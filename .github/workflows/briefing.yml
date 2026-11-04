@@ -52,10 +52,20 @@ jobs:
 
       - name: Get yesterday's briefing for the change view
         run: |
-          # the latest published briefing.json, if the site exists yet
-          git fetch --depth=1 origin gh-pages 2>/dev/null && \
-            git show origin/gh-pages:data/briefing.json > previous.json 2>/dev/null || rm -f previous.json
-          ls -la previous.json 2>/dev/null || echo "no previous briefing yet"
+          # The newest archived briefing from an earlier day, so a second run on the same day
+          # (manual, or a late schedule) still compares with yesterday rather than with itself.
+          TODAY=$(TZ=America/Los_Angeles date +%Y-%m-%d)
+          rm -f previous.json
+          if git fetch --depth=1 origin gh-pages 2>/dev/null; then
+            PREV=$(git ls-tree --name-only origin/gh-pages archive/ 2>/dev/null | sed 's#^archive/##' \
+                   | grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' | awk -v t="$TODAY" '$0 < t' | sort | tail -1)
+            if [ -n "$PREV" ] && git show "origin/gh-pages:archive/$PREV/data/briefing.json" > previous.json 2>/dev/null; then
+              echo "comparing with the briefing from $PREV"
+            else
+              rm -f previous.json
+            fi
+          fi
+          ls -la previous.json 2>/dev/null || echo "no earlier briefing yet"
 
       - name: Preflight checks (environment and data hosts)
         if: ${{ !inputs.demo }}
