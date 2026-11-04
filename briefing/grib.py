@@ -77,10 +77,25 @@ def _latest_run(spec, start: datetime):
         ndays = min(spec["range_days"], (spec["max_hours"] - lead0) // 24)
         if ndays < 1:
             continue
-        H = _H(spec, run, lead0 + 24 * ndays)
-        if H.grib is not None and H.idx is not None:
+        # A cycle that's still being written can be listed before its files are readable, and a
+        # fallback source can error outright (Herbie's Azure lookup raises KeyError 'href' for
+        # runs it doesn't have). Either way, move on to the previous cycle instead of failing.
+        try:
+            ok = all(_readable(spec, run, h) for h in (lead0 + 24 * ndays, lead0 + 24))
+        except Exception as e:
+            log.info("%s %s: not usable yet (%s)", spec["label"], run.strftime("%HZ"), report.short(e))
+            ok = False
+        if ok:
             return run, lead0, ndays
     return None, None, 0
+
+
+def _readable(spec, run, fxx):
+    """The step exists and its index can actually be read."""
+    H = _H(spec, run, fxx)
+    if H.grib is None or H.idx is None:
+        return False
+    return len(_retry(H.inventory)) > 0
 
 
 # ---------------------------------------------------------------- reading
