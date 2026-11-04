@@ -30,7 +30,7 @@ def _region_stats(doc, dates, regions, points):
         else:
             for p, v in totals.items():
                 point_vals[p].append(v)
-            per_model_region[m["label"]] = {r["id"]: float(np.mean([totals[p["name"]] for p in points if p["region"] == r["id"]]))
+            per_model_region[m["label"]] = {r["id"]: float(np.mean([totals[p["name"]] for p in points if p.get("region") == r["id"]]))
                                             for r in regions}
     if not per_model_region:
         return None

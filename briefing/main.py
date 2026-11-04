@@ -155,7 +155,7 @@ def collect(cfg: dict, out: Path, demo: bool = False, products: bool = True) -> 
                  "sources": {"ncep": [m["label"] for m in grib_models if m.get("family") == "ncep"],
                              "ecmwf": [m["label"] for m in grib_models if m.get("family") == "ecmwf"]}},
         "regions": [{"id": rid, "name": r["name"], "short": r.get("short", r["name"])} for rid, r in cfg["regions"].items()],
-        "points": [{"name": p["name"], "kind": p["kind"], "region": p["region"], "plume": bool(p.get("plume")),
+        "points": [{"name": p["name"], "kind": p["kind"], "region": p.get("region"), "plume": bool(p.get("plume")),
                     "lat": p["lat"], "lon": p["lon"]} for p in cfg["points"]],
         "regionShapes": {rid: r["polygon"] for rid, r in cfg["regions"].items()},
         "status": status,

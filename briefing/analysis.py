@@ -103,7 +103,7 @@ def point_window_totals(models, cfg, wdays):
             a = np.array(v["precipitation_sum"][:wdays], dtype=float)
             t[p] = float(np.sum(a)) if not np.any(np.isnan(a)) else np.nan
         totals[m["label"]] = t
-        region_avg[m["label"]] = {rid: float(np.nanmean([t[p["name"]] for p in cfg["points"] if p["region"] == rid]))
+        region_avg[m["label"]] = {rid: float(np.nanmean([t[p["name"]] for p in cfg["points"] if p.get("region") == rid]))
                                   for rid in cfg["regions"]}
     return totals, region_avg
 

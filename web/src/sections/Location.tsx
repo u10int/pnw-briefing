@@ -13,7 +13,12 @@ import type { Briefing, N } from "@/types"
 const ENS_COLORS = ["var(--chart-1)", "var(--chart-2)", "var(--chart-3)"]
 
 export function LocationPicker({ data, value, onChange }: { data: Briefing; value: string; onChange: (v: string) => void }) {
-  const groups = data.regions.map((r) => ({ r, pts: data.points.filter((p) => p.region === r.id) }))
+  // locations outside the comparison regions (e.g. Vancouver BC) are listed last
+  const others = data.points.filter((p) => !data.regions.some((r) => r.id === p.region))
+  const groups = [
+    ...data.regions.map((r) => ({ r: { id: r.id, name: r.name }, pts: data.points.filter((p) => p.region === r.id) })),
+    ...(others.length ? [{ r: { id: "_other", name: "Other locations" }, pts: others }] : []),
+  ]
   return (
     <Select value={value} onValueChange={onChange}>
       <SelectTrigger className="w-[220px] bg-card" aria-label="Location">

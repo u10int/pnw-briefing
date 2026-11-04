@@ -133,7 +133,7 @@ def summarize(models, cfg, cache: Path, demo: bool = False):
         tot, ravg = analysis.point_window_totals(models, cfg, n)
         region = {}
         for rid in cfg["regions"]:
-            names = [p["name"] for p in cfg["points"] if p["region"] == rid]
+            names = [p["name"] for p in cfg["points"] if p.get("region") == rid]
             normal = float(np.nanmean([pn[p] for p in names]))
             vals = [v[rid] for v in ravg.values() if np.isfinite(v[rid])]
             med = float(np.median(vals)) if vals else None
