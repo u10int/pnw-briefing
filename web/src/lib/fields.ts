@@ -265,11 +265,12 @@ export function pressureGradient(g: Grid, raw: Float32Array, passes: number): Fl
 // ---- terrain elevation on a field's grid (for masking where sea-level pressure is extrapolated)
 
 const TERRARIUM = "https://s3.amazonaws.com/elevation-tiles-prod/terrarium"
-const elevCache = new Map<string, Promise<Float32Array>>()
+export interface Elevation { mean: Float32Array; max: Float32Array }
+const elevCache = new Map<string, Promise<Elevation>>()
 
-/** Mean terrain height (m) over each cell of `g`, from AWS Terrain Tiles at zoom 7 (~1 km),
- *  averaging a 3×3 sample per cell the way a model's smoothed terrain would. */
-export function elevationFor(g: Grid): Promise<Float32Array> {
+/** Terrain height (m) over each cell of `g` from AWS Terrain Tiles at zoom 7 (~1 km): the mean of a
+ *  3×3 sample per cell (roughly a model's smoothed terrain) and the highest of those samples. */
+export function elevationFor(g: Grid): Promise<Elevation> {
   const key = `${g.width}x${g.height}|${g.west}|${g.south}|${g.east}|${g.north}`
   if (!elevCache.has(key)) {
     const p = loadElevation(g)
@@ -279,7 +280,7 @@ export function elevationFor(g: Grid): Promise<Float32Array> {
   return elevCache.get(key)!
 }
 
-async function loadElevation(g: Grid): Promise<Float32Array> {
+async function loadElevation(g: Grid): Promise<Elevation> {
   const z = 7, n = 2 ** z, size = 256
   const X = (lon: number) => ((lon + 180) / 360) * n * size
   const Y = (lat: number) => {
@@ -308,17 +309,18 @@ async function loadElevation(g: Grid): Promise<Float32Array> {
     if (!t) return NaN
     return Math.max(0, t[Math.min(size - 1, Math.floor(py % size)) * size + Math.min(size - 1, Math.floor(px % size))])
   }
-  const out = new Float32Array(g.width * g.height)
+  const mean = new Float32Array(g.width * g.height), max = new Float32Array(g.width * g.height)
   const dLon = (g.east - g.west) / g.width, dLat = (g.north - g.south) / g.height
   for (let y = 0; y < g.height; y++) {
     for (let x = 0; x < g.width; x++) {
-      let s = 0, m = 0
+      let s = 0, m = 0, hi = -Infinity
       for (const fy of [0.17, 0.5, 0.83]) for (const fx of [0.17, 0.5, 0.83]) {
         const v = at(g.west + (x + fx) * dLon, g.north - (y + fy) * dLat)
-        if (Number.isFinite(v)) { s += v; m++ }
+        if (Number.isFinite(v)) { s += v; m++; hi = Math.max(hi, v) }
       }
-      out[y * g.width + x] = m ? s / m : NaN
+      mean[y * g.width + x] = m ? s / m : NaN
+      max[y * g.width + x] = m ? hi : NaN
     }
   }
-  return out
+  return { mean, max }
 }

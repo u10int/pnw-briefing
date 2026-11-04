@@ -14,7 +14,7 @@ import { Slider } from "@/components/ui/slider"
 import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { loadCog } from "@/lib/cog"
-import { bicubicAt, contourLines, fieldUrl, gridPos, loadField, nearestAt, nearestTime, elevationFor, pressureCenters, pressureGradient, windArrows, windFrom } from "@/lib/fields"
+import { bicubicAt, contourLines, fieldUrl, gridPos, loadField, nearestAt, nearestTime, type Elevation, elevationFor, pressureCenters, pressureGradient, windArrows, windFrom } from "@/lib/fields"
 import { GRAD_COLORS, gradLevel, pairName, seriesAt } from "@/lib/gradients"
 import { GridLayer, type GridDraw } from "@/lib/gl/grid-layer"
 import { ParticleLayer, type WindDraw } from "@/lib/gl/particle-layer"
@@ -305,8 +305,8 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
       m.addLayer({ id: "pair-arrows", type: "symbol", source: "pairs", filter: ["all", ["==", ["geometry-type"], "LineString"], ["==", ["get", "flow"], 1]],
         layout: { "symbol-placement": "line", "symbol-spacing": 34, "icon-image": "chevron", "icon-rotation-alignment": "map",
                   "icon-allow-overlap": true, "icon-ignore-placement": true,
-                  "icon-size": ["match", ["get", "level"], 2, 0.85, 1, 0.75, 0.6] },
-        paint: { "icon-color": ["match", ["get", "level"], 0, "#6b7280", ["get", "color"]], "icon-halo-color": "rgba(255,255,255,0.95)", "icon-halo-width": 1.2 } }, labels)
+                  "icon-size": ["match", ["get", "level"], 2, 1.0, 1, 0.9, 0.75] },
+        paint: { "icon-color": "#1b1f24", "icon-halo-color": "rgba(255,255,255,0.95)", "icon-halo-width": 1.5 } }, labels)
       m.addLayer({ id: "pair-ends", type: "circle", source: "pairs", filter: ["==", ["geometry-type"], "Point"],
         paint: { "circle-radius": 4, "circle-color": "#fff", "circle-stroke-color": ["get", "color"], "circle-stroke-width": 2.5 } }, labels)
       // labels need the basemap's glyphs; the plain fallback style has none
@@ -591,13 +591,15 @@ async function bandNear(e: FieldEntry | undefined, iso: string, tol = 0.6) {
   return { f, i, data: await f.band(i) }
 }
 
-/** Above this height (m) sea-level pressure is an extrapolation, and its gradient shows the mountains. */
-const PGRAD_MAX_ELEV = 900
+/** Where sea-level pressure is an extrapolation its gradient traces the mountains, so cells whose
+ *  mean height is above 600 m, or whose highest point is above 1,400 m, are left blank. */
+const PGRAD_MAX_MEAN = 600, PGRAD_MAX_PEAK = 1400
+const masked = (elev: Elevation, i: number) => elev.mean[i] > PGRAD_MAX_MEAN || elev.max[i] > PGRAD_MAX_PEAK
 const gradCache = new WeakMap<Float32Array, Float32Array>()
-const gradOf = (g: Grid, p: Float32Array, elev: Float32Array | null) => {
+const gradOf = (g: Grid, p: Float32Array, elev: Elevation | null) => {
   if (!gradCache.has(p)) {
     const out = pressureGradient(g, p, g.width > 120 ? 6 : 2)
-    if (elev) for (let i = 0; i < out.length; i++) if (elev[i] > PGRAD_MAX_ELEV) out[i] = NaN
+    if (elev) for (let i = 0; i < out.length; i++) if (masked(elev, i)) out[i] = NaN
     gradCache.set(p, out)
   }
   return gradCache.get(p)!
@@ -699,7 +701,7 @@ function hourlyView(model: string, entries: Record<string, FieldEntry>, layer: H
             describe = (lon, lat, t, smooth) => {
               const v = blendAt(f, GA, GB, t, lon, lat, smooth)
               if (Number.isFinite(v)) return `Pressure gradient ${v.toFixed(1)} hPa per 100 km`
-              return elev && Number.isFinite(valueAt(f, A, lon, lat, false)) ? `High terrain: not shown (sea-level pressure is extrapolated above ${PGRAD_MAX_ELEV.toLocaleString("en-US")} m)` : null
+              return elev && Number.isFinite(valueAt(f, A, lon, lat, false)) ? "Mountains: not shown (sea-level pressure there is an extrapolation)" : null
             }
           } else if (layer === "radar") {
             draw = { grid: f, a: A, b: B, paint: { kind: "ptype" } }
@@ -1079,7 +1081,7 @@ export function InteractiveMap({ data }: { data: Briefing }) {
             {layer === "gust" && <RampLegend ramp={GUST} />}
             {layer === "wind" && <RampLegend ramp={WIND} note={showParticles ? "Particles trace the 10 m wind; faster particles mean stronger wind." : "Arrows point the way the wind is blowing; longer arrows are stronger winds."} />}
             {layer === "frz" && <RampLegend ramp={FRZ} every={2} note="Snow usually reaches the ground about 1,000 ft below the freezing level." />}
-            {layer === "pgrad" && <RampLegend ramp={PGRAD} note="How fast sea-level pressure changes with distance, from the smoothed field: 1–2 is a typical synoptic gradient, 3 and up is windstorm-class, and gap flows (Gorge, Fraser, Strait) pack tighter. Terrain above 900 m (about 3,000 ft) is left blank: sea-level pressure there is an extrapolation, and its gradient would mostly trace the mountains." />}
+            {layer === "pgrad" && <RampLegend ramp={PGRAD} note="How fast sea-level pressure changes with distance, from the smoothed field: 1–2 is a typical synoptic gradient, 3 and up is windstorm-class, and gap flows (Gorge, Fraser, Strait) pack tighter. Mountain cells (mean height above 600 m, or peaks above 1,400 m) are left blank: sea-level pressure there is an extrapolation, and its gradient would mostly trace the terrain." />}
             {showPairs && pairList.length > 0 && <p className="text-xs text-muted-foreground">Lines join each gradient station pair, labelled with this model's pressure difference (hPa, first station minus second); arrowheads point from high to low pressure, the way the gap flow blows; amber and red mark the pair's first and second thresholds, as on the pressure gradient card.</p>}
             {layer === "ivt" && <RampLegend ramp={IVT} note={`Vertically integrated water vapor transport (GFS and ECMWF AIFS), the measure behind the atmospheric-river scale: 250 and up is AR conditions${showParticles ? "; particles follow the moisture flow" : ""}.`} />}
             {showParticles && layer !== "wind" && layer !== "ivt" && <p className="text-xs text-muted-foreground">Moving particles trace the 10 m wind.</p>}
