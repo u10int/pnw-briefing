@@ -41,7 +41,10 @@ VARS = {
 
 PATTERNS = {
     "ncep": {
-        "u10": [":UGRD:10 m above ground:"], "v10": [":VGRD:10 m above ground:"],
+        # NAM packs both components in one message whose index entry for UGRD is empty, so each
+        # component also tries the other's record and picks its own variable by name.
+        "u10": [":UGRD:10 m above ground:", ":VGRD:10 m above ground:"],
+        "v10": [":VGRD:10 m above ground:", ":UGRD:10 m above ground:"],
         "mslp": [":MSLMA:mean sea level:", ":PRMSL:mean sea level:", ":MSLET:mean sea level:"],
         "frz": [":HGT:0C isotherm:"], "refc": [":REFC:entire atmosphere"],
         "crain": [":CRAIN:surface:"], "csnow": [":CSNOW:surface:"],
@@ -72,11 +75,22 @@ def _instant_first(rows):
     return sorted(rows, key=rank)
 
 
-def _read_var(grib, H, patterns, dom):
+# cfgrib variable names, so a message carrying several fields yields the right one
+PREFER = {"u10": ["u10"], "v10": ["v10"]}
+
+
+def _read_var(grib, H, patterns, dom, name=None):
+    """First record that reads and holds the wanted variable; later patterns are fallbacks."""
+    last = None
     for p in patterns:
-        rows = _instant_first(grib._rows(H, p))
-        if rows:
-            return grib._read(H, rows[0], dom)[2]
+        for row in _instant_first(grib._rows(H, p)):
+            try:
+                return grib._read(H, row, dom, prefer=PREFER.get(name))[2]
+            except Exception as e:      # empty byte range, or the wrong variable in this message
+                last = e
+                break
+    if last:
+        raise last
     return None
 
 
@@ -127,7 +141,7 @@ def fetch(spec, run, lead0, last_hour, stepped_hours, samples, dom):
             if not pats:
                 continue
             try:
-                v = _read_var(grib, H, pats, dom)
+                v = _read_var(grib, H, pats, dom, name)
                 if v is not None:
                     got[name] = v
             except Exception as e:

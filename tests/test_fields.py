@@ -22,7 +22,17 @@ def fake_grib(rows_by_name, values):
     """rows_by_name: pattern -> inventory rows; values: row -> 2-D array. Undo with restore()."""
     grib._H = lambda spec, run, h: h
     grib._rows = lambda H, p: rows_by_name.get(p, [])
-    grib._read = lambda H, row, dom: (LAT, LON, values[row])
+    def read(H, row, dom, water=False, default=1.0, prefer=None):
+        v = values[row]
+        if isinstance(v, Exception):
+            raise v
+        if isinstance(v, dict):          # a message carrying several variables
+            name = next((n for n in (prefer or []) if n in v), None)
+            if prefer and name is None:
+                raise LookupError(f"none of {prefer}")
+            v = v[name] if name else next(iter(v.values()))
+        return LAT, LON, v
+    grib._read = read
 
 
 def restore():
@@ -61,6 +71,20 @@ def test_ncep_ptype_and_instant_records():
     restore()
 
 
+def test_shared_wind_message():
+    """NAM: u and v in one message; the UGRD index entry is empty and its read fails."""
+    rows = {":UGRD:10 m above ground:": [":UGRD:10 m above ground:6 hour fcst:"],
+            ":VGRD:10 m above ground:": [":VGRD:10 m above ground:6 hour fcst:"]}
+    vals = {":UGRD:10 m above ground:6 hour fcst:": FileNotFoundError("empty byte range"),
+            ":VGRD:10 m above ground:6 hour fcst:": {"u10": np.full(SHAPE, 4.0), "v10": np.full(SHAPE, -2.0)}}
+    fake_grib(rows, vals)
+    spec = {"label": "NAM", "family": "ncep", "fields": {"stepped": ["wind"]}}
+    out = fields.fetch(spec, datetime(2026, 11, 4, 6), 0, 6, [6], {}, {})
+    restore()
+    assert abs(out["u10"]["data"][0][0, 0] - 4.0 * 2.23694) < 1e-4, "u read from the shared message"
+    assert abs(out["v10"]["data"][0][0, 0] + 2.0 * 2.23694) < 1e-4, "v is v, not the first variable"
+
+
 def test_ecmwf_ptype_codes():
     rows = {":ptype:": [":ptype:sfc:6:"]}
     vals = {":ptype:sfc:6:": np.array([[0, 1, 3, 5], [6, 7, 8, 12], [0, 0, 0, 0], [0, 0, 0, 0]], dtype=float)}
@@ -96,6 +120,7 @@ def test_export_multiband_roundtrip():
 
 if __name__ == "__main__":
     test_ncep_ptype_and_instant_records()
+    test_shared_wind_message()
     test_ecmwf_ptype_codes()
     test_export_multiband_roundtrip()
     print("ok")

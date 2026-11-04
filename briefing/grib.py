@@ -103,10 +103,18 @@ def _crop(da, dom):
     return lat[sl], lon[sl], vals[(..., *sl)]
 
 
-def _first_var(ds):
-    if isinstance(ds, list):
-        ds = ds[0]
-    return ds[list(ds.data_vars)[0]]
+def _first_var(ds, prefer=None):
+    """The data variable to use. With `prefer` (cfgrib names), pick that variable by name: some
+    files pack several fields in one GRIB message (NAM's 10 m u and v share one), so position
+    can't be trusted. Raises if a preferred name is given but absent."""
+    dss = ds if isinstance(ds, list) else [ds]
+    if prefer:
+        for d in dss:
+            for name in prefer:
+                if name in d.data_vars:
+                    return d[name]
+        raise LookupError(f"none of {prefer} in {[list(d.data_vars) for d in dss]}")
+    return dss[0][list(dss[0].data_vars)[0]]
 
 
 def _rows(H, pattern):
@@ -130,12 +138,12 @@ def water_mm_factor(da, default: float = 1.0) -> float:
     raise ValueError(f"unexpected units {u!r} for an accumulated water field")
 
 
-def _read(H, row, dom, water=False, default=1.0):
+def _read(H, row, dom, water=False, default=1.0, prefer=None):
     """Crop one GRIB message to the domain. With water=True, convert to mm from the message's units."""
     # Anchor to the whole record: Herbie matches by regex, and NBM's probability records begin with
     # the plain record's text (":APCP:surface:0-6 hour acc fcst:" vs "...fcst:prob >0.254:..."),
     # so an unanchored search downloads both and the probability (0-100 %) can come back first.
-    da = _first_var(_retry(H.xarray, f"^{re.escape(row)}$", remove_grib=True))
+    da = _first_var(_retry(H.xarray, f"^{re.escape(row)}$", remove_grib=True), prefer)
     lat, lon, v = _crop(da, dom)
     return (lat, lon, v * water_mm_factor(da, default)) if water else (lat, lon, v)
 
