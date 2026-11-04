@@ -229,37 +229,58 @@ function rankNote(e: ArEvent, breaks: number[]) {
   return null
 }
 
-const LABEL_W = 184   // location + model columns, px
+// ------------------------------------------------------------------ shared: horizontal timeline
 
-/** Horizontal timeline: a row per model under each coastal location, with each AR event drawn
- *  from its start for its duration. Hover (or focus) a bar for the details; click to chart that place. */
-function ArTimeline({ ar, onPick, picked }: {
-  ar: NonNullable<Briefing["ar"]>; onPick: (p: string) => void; picked: string
+interface TimelineBar {
+  key: string; start: number; end: number          // ms
+  color: string; text?: string
+  label: string; short?: string                    // full label, and a shorter one for narrow bars
+  aria: string; tip: React.ReactNode; onClick?: () => void
+}
+interface TimelineRow { key: string; label: React.ReactNode; bars: TimelineBar[] }
+interface TimelineGroup { key: string; label: string; title?: string; onClick?: () => void; selected?: boolean; rows: TimelineRow[] }
+
+/** One bar. Hover or focus opens the tooltip; a tap or click opens it too, since touch screens
+ *  have no hover. */
+function TimelineBarView({ e, left, w, label }: { e: TimelineBar; left: number; w: number; label: string }) {
+  const [open, setOpen] = React.useState(false)
+  return (
+    <Tooltip open={open} onOpenChange={setOpen}>
+      <TooltipTrigger asChild>
+        <button type="button" onClick={() => { setTimeout(() => setOpen(true), 0); e.onClick?.() }} aria-label={e.aria}
+                className={`absolute top-1 bottom-1 flex items-center overflow-hidden rounded-[4px] px-1.5 font-medium whitespace-nowrap shadow-[inset_0_0_0_1px_rgb(0_0_0/0.08)] outline-offset-1 hover:brightness-105 focus-visible:outline-2 focus-visible:outline-ring ${e.onClick ? "" : "cursor-default"}`}
+                style={{ left: `${left}%`, width: `${w}%`, background: e.color, color: e.text ?? "var(--foreground)" }}>
+          {label}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="top" className="max-w-72 text-left">
+        <div className="space-y-1 py-0.5">{e.tip}</div>
+      </TooltipContent>
+    </Tooltip>
+  )
+}
+
+/** Groups (a place) with child rows (a model, an outlook), each row a track of bars placed by
+ *  start and duration on a shared day axis. Hover or focus a bar for its tooltip. */
+function Timeline({ t0, t1, groups, groupW = 96, rowW = 88 }: {
+  t0: number; t1: number; groups: TimelineGroup[]; groupW?: number; rowW?: number
 }) {
   const [trackRef, width] = useWidth<HTMLDivElement>()
-  const times = ar.models.flatMap((m) => m.times.map((t) => Date.parse(t)))
-  const t0 = Math.min(...times), t1 = Math.max(...times)
+  const [outerRef, outerW] = useWidth<HTMLDivElement>()
+  // narrow screens: place names on their own line above their rows, and fit the width
+  const compact = outerW > 0 && outerW < 640
+  const gW = compact ? 0 : groupW
   const span = t1 - t0 || 1
   const x = (t: number) => ((t - t0) / span) * 100
   const days = midnights(t0, t1)
   const pxPerDay = width ? (width * 24 * H) / span : 60
   const labelEvery = pxPerDay >= 46 ? 1 : pxPerDay >= 24 ? 2 : 3
-  const events = ar.events.filter((e) => e.rank >= 1)
-  const models = ar.models.map((m) => m.model)
-
-  // bars cover each 6-hourly sample's own slot, so a bar's length is the event's duration
-  const bar = (e: ArEvent) => {
-    const s = Date.parse(e.start), en = Date.parse(e.end)
-    const pad = Math.max(0, (e.hours * H - (en - s)) / 2)
-    const a = Math.max(t0, s - pad), b = Math.min(t1, en + pad)
-    return { left: x(a), width: Math.max(0.6, x(b) - x(a)) }
-  }
-
+  const labelW = gW + rowW
   return (
-    <div className="overflow-x-auto">
-      <div className="relative min-w-[600px] text-xs">
+    <div ref={outerRef}>
+      <div className="relative text-xs">
         {/* day shading and midnight lines behind every row */}
-        <div ref={trackRef} className="pointer-events-none absolute inset-y-0 right-0" style={{ left: LABEL_W }}>
+        <div ref={trackRef} className="pointer-events-none absolute inset-y-0 right-0" style={{ left: labelW }}>
           {days.map((d, i) => (
             <React.Fragment key={d}>
               <div className="absolute inset-y-0 border-l border-border/70" style={{ left: `${x(d)}%` }} />
@@ -271,9 +292,8 @@ function ArTimeline({ ar, onPick, picked }: {
           ))}
         </div>
 
-        {/* day axis */}
         <div className="relative flex h-7 items-end border-b">
-          <div style={{ width: LABEL_W }} className="shrink-0" />
+          <div style={{ width: labelW }} className="shrink-0" />
           <div className="relative h-full flex-1">
             {days.map((d, i) => i % labelEvery === 0 && x(d) < 96 && (
               <span key={d} className="absolute bottom-1.5 whitespace-nowrap pl-1 text-muted-foreground" style={{ left: `${x(d)}%` }}>
@@ -283,61 +303,86 @@ function ArTimeline({ ar, onPick, picked }: {
           </div>
         </div>
 
-        {ar.points.map((p) => (
-          <div key={p} className="relative flex border-b last:border-b-0">
-            <button type="button" onClick={() => onPick(p)}
-                    className={`w-24 shrink-0 py-1.5 pr-2 text-left text-sm font-medium hover:underline ${p === picked ? "underline decoration-2 underline-offset-4" : ""}`}
-                    title={`Chart IVT at ${p}`}>
-              {p}
-            </button>
+        {groups.map((g) => (
+          <div key={g.key} className={`relative border-b last:border-b-0 ${compact ? "" : "flex"}`}>
+            {compact ? (
+              <div className="relative pt-1.5 text-sm font-medium">
+                {g.onClick ? <button type="button" onClick={g.onClick} className={`hover:underline ${g.selected ? "underline decoration-2 underline-offset-4" : ""}`}>{g.label}</button> : g.label}
+              </div>
+            ) : g.onClick ? (
+              <button type="button" onClick={g.onClick} title={g.title}
+                      className={`shrink-0 py-1.5 pr-2 text-left text-sm font-medium hover:underline ${g.selected ? "underline decoration-2 underline-offset-4" : ""}`}
+                      style={{ width: groupW }}>
+                {g.label}
+              </button>
+            ) : <div className="shrink-0 py-1.5 pr-2 text-sm font-medium" style={{ width: groupW }}>{g.label}</div>}
             <div className="flex-1">
-              {models.map((m, k) => {
-                const evs = events.filter((e) => e.point === p && e.model === m)
-                return (
-                  <div key={m} className="flex h-7 items-center">
-                    <span className="flex shrink-0 items-center gap-1.5 truncate pr-2 text-muted-foreground" style={{ width: LABEL_W - 96 }}>
-                      <span className="h-0.5 w-2.5 shrink-0 rounded" style={{ background: colorOf(m, k) }} />
-                      <span className="truncate">{m.replace("ECMWF ", "")}</span>
-                    </span>
-                    <div className="relative h-full flex-1">
-                      {evs.map((e) => {
-                        const pos = bar(e)
-                        const px = (pos.width / 100) * width
-                        const label = px >= 84 ? AR_SHORT[e.rank] : px >= 30 ? AR_SHORT[e.rank].split(" ")[0] : ""
-                        const note = rankNote(e, ar.breaks)
-                        return (
-                          <Tooltip key={e.start}>
-                            <TooltipTrigger asChild>
-                              <button type="button" onClick={() => onPick(p)}
-                                      aria-label={`${AR_SHORT[e.rank]} at ${p} in ${m}, ${tipTime(Date.parse(e.start))} for ${e.hours} hours`}
-                                      className="absolute top-1 bottom-1 flex items-center overflow-hidden rounded-[4px] px-1.5 font-medium whitespace-nowrap shadow-[inset_0_0_0_1px_rgb(0_0_0/0.08)] outline-offset-1 hover:brightness-105 focus-visible:outline-2 focus-visible:outline-ring"
-                                      style={{ left: `${pos.left}%`, width: `${pos.width}%`, background: AR_COLORS[e.rank],
-                                               color: e.rank >= 3 ? "#1b1f24" : "#fff" }}>
-                                {label}
-                              </button>
-                            </TooltipTrigger>
-                            <TooltipContent side="top" className="max-w-72 text-left">
-                              <div className="space-y-1 py-0.5">
-                                <p className="font-semibold">{AR_SHORT[e.rank]} · {p}</p>
-                                <p>{m}</p>
-                                <p>{tipTime(Date.parse(e.start))} – {tipTime(Date.parse(e.end))} ({e.hours} h)</p>
-                                <p>Peak IVT {e.peak} {AR_RANGE}{e.peakTime ? `, ${tipTime(Date.parse(e.peakTime))}` : ""}</p>
-                                {note && <p className="opacity-75">{note}</p>}
-                              </div>
-                            </TooltipContent>
-                          </Tooltip>
-                        )
-                      })}
-                    </div>
+              {g.rows.map((r) => (
+                <div key={r.key} className="flex h-7 items-center">
+                  <span className="flex shrink-0 items-center gap-1.5 truncate pr-2 text-muted-foreground" style={{ width: rowW }}>{r.label}</span>
+                  <div className="relative h-full flex-1">
+                    {r.bars.map((e) => {
+                      const a = Math.max(t0, e.start), b = Math.min(t1, e.end)
+                      if (b <= a) return null
+                      const left = x(a), w = Math.max(0.6, x(b) - x(a))
+                      const px = (w / 100) * width
+                      const fits = (s: string) => px >= s.length * 6.4 + 14
+                      const label = fits(e.label) ? e.label : e.short && fits(e.short) ? e.short : ""
+                      return <TimelineBarView key={e.key} e={e} left={left} w={w} label={label} />
+                    })}
                   </div>
-                )
-              })}
+                </div>
+              ))}
             </div>
           </div>
         ))}
       </div>
     </div>
   )
+}
+
+const ModelRowLabel = ({ model, k }: { model: string; k: number }) => (
+  <><span className="h-0.5 w-2.5 shrink-0 rounded" style={{ background: colorOf(model, k) }} />
+    <span className="truncate">{model.replace("ECMWF ", "")}</span></>
+)
+
+/** AR events on the shared timeline: a row per model under each coastal location, each event
+ *  drawn from its start for its duration. Click a location or bar to chart it. */
+function ArTimeline({ ar, onPick, picked }: {
+  ar: NonNullable<Briefing["ar"]>; onPick: (p: string) => void; picked: string
+}) {
+  const times = ar.models.flatMap((m) => m.times.map((t) => Date.parse(t)))
+  const t0 = Math.min(...times), t1 = Math.max(...times)
+  const events = ar.events.filter((e) => e.rank >= 1)
+  // bars cover each 6-hourly sample's own slot, so a bar's length is the event's duration
+  const span = (e: ArEvent) => {
+    const s = Date.parse(e.start), en = Date.parse(e.end)
+    const pad = Math.max(0, (e.hours * H - (en - s)) / 2)
+    return [s - pad, en + pad]
+  }
+  const groups: TimelineGroup[] = ar.points.map((p) => ({
+    key: p, label: p, title: `Chart IVT at ${p}`, onClick: () => onPick(p), selected: p === picked,
+    rows: ar.models.map((m, k) => ({
+      key: m.model, label: <ModelRowLabel model={m.model} k={k} />,
+      bars: events.filter((e) => e.point === p && e.model === m.model).map((e) => {
+        const [a, b] = span(e)
+        const note = rankNote(e, ar.breaks)
+        return {
+          key: e.start, start: a, end: b, color: AR_COLORS[e.rank], text: e.rank >= 3 ? "#1b1f24" : "#fff",
+          label: AR_SHORT[e.rank], short: AR_SHORT[e.rank].split(" ")[0], onClick: () => onPick(p),
+          aria: `${AR_SHORT[e.rank]} at ${p} in ${m.model}, ${tipTime(Date.parse(e.start))} for ${e.hours} hours`,
+          tip: <>
+            <p className="font-semibold">{AR_SHORT[e.rank]} · {p}</p>
+            <p>{m.model}</p>
+            <p>{tipTime(Date.parse(e.start))} – {tipTime(Date.parse(e.end))} ({e.hours} h)</p>
+            <p>Peak IVT {e.peak} {AR_RANGE}{e.peakTime ? `, ${tipTime(Date.parse(e.peakTime))}` : ""}</p>
+            {note && <p className="opacity-75">{note}</p>}
+          </>,
+        }
+      }),
+    })),
+  }))
+  return <Timeline t0={t0} t1={t1} groups={groups} />
 }
 
 function ArKey() {
@@ -688,15 +733,44 @@ export function DiscussionsCard({ data }: { data: Briefing }) {
 }
 
 const ERO_COLORS = ["transparent", "#7cc47c", "#f6e05e", "#e9502e", "#d62fd6"]
-const CPC_COLOR: Record<string, Record<string, string>> = {
-  temperature: { Above: "#f4a582", Below: "#92c5de", Normal: "#e5e7eb", Near: "#e5e7eb", EC: "#f3f4f6" },
-  precipitation: { Above: "#80cdc1", Below: "#dfc27d", Normal: "#e5e7eb", Near: "#e5e7eb", EC: "#f3f4f6" },
+const CPC_BASE: Record<string, Record<string, string>> = {
+  temperature: { Above: "#e4572e", Below: "#2b7bba" },
+  precipitation: { Above: "#1a9e85", Below: "#b07d2b" },
+}
+const CPC_NEAR = "#9ca3af", CPC_EC = "#d1d5db"
+const cpcWords = (cat: string) => cat === "EC" ? "Equal chances" : cat === "Normal" || cat === "Near" ? "Near normal" : cat
+/** CPC category colour, deeper as the probability rises (33% → light, 80%+ → full). */
+function cpcColor(v: "temperature" | "precipitation", cat: string, prob: number | null) {
+  const base = CPC_BASE[v][cat] ?? (cat === "EC" ? CPC_EC : CPC_NEAR)
+  const k = cat === "EC" ? 60 : Math.round(30 + 60 * Math.min(1, Math.max(0, ((prob ?? 33) - 33) / 47)))
+  return `color-mix(in srgb, ${base} ${k}%, transparent)`
+}
+/** Midnight Pacific at the start of a YYYY-MM-DD date. */
+const ptMidnight = (d: string) => {
+  const t = Date.parse(`${d}T00:00:00-08:00`)
+  return ptHour(t) === 1 ? t - H : t                      // daylight time
+}
+
+function CpcKey() {
+  const sw = (c: string, label: string) => (
+    <span key={label} className="inline-flex items-center gap-1.5">
+      <span className="h-2.5 w-4 rounded-[3px]" style={{ background: c }} />{label}
+    </span>
+  )
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+      {sw(CPC_BASE.temperature.Above, "Warmer")}{sw(CPC_BASE.temperature.Below, "Cooler")}
+      {sw(CPC_BASE.precipitation.Above, "Wetter")}{sw(CPC_BASE.precipitation.Below, "Drier")}
+      {sw(CPC_NEAR, "Near normal")}{sw(CPC_EC, "Equal chances")}
+      <span>· deeper = more likely</span>
+    </div>
+  )
 }
 
 export function OutlooksCard({ data }: { data: Briefing }) {
   const o = data.outlooks
   if (!o || (!o.ero && !o.cpc)) return null
-  const groups = [
+  const groupsAll = [
     ...data.regions.map((r) => ({ name: r.name, pts: data.points.filter((p) => p.region === r.id).map((p) => p.name) })),
     { name: "Other locations", pts: data.points.filter((p) => !data.regions.some((r) => r.id === p.region)).map((p) => p.name) },
   ].filter((g) => g.pts.length)
@@ -718,6 +792,51 @@ export function OutlooksCard({ data }: { data: Briefing }) {
     const prob = Math.max(...got.filter((v) => v.cat === cat).map((v) => v.prob ?? 0))
     return { cat, prob }
   }
+  const cpc = (() => {
+    const outs = (o.cpc?.outlooks ?? []).filter((x) => x.start && x.end)
+    if (!outs.length) return null
+    const order = (x: (typeof outs)[number]) => (x.var === "temperature" ? 0 : 2) + (x.period === "6-10" ? 0 : 1)
+    outs.sort((a, b) => order(a) - order(b))
+    const t0 = ptMidnight(data.dates[0])
+    const t1 = Math.max(...outs.map((x) => ptMidnight(x.end!) + 24 * H), t0 + 14 * 24 * H)
+    const covered = (p: string) => outs.some((x) => x.points[p]?.cat)
+    const uncovered = data.points.map((p) => p.name).filter((p) => !covered(p))
+    const groups: TimelineGroup[] = groupsAll.map((g) => ({ ...g, pts: g.pts.filter(covered) })).filter((g) => g.pts.length).map((g) => ({
+      key: g.name, label: g.name,
+      rows: outs.map((x) => {
+        const v = cpcGroup(g.pts, x.points)
+        const what = x.var === "temperature" ? "temperature" : "precipitation"
+        const per = g.pts.map((p) => [p, x.points[p]] as const).filter(([, q]) => q?.cat)
+        return {
+          key: `${x.period}-${x.var}`,
+          label: <span className="truncate">{x.var === "temperature" ? "Temp" : "Precip"} · {x.period.replace("-", "–")} d</span>,
+          bars: v ? [{
+            key: "o", start: ptMidnight(x.start!), end: ptMidnight(x.end!) + 24 * H,
+            color: cpcColor(x.var, v.cat, v.prob),
+            label: v.cat === "EC" ? "Equal chances" : `${cpcWords(v.cat)}${v.prob ? ` ${Math.round(v.prob)}%` : ""}`,
+            short: v.prob ? `${Math.round(v.prob)}%` : "EC",
+            aria: `${g.name}, ${x.period} day ${what} outlook, ${dateRange(x.start!, x.end!)}: ${cpcWords(v.cat)}${v.prob ? `, ${Math.round(v.prob)}%` : ""}`,
+            tip: <>
+              <p className="font-semibold">{g.name} · {x.period.replace("-", "–")} day {what}</p>
+              <p>{dateRange(x.start!, x.end!)}</p>
+              <p>{v.cat === "EC" ? "Equal chances of above, near or below normal" : `${cpcWords(v.cat)}${v.cat === "Above" || v.cat === "Below" ? " normal" : ""}, ${Math.round(v.prob ?? 0)}% chance`}</p>
+              {per.length > 1 && per.every(([, q]) => q!.cat === v.cat && q!.prob === v.prob) && (
+                <p className="opacity-80">The same at all {per.length} locations.</p>
+              )}
+              {per.length > 1 && !per.every(([, q]) => q!.cat === v.cat && q!.prob === v.prob) && (
+                <div className="grid grid-cols-[auto_auto] gap-x-3 pt-1 opacity-80">
+                  {per.map(([p, q]) => (
+                    <React.Fragment key={p}><span>{p}</span><span className="text-right tabular-nums">{cpcWords(q!.cat!)}{q!.prob ? ` ${Math.round(q!.prob)}%` : ""}</span></React.Fragment>
+                  ))}
+                </div>
+              )}
+            </>,
+          }] : [],
+        }
+      }),
+    }))
+    return groups.length ? { t0, t1, groups, uncovered } : null
+  })()
   return (
     <Card>
       <CardHeader>
@@ -749,41 +868,18 @@ export function OutlooksCard({ data }: { data: Briefing }) {
             <a className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground" href={o.ero.url} target="_blank" rel="noopener">WPC Excessive Rainfall Outlook</a>
           </div>
         )}
-        {o.cpc && o.cpc.outlooks.length > 0 && (
-          <div className="space-y-2 overflow-x-auto">
-            <p className="text-sm font-medium">CPC extended outlooks</p>
-            <Table className="min-w-[640px]">
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Area</TableHead>
-                  {o.cpc.outlooks.map((x) => (
-                    <TableHead key={`${x.period}-${x.var}`} className="text-center text-xs">
-                      {x.period} day {x.var === "temperature" ? "temp" : "precip"}
-                      {x.start && x.end && <span className="block font-normal text-muted-foreground">{dateRange(x.start, x.end)}</span>}
-                    </TableHead>
-                  ))}
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {groups.map((g) => (
-                  <TableRow key={g.name}>
-                    <TableCell>{g.name}</TableCell>
-                    {o.cpc!.outlooks.map((x) => {
-                      const v = cpcGroup(g.pts, x.points)
-                      return (
-                        <TableCell key={`${x.period}-${x.var}`} className="text-center text-xs"
-                                   style={{ background: v ? CPC_COLOR[x.var][v.cat] ?? "#f3f4f6" : "transparent" }}>
-                          {v ? <>{v.cat === "EC" ? "Equal chances" : v.cat}{v.prob ? <span className="block text-muted-foreground">{Math.round(v.prob)}%</span> : null}</> : "–"}
-                        </TableCell>
-                      )
-                    })}
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+        {cpc && (
+          <div className="space-y-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-sm font-medium">CPC extended outlooks</p>
+              <CpcKey />
+            </div>
+            <Timeline t0={cpc.t0} t1={cpc.t1} groups={cpc.groups} groupW={150} rowW={100} />
             <p className="text-xs text-muted-foreground">
-              The most common category across each area's locations, with its probability. CPC outlooks cover the US only.{" "}
-              <a className="underline underline-offset-2 hover:text-foreground" href={o.cpc.url} target="_blank" rel="noopener">CPC outlooks</a>
+              Each bar is the most common category across the area's locations, over the days the outlook covers; hover
+              for each location's category and probability.
+              {cpc.uncovered.length > 0 && ` CPC outlooks cover the US only, so ${cpc.uncovered.join(", ")} ${cpc.uncovered.length > 1 ? "are" : "is"} left out.`}{" "}
+              <a className="underline underline-offset-2 hover:text-foreground" href={o.cpc!.url} target="_blank" rel="noopener">CPC 6–10 and 8–14 day outlooks</a>
             </p>
           </div>
         )}
