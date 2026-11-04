@@ -17,6 +17,7 @@ jobs:
           git fetch --depth=1 origin gh-pages
           rm -rf web/public/data && mkdir -p web/public
           git archive FETCH_HEAD data | tar -x -C web/public
+          pip install pyyaml >/dev/null && python -m briefing.repage web/public/data/briefing.json
           cd web && npm ci && npm run build
       - name: Screenshots with the real basemap and terrain
         run: |
@@ -35,11 +36,21 @@ jobs:
           await pg.waitForTimeout(5000)
           await card.screenshot({ path: "/tmp/shots/summary_terrain.png" })
           await card.getByRole("tab", { name: "Through time", exact: true }).click()
-          await card.getByRole("tab", { name: "Wind", exact: true }).click()
+          await card.getByRole("tab", { name: "Pressure gradient", exact: true }).click()
+          await pg.waitForTimeout(1500)
+          await card.getByRole("combobox").first().click()
+          await pg.getByRole("option", { name: "GFS", exact: true }).click()
           const iso = card.getByLabel("Isobars")
           if (!(await iso.isChecked())) await iso.click()
+          await pg.waitForTimeout(2000)
+          const slider = card.getByRole("slider").first()
+          await slider.focus()
+          for (let k = 0; k < 52; k++) await pg.keyboard.press("ArrowRight")
           await pg.waitForTimeout(7000)
-          await card.screenshot({ path: "/tmp/shots/isobars.png" })
+          await card.screenshot({ path: "/tmp/shots/pgrad.png" })
+          await card.getByRole("tab", { name: "Wind", exact: true }).click()
+          await pg.waitForTimeout(6000)
+          await card.screenshot({ path: "/tmp/shots/pairs_wind.png" })
           console.log("errors", JSON.stringify(errs), "failed requests", JSON.stringify(fails.slice(0, 10)))
           await b.close()
           JS

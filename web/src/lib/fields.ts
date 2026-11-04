@@ -241,3 +241,23 @@ export function pressureCenters(g: Grid, raw: Float32Array, prominence = 1.5): G
   }
   return { type: "FeatureCollection", features: feats }
 }
+
+/** Horizontal pressure gradient magnitude (hPa per 100 km) from a sea-level pressure band, after
+ *  smoothing (sea-level reduction over terrain is noisy on fine grids). Central differences;
+ *  NaN on the edges. */
+export function pressureGradient(g: Grid, raw: Float32Array, passes: number): Float32Array {
+  const p = smooth(g, raw, passes)
+  const out = new Float32Array(p.length).fill(NaN)
+  const dLon = (g.east - g.west) / g.width, dLat = (g.north - g.south) / g.height
+  const ky = 2 * dLat * 110.57
+  for (let y = 1; y < g.height - 1; y++) {
+    const lat = g.north - ((y + 0.5) / g.height) * (g.north - g.south)
+    const kx = 2 * dLon * 111.32 * Math.cos((lat * Math.PI) / 180)
+    for (let x = 1; x < g.width - 1; x++) {
+      const i = y * g.width + x
+      const gx = (p[i + 1] - p[i - 1]) / kx, gy = (p[i - g.width] - p[i + g.width]) / ky
+      out[i] = 100 * Math.hypot(gx, gy)
+    }
+  }
+  return out
+}

@@ -64,6 +64,7 @@ def gradients(grib_models, cfg):
                            "values": [_r(v) for v in diff]})
         out.append({"id": g["id"], "a": g["a"]["name"], "b": g["b"]["name"],
                     "codes": [g["a"].get("code"), g["b"].get("code")], "meaning": g["meaning"],
+                    "locs": [[g["a"]["lon"], g["a"]["lat"]], [g["b"]["lon"], g["b"]["lat"]]],
                     "thresholds": g.get("thresholds", []), "series": series})
     log.info("pressure gradients: %s", ", ".join(f"{g['id']} ({len(g['series'])} models)" for g in out))
     return out

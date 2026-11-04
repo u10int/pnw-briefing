@@ -14,12 +14,13 @@ import { Slider } from "@/components/ui/slider"
 import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { loadCog } from "@/lib/cog"
-import { bicubicAt, contourLines, fieldUrl, gridPos, loadField, nearestAt, nearestTime, pressureCenters, windArrows, windFrom } from "@/lib/fields"
+import { bicubicAt, contourLines, fieldUrl, gridPos, loadField, nearestAt, nearestTime, pressureCenters, pressureGradient, windArrows, windFrom } from "@/lib/fields"
+import { GRAD_COLORS, gradLevel, pairName, seriesAt } from "@/lib/gradients"
 import { GridLayer, type GridDraw } from "@/lib/gl/grid-layer"
 import { ParticleLayer, type WindDraw } from "@/lib/gl/particle-layer"
 import { type Grid, sameGrid } from "@/lib/gl/util"
-import { FRZ, GUST, IVT, PCT, PRECIP, PROB, PTYPE_COLORS, PTYPE_NAMES, type Ramp, REFC, SNOW, SPREAD, TDEP, TEMP, WIND } from "@/lib/ramps"
-import type { Briefing, Cog, ExtremeVar, FieldEntry, FieldsManifest, FieldVar } from "@/types"
+import { FRZ, GUST, IVT, PCT, PGRAD, PRECIP, PROB, PTYPE_COLORS, PTYPE_NAMES, type Ramp, REFC, SNOW, SPREAD, TDEP, TEMP, WIND } from "@/lib/ramps"
+import type { Briefing, Cog, ExtremeVar, FieldEntry, FieldsManifest, FieldVar, Gradient } from "@/types"
 
 // ------------------------------------------------------------------ map plumbing
 
@@ -164,7 +165,7 @@ interface Loaded {
   note?: string
   sample: (lon: number, lat: number, t: number, smooth: boolean) => string | null
 }
-interface Overlays { isobars?: FC | null; centers?: FC | null; freezing?: FC | null; arrows?: FC | null; sample?: (lon: number, lat: number, smooth: boolean) => string | null }
+interface Overlays { isobars?: FC | null; centers?: FC | null; pairs?: FC | null; freezing?: FC | null; arrows?: FC | null; sample?: (lon: number, lat: number, smooth: boolean) => string | null }
 /** One channel's choice for the current time: `key` identifies the data, `t` blends within it. */
 interface Choice<T> { key: string; t: number; load: () => Promise<T> }
 
@@ -281,6 +282,13 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
       m.addSource("isobars", { type: "geojson", data: EMPTY })
       m.addLayer({ id: "isobars", type: "line", source: "isobars", paint: { "line-color": "#3a3f47", "line-width": ["case", ["==", ["%", ["get", "value"], 4], 0], 1.3, 0.6], "line-opacity": ["case", ["==", ["%", ["get", "value"], 4], 0], 0.8, 0.55] } }, labels)
       m.addSource("centers", { type: "geojson", data: EMPTY })
+      m.addSource("pairs", { type: "geojson", data: EMPTY })
+      m.addLayer({ id: "pairs", type: "line", source: "pairs", filter: ["==", ["geometry-type"], "LineString"],
+        layout: { "line-cap": "round" },
+        paint: { "line-color": ["get", "color"], "line-width": ["match", ["get", "level"], 2, 5, 1, 4, 2.5],
+                 "line-opacity": ["match", ["get", "level"], 0, 0.7, 0.95] } }, labels)
+      m.addLayer({ id: "pair-ends", type: "circle", source: "pairs", filter: ["==", ["geometry-type"], "Point"],
+        paint: { "circle-radius": 4, "circle-color": "#fff", "circle-stroke-color": ["get", "color"], "circle-stroke-width": 2.5 } }, labels)
       // labels need the basemap's glyphs; the plain fallback style has none
       const font = (m.getStyle().layers.find((l) => l.type === "symbol" && (l.layout as Record<string, unknown> | undefined)?.["text-font"])?.layout as Record<string, unknown> | undefined)?.["text-font"]
       if (m.getStyle().glyphs && Array.isArray(font)) {
@@ -288,6 +296,10 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
           layout: { "symbol-placement": "line", "symbol-spacing": 260, "text-field": ["to-string", ["get", "value"]],
                     "text-font": font as string[], "text-size": 10, "text-keep-upright": true, "text-max-angle": 30 },
           paint: { "text-color": "#3a3f47", "text-halo-color": "rgba(255,255,255,0.9)", "text-halo-width": 1.4 } }, labels)
+        m.addLayer({ id: "pair-labels", type: "symbol", source: "pairs", filter: ["==", ["geometry-type"], "LineString"],
+          layout: { "symbol-placement": "line-center", "text-field": ["get", "text"], "text-font": font as string[], "text-size": 11,
+                    "text-allow-overlap": true, "text-keep-upright": true, "text-offset": [0, -0.9] },
+          paint: { "text-color": "#1b1f24", "text-halo-color": "rgba(255,255,255,0.95)", "text-halo-width": 1.8 } }, labels)
         m.addLayer({ id: "centers", type: "symbol", source: "centers",
           layout: { "text-field": ["format", ["get", "kind"], { "font-scale": 1.5 }, "\n", {}, ["to-string", ["get", "value"]], { "font-scale": 0.75 }],
                     "text-font": font as string[], "text-size": 14, "text-line-height": 1.0, "text-allow-overlap": true },
@@ -350,6 +362,7 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
         ready.current?.then((m) => {
           ;(m.getSource("isobars") as GeoJSONSource).setData(o?.isobars ?? EMPTY)
           ;(m.getSource("centers") as GeoJSONSource).setData(o?.centers ?? EMPTY)
+          ;(m.getSource("pairs") as GeoJSONSource).setData(o?.pairs ?? EMPTY)
           ;(m.getSource("freezing") as GeoJSONSource).setData(o?.freezing ?? EMPTY)
           ;(m.getSource("arrows") as GeoJSONSource).setData(o?.arrows ?? EMPTY)
         })
@@ -529,13 +542,14 @@ function totalsView(c: Cog | undefined, ramp: Ramp, windowLabel: string, digits 
 
 // ------------------------------------------------------------------ hourly mode
 
-type HLayer = "radar" | "t2m" | "gust" | "wind" | "frz" | "ivt"
+type HLayer = "radar" | "t2m" | "gust" | "wind" | "frz" | "ivt" | "pgrad"
 const HLAYERS: { id: HLayer; label: string; primary: (e: Record<string, FieldEntry>) => FieldEntry | undefined }[] = [
   { id: "radar", label: "Precipitation", primary: (e) => e.refc ?? e.ptype },
   { id: "t2m", label: "Temperature", primary: (e) => e.t2m },
   { id: "gust", label: "Gusts", primary: (e) => e.gust },
   { id: "wind", label: "Wind", primary: (e) => (e.u10 && e.v10 ? e.u10 : undefined) },
   { id: "frz", label: "Freezing level", primary: (e) => e.frz },
+  { id: "pgrad", label: "Pressure gradient", primary: (e) => e.mslp },
   { id: "ivt", label: "Moisture (IVT)", primary: (e) => (e.ivtu && e.ivtv ? e.ivtu : undefined) },
 ]
 /** The vector pair a layer's particles follow: water vapor transport on the IVT layer, else the 10 m wind. */
@@ -555,6 +569,12 @@ async function bandNear(e: FieldEntry | undefined, iso: string, tol = 0.6) {
   if (i < 0) return null
   const f = await loadField(e)
   return { f, i, data: await f.band(i) }
+}
+
+const gradCache = new WeakMap<Float32Array, Float32Array>()
+const gradOf = (g: Grid, p: Float32Array) => {
+  if (!gradCache.has(p)) gradCache.set(p, pressureGradient(g, p, g.width > 120 ? 6 : 2))
+  return gradCache.get(p)!
 }
 
 const speedCache = new WeakMap<Float32Array, Float32Array>()
@@ -577,17 +597,38 @@ function cachedOverlay(key: string, load: () => Promise<Overlays>) {
 
 const cap = (s: string) => s[0].toUpperCase() + s.slice(1)
 
-function hourlyView(model: string, entries: Record<string, FieldEntry>, layer: HLayer, isobars: boolean): View | null {
+/** The configured station pairs as lines, coloured by how far this model's difference at `time`
+ *  is past each pair's thresholds, with the value as a label. */
+function pairOverlay(pairs: Gradient[], model: string, time: number): FC {
+  const features: GeoJSON.Feature[] = []
+  for (const g of pairs) {
+    const s = g.series.find((x) => x.model === model)
+    if (!g.locs || !s) continue
+    const v = seriesAt(s, time)
+    if (v == null) continue
+    const { level, label } = gradLevel(g, v)
+    const text = `${pairName(g)} ${v > 0 ? "+" : ""}${v.toFixed(0)}`
+    features.push({ type: "Feature", properties: { level, color: GRAD_COLORS[level], text, what: label ?? "" },
+                    geometry: { type: "LineString", coordinates: g.locs } })
+    for (const [k, loc] of g.locs.entries()) {
+      features.push({ type: "Feature", properties: { end: 1, color: GRAD_COLORS[level], code: g.codes?.[k] ?? "" },
+                      geometry: { type: "Point", coordinates: loc } })
+    }
+  }
+  return { type: "FeatureCollection", features } as FC
+}
+
+function hourlyView(model: string, entries: Record<string, FieldEntry>, layer: HLayer, isobars: boolean, pairs: Gradient[] | null): View | null {
   const def = HLAYERS.find((l) => l.id === layer)!
   const prim = def.primary(entries)
   if (!prim) return null
   const iso = isobars && !!entries.mslp
   const name = def.label.toLowerCase()
   const nearest = (time: number | null) => (time == null ? null : bracket(prim.times, time, false, 3.1))
-  const ramp = layer === "t2m" ? TEMP : layer === "gust" ? GUST : layer === "wind" ? WIND : layer === "ivt" ? IVT : FRZ
+  const ramp = layer === "t2m" ? TEMP : layer === "gust" ? GUST : layer === "wind" ? WIND : layer === "ivt" ? IVT : layer === "pgrad" ? PGRAD : FRZ
 
   return {
-    key: `hr|${model}|${layer}|${iso ? 1 : 0}`,
+    key: `hr|${model}|${layer}|${iso ? 1 : 0}|${pairs ? 1 : 0}`,
     title: `${model}, ${name}`,
     sub(time) {
       const b = nearest(time)
@@ -621,6 +662,13 @@ function hourlyView(model: string, entries: Record<string, FieldEntry>, layer: H
               const code = aux ? categoryAt(f, aux, auxB, t, lon, lat) : NaN
               const tn = PTYPE_NAMES[code] as string | undefined
               return `${tn && tn !== "none" ? cap(tn) + ", " : ""}${Math.round(v)} dBZ`
+            }
+          } else if (layer === "pgrad") {
+            const GA = gradOf(f, A), GB = B ? gradOf(f, B) : null
+            draw = { grid: f, a: GA, b: GB, paint: { kind: "ramp", ramp } }
+            describe = (lon, lat, t, smooth) => {
+              const v = blendAt(f, GA, GB, t, lon, lat, smooth)
+              return Number.isFinite(v) ? `Pressure gradient ${v.toFixed(1)} hPa per 100 km` : null
             }
           } else if (layer === "radar") {
             draw = { grid: f, a: A, b: B, paint: { kind: "ptype" } }
@@ -662,8 +710,9 @@ function hourlyView(model: string, entries: Record<string, FieldEntry>, layer: H
       const valid = prim.times[i]
       return {
         key: `${i}`, t: 0,
-        load: () => cachedOverlay(`${model}|${layer}|${i}|${iso ? 1 : 0}`, async () => {
+        load: () => cachedOverlay(`${model}|${layer}|${i}|${iso ? 1 : 0}|${pairs ? 1 : 0}`, async () => {
           const out: Overlays = {}
+          if (pairs) out.pairs = pairOverlay(pairs, model, Date.parse(valid))
           if (layer === "t2m") {
             const f = await loadField(prim)
             out.freezing = contourLines(f, await f.band(i), [32], 1)
@@ -819,6 +868,8 @@ export function InteractiveMap({ data }: { data: Briefing }) {
   const [smooth, setSmooth] = useStoredFlag("pnw-briefing.map.smooth", false)
   const [particles, setParticles] = useStoredFlag("pnw-briefing.map.particles", true)
   const [terrain, setTerrain] = useStoredFlag("pnw-briefing.map.terrain", true)
+  const [showPairs, setShowPairs] = useStoredFlag("pnw-briefing.map.pairs", true)
+  const pairList = React.useMemo(() => (data.gradients ?? []).filter((g) => g.locs && g.series.length), [data])
   const [compare, setCompare] = React.useState(false)
   const clock = React.useMemo(() => new Clock(), [])
 
@@ -900,11 +951,11 @@ export function InteractiveMap({ data }: { data: Briefing }) {
 
   const viewA = mode === "totals"
     ? totalsView(pick(model), totRamp, winLabel(d), totDef.digits, totDef.suffix)
-    : hA ? hourlyView(hA, byModel.get(hA)!.entries, layer, isobars) : null
+    : hA ? hourlyView(hA, byModel.get(hA)!.entries, layer, isobars, showPairs && pairList.length ? pairList : null) : null
   const showB = compare && (mode === "hourly" || perModel)
   const viewB = !showB ? null : mode === "totals"
     ? totalsView(pickOther(other), totRamp, winLabel(d), totDef.digits, totDef.suffix)
-    : hB ? hourlyView(hB, byModel.get(hB)!.entries, layer, isobars) : null
+    : hB ? hourlyView(hB, byModel.get(hB)!.entries, layer, isobars, showPairs && pairList.length ? pairList : null) : null
 
   if (!cogs.length && !fields.length) return null
   const hasHourly = fields.length > 0
@@ -967,6 +1018,7 @@ export function InteractiveMap({ data }: { data: Briefing }) {
               <Toggle id="compare-h" label="Compare" checked={compare} onChange={setCompare} />
               {compare && hB && <ModelSelect options={layerModels.filter((m) => m.model !== hA)} value={hB} onChange={setHOther} label="Compare with" />}
               {entriesA.mslp && <Toggle id="isobars" label="Isobars" checked={isobars} onChange={setIsobars} />}
+              {pairList.length > 0 && <Toggle id="pairs" label="Gradient pairs" checked={showPairs} onChange={setShowPairs} />}
               {hasWind && <Toggle id="particles" label={layer === "ivt" ? "Moisture particles" : "Wind particles"} checked={particles} onChange={setParticles} />}
             </>
           )}
@@ -996,6 +1048,8 @@ export function InteractiveMap({ data }: { data: Briefing }) {
             {layer === "gust" && <RampLegend ramp={GUST} />}
             {layer === "wind" && <RampLegend ramp={WIND} note={showParticles ? "Particles trace the 10 m wind; faster particles mean stronger wind." : "Arrows point the way the wind is blowing; longer arrows are stronger winds."} />}
             {layer === "frz" && <RampLegend ramp={FRZ} every={2} note="Snow usually reaches the ground about 1,000 ft below the freezing level." />}
+            {layer === "pgrad" && <RampLegend ramp={PGRAD} note="How fast sea-level pressure changes with distance, from the smoothed field: 1–2 is a typical synoptic gradient, 3 and up is windstorm-class, and gap flows (Gorge, Fraser, Strait) pack tighter. Over high terrain sea-level pressure is an extrapolation, so values there are less reliable." />}
+            {showPairs && pairList.length > 0 && <p className="text-xs text-muted-foreground">Lines join each gradient station pair, labelled with this model's pressure difference (hPa, first station minus second); amber and red mark the pair's first and second thresholds, as on the pressure gradient card.</p>}
             {layer === "ivt" && <RampLegend ramp={IVT} note={`Vertically integrated water vapor transport (GFS and ECMWF AIFS), the measure behind the atmospheric-river scale: 250 and up is AR conditions${showParticles ? "; particles follow the moisture flow" : ""}.`} />}
             {showParticles && layer !== "wind" && layer !== "ivt" && <p className="text-xs text-muted-foreground">Moving particles trace the 10 m wind.</p>}
             {isobars && entriesA.mslp && <p className="text-xs text-muted-foreground">Gray lines are sea-level pressure every 2 hPa; heavier, labelled lines every 4 hPa. H and L mark pressure centres.</p>}
