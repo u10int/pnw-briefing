@@ -33,6 +33,13 @@ export const PCT: Ramp = {
   colors: ["#8c510a", "#bf812d", "#dfc27d", "#f6e8c3", "#f5f5f5", "#c7eae5", "#80cdc1", "#35978f", "#01665e", "#003c30"],
 }
 
+/** Integrated water vapor transport, with the AR threshold (250) and CW3E scale breaks marked. */
+export const IVT: Ramp = {
+  label: "Water vapor transport (IVT)", units: "kg m⁻¹ s⁻¹",
+  levels: [150, 250, 375, 500, 625, 750, 1000, 1250],
+  colors: ["#d7e8f4", "#8fc6e6", "#4f9fd8", "#3fae6a", "#9ccc3c", "#e9b625", "#f08a24", "#d9342b"],
+}
+
 /** Departure from normal (°F): blue below, red above, white within ±2°. */
 export const TDEP: Ramp = {
   label: "Departure from 1991–2020 normal", units: "°F", clampLow: true,
