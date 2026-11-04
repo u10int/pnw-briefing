@@ -74,6 +74,9 @@ jobs:
 
       - name: Build the page (React + shadcn/ui)
         working-directory: web
+        env:
+          # optional CARTO basemap key (Settings → Secrets and variables → Actions → Variables)
+          VITE_CARTO_KEY: ${{ vars.CARTO_KEY }}
         run: |
           npm ci
           npm run build

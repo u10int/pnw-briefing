@@ -25,19 +25,19 @@ import type { Briefing, Cog, FieldEntry, FieldsManifest, FieldVar } from "@/type
 
 const EMPTY: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: [] }
 
-// CARTO light basemap: unlabelled tiles under the data, labels on top so place names stay readable.
-const carto = (layer: string) => ["a", "b", "c", "d"].map((s) => `https://${s}.basemaps.cartocdn.com/${layer}/{z}/{x}/{y}@2x.png`)
-const STYLE: StyleSpecification = {
-  version: 8,
-  sources: {
-    base: { type: "raster", tiles: carto("light_nolabels"), tileSize: 256, attribution: "© OpenStreetMap contributors © CARTO" },
-    labels: { type: "raster", tiles: carto("light_only_labels"), tileSize: 256 },
-  },
-  layers: [
-    { id: "bg", type: "background", paint: { "background-color": "#eef0f3" } },
-    { id: "base", type: "raster", source: "base" },
-    { id: "labels", type: "raster", source: "labels" },
-  ],
+// CARTO's Positron vector basemap. The weather layers go under its first label layer, so place
+// names stay readable on top. Vector styles load without a key today; set the CARTO_KEY repository
+// variable to send one (CARTO's raster tiles already require it).
+const CARTO_KEY = (import.meta.env.VITE_CARTO_KEY as string | undefined) || ""
+const STYLE_URL = "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json"
+const withKey = (url: string) =>
+  CARTO_KEY && url.includes("cartocdn.com") && !/[?&]key=/.test(url)
+    ? { url: `${url}${url.includes("?") ? "&" : "?"}key=${encodeURIComponent(CARTO_KEY)}` }
+    : undefined
+// If the basemap can't load (offline, blocked), the data still shows on a plain background.
+const FALLBACK: StyleSpecification = {
+  version: 8, sources: {},
+  layers: [{ id: "bg", type: "background", paint: { "background-color": "#eef0f3" } }],
 }
 
 // A standalone (single-file) copy carries the worker inline; turn it into a blob URL. The bundled
@@ -223,29 +223,36 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
     const ring = Object.values(data.regionShapes).flat()
     const lons = ring.map((c) => c[0]), lats = ring.map((c) => c[1])
     const m = new maplibregl.Map({
-      container: el.current!, style: STYLE, attributionControl: { compact: true },
+      container: el.current!, style: STYLE_URL, transformRequest: withKey, attributionControl: { compact: true },
       bounds: [[Math.min(...lons) - 0.4, Math.min(...lats) - 0.25], [Math.max(...lons) + 0.4, Math.max(...lats) + 0.25]],
       fitBoundsOptions: { padding: 16 },
       dragRotate: false, pitchWithRotate: false, touchPitch: false, maxZoom: 11,
     })
     m.touchZoomRotate.disableRotation()
     m.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right")
+    let mapLoaded = false, fellBack = false
+    m.on("error", () => {
+      if (!mapLoaded && !fellBack && !m.isStyleLoaded()) { fellBack = true; m.setStyle(FALLBACK) }
+    })
     ready.current = new Promise((resolve) => m.on("load", () => {
+      mapLoaded = true
       const { grid, particles } = layers.current!
+      // first label layer of the basemap (none on the fallback, so data goes on top)
+      const labels = m.getStyle().layers.find((l) => l.type === "symbol")?.id
       m.addImage("arrow", arrowImage(), { sdf: true })
-      m.addLayer(grid, "labels")
+      m.addLayer(grid, labels)
       m.addSource("isobars", { type: "geojson", data: EMPTY })
-      m.addLayer({ id: "isobars", type: "line", source: "isobars", paint: { "line-color": "#3a3f47", "line-width": ["case", ["==", ["%", ["get", "value"], 8], 0], 1.4, 0.8], "line-opacity": 0.75 } }, "labels")
+      m.addLayer({ id: "isobars", type: "line", source: "isobars", paint: { "line-color": "#3a3f47", "line-width": ["case", ["==", ["%", ["get", "value"], 8], 0], 1.4, 0.8], "line-opacity": 0.75 } }, labels)
       m.addSource("freezing", { type: "geojson", data: EMPTY })
-      m.addLayer({ id: "freezing", type: "line", source: "freezing", paint: { "line-color": "#1d3f9c", "line-width": 1.6, "line-dasharray": [2, 1.5] } }, "labels")
+      m.addLayer({ id: "freezing", type: "line", source: "freezing", paint: { "line-color": "#1d3f9c", "line-width": 1.6, "line-dasharray": [2, 1.5] } }, labels)
       m.addSource("arrows", { type: "geojson", data: EMPTY })
       m.addLayer({ id: "arrows", type: "symbol", source: "arrows",
         // more candidates than fit; collision detection keeps an even spread at any pane size or zoom
         layout: { "icon-image": "arrow", "icon-rotate": ["get", "dir"], "icon-rotation-alignment": "map",
                   "icon-allow-overlap": false, "icon-padding": 3, "symbol-sort-key": ["-", 0, ["get", "speed"]],
                   "icon-size": ["interpolate", ["linear"], ["get", "speed"], 2, 0.35, 20, 0.55, 50, 0.8] },
-        paint: { "icon-color": "#1b1f24", "icon-halo-color": "rgba(255,255,255,0.9)", "icon-halo-width": 1.2 } }, "labels")
-      m.addLayer(particles, "labels")
+        paint: { "icon-color": "#1b1f24", "icon-halo-color": "rgba(255,255,255,0.9)", "icon-halo-width": 1.2 } }, labels)
+      m.addLayer(particles, labels)
       m.addSource("regions", { type: "geojson", data: { type: "FeatureCollection", features: Object.entries(data.regionShapes).map(([id, ring]) => ({
         type: "Feature", properties: { id }, geometry: { type: "LineString", coordinates: [...ring, ring[0]] } })) } })
       m.addLayer({ id: "regions", type: "line", source: "regions", paint: { "line-color": "#1b1f24", "line-width": 1.2, "line-dasharray": [3, 2] } })

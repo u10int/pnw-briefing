@@ -232,10 +232,13 @@ Sections live in `web/src/sections/`, and the data contract is `web/src/types.ts
   equivalent at 10:1. Models without one are left out of the snow maps.
 - **The icy-precipitation flag is a screen.** It needs a day with low ≤ 32°F, high ≤ 36°F and
   liquid precip. Daily values can't resolve the shallow cold-air setups behind PNW freezing rain.
-- **Basemap.** The interactive map uses CARTO's free light tiles (OpenStreetMap data), with
-  labels drawn above the data. Their free tier is for non-commercial use; swap the `STYLE` in
-  `web/src/sections/InteractiveMap.tsx` for a Mapbox or self-hosted style if you need more.
-  MapLibre's API matches Mapbox GL's, so moving to Mapbox is mostly the import and a token.
+- **Basemap.** The interactive map uses CARTO's Positron vector style (OpenStreetMap data), with
+  the weather layers inserted under its labels. Vector styles load without a key today; CARTO
+  recommends one, and their raster tiles already require it. To send a key, add a repository
+  variable `CARTO_KEY` (Settings → Secrets and variables → Actions → Variables); it's added to
+  every CARTO request. Free use is up to 5M tile requests a month non-commercial, 1M commercial.
+  If the basemap can't load, the data still draws on a plain background. To use another style,
+  change `STYLE_URL` in `web/src/sections/InteractiveMap.tsx`.
 - Impact flags are not official warnings. Check NWS Seattle and Portland.
 
 ## Layout
