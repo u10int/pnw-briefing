@@ -65,8 +65,32 @@ def test_cog_roundtrip():
             assert np.isnan(s.read(1)[r, c])                     # nodata preserved
 
 
+def test_normals_window_clipped_to_grid():
+    """The domain extends west of PRISM's grid; cells must keep their true coordinates."""
+    import zipfile
+    import rasterio
+    from rasterio.transform import from_origin
+    from briefing import grib, normals
+    W, H, res, left, top = 300, 200, 1 / 24, -125.0208333, 49.9375
+    rows, cols = np.mgrid[0:H, 0:W]
+    lat, lon = top - (rows + 0.5) * res, left + (cols + 0.5) * res
+    val = (lat * 1000 + lon + 200).astype("float32")           # each cell encodes its own centre
+    with tempfile.TemporaryDirectory() as d:
+        tif, z = Path(d) / "n.tif", Path(d) / "n.zip"
+        with rasterio.open(tif, "w", driver="GTiff", width=W, height=H, count=1, dtype="float32",
+                           crs="EPSG:4269", transform=from_origin(left, top, res, res)) as f:
+            f.write(val, 1)
+        with zipfile.ZipFile(z, "w") as zf:
+            zf.write(tif, "prism_ppt_us_25m_202011_avg_30y.tif")
+        la, lo, a = normals._read(z, {"lat_min": 43, "lat_max": 49.4, "lon_min": -125.8, "lon_max": -120})
+        assert lo[0] > -125.03, "columns west of the grid were labelled as data"
+        (i, j), = grib.nearest_index(la, lo, [{"lat": 47.61, "lon": -122.33}])
+        assert abs(a[i, j] - (la[i] * 1000 + lo[j] + 200)) < 0.01, "cell value does not match its coordinates"
+
+
 if __name__ == "__main__":
     test_change_uses_the_same_days()
     test_alerts_match_by_zone()
     test_cog_roundtrip()
+    test_normals_window_clipped_to_grid()
     print("ok")

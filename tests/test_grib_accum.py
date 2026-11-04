@@ -51,8 +51,12 @@ def make_fake(style, grid):
             return pd.DataFrame({"search_this": [r for r in self._rows() if "APCP" in search]})
 
         def xarray(self, search, remove_grib=True):
-            s = search.replace("\\", "")
-            assert "prob" not in s and "std" not in s, "statistic record was read"
+            # Like Herbie: every inventory row matching the regex is downloaded; with several matches
+            # cfgrib hands back a list, statistic records first (as NBM's files are ordered).
+            hits = [r for r in self._rows() if re.search(search, r)]
+            assert hits, f"nothing matched {search!r}"
+            s = sorted(hits, key=lambda r: "prob" not in r and "std" not in r)[0]
+            assert "prob" not in s and "std" not in s, f"statistic record was read: {s}"
             m = re.search(r"(\d+)-(\d+) (hour|day)", s)
             a, b = int(m[1]), int(m[2])
             if m[3] == "day":
@@ -95,8 +99,32 @@ def test_hourly_buckets_on_projected_grid():
     run("hourly", grid="projected", chain_step=1, targets=(12, 36))
 
 
+def test_water_units_follow_the_file():
+    import xarray as xr
+    from briefing import grib
+    m = xr.DataArray(np.ones((2, 2)), attrs={"GRIB_units": "m"})
+    kg = xr.DataArray(np.ones((2, 2)), attrs={"GRIB_units": "kg m**-2"})
+    none = xr.DataArray(np.ones((2, 2)))
+    assert grib.water_mm_factor(m) == 1000.0
+    assert grib.water_mm_factor(kg) == 1.0
+    assert grib.water_mm_factor(none, 1000.0) == 1000.0
+
+
+def test_implausible_model_is_rejected():
+    from briefing import grib
+    grib.check_plausible("ok", np.array([[0.0, 3.2, 11.0]]))
+    try:
+        grib.check_plausible("bad", np.array([[0.0, 3200.0]]))   # mm read as m: 1000x too big
+    except ValueError as e:
+        assert "implausible" in str(e)
+    else:
+        raise AssertionError("1000x precipitation was not rejected")
+
+
 if __name__ == "__main__":
     print("running totals:", run("running"))
     print("6-h buckets:", run("buckets"))
     print("hourly buckets, 2-D grid:", run("hourly", grid="projected", chain_step=1, targets=(12, 36)))
+    test_water_units_follow_the_file()
+    test_implausible_model_is_rejected()
     print("ok")

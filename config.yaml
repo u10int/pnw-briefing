@@ -95,7 +95,7 @@ grib_models:
   - {id: hrrr, label: HRRR, tier: regional, family: ncep, herbie: {model: hrrr, product: sfc},
      cycles: [0, 6, 12, 18], max_hours: 48, range_days: 2, sample_hours: 3, chain_step: 1}
   - {id: rrfs, label: RRFS, tier: regional, family: ncep,
-     herbie: {model: rrfs, product: prslev, domain: conus, member: control},
+     herbie: {model: rrfs, product: 2dfld, domain: conus},   # operational RRFS: deterministic = no member
      cycles: [0, 6, 12, 18], max_hours: 84, range_days: 3, sample_hours: 3, chain_step: 1}
   - {id: namnest, label: NAM 3 km, tier: regional, family: ncep,
      herbie: {model: nam, product: conusnest.hiresf},

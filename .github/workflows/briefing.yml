@@ -57,11 +57,18 @@ jobs:
             git show origin/gh-pages:data/briefing.json > previous.json 2>/dev/null || rm -f previous.json
           ls -la previous.json 2>/dev/null || echo "no previous briefing yet"
 
+      - name: Preflight checks (environment and data hosts)
+        if: ${{ !inputs.demo }}
+        shell: micromamba-shell {0}
+        env: { PYTHONUNBUFFERED: "1" }
+        run: python -m briefing.check
+
       - name: Fetch models and write briefing data
         shell: micromamba-shell {0}
         run: |
           DATE=$(TZ=America/Los_Angeles date +%Y-%m-%d)
           echo "DATE=$DATE" >> "$GITHUB_ENV"
+          export PYTHONUNBUFFERED=1
           PREV=""; [ -s previous.json ] && PREV="--previous previous.json"
           python -m briefing.main --out web/public/data $PREV ${{ inputs.demo && '--demo' || '' }}
 

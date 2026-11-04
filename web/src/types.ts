@@ -76,7 +76,7 @@ export interface Briefing {
   }
   regions: Region[]
   points: Point[]
-  status: { label: string; kind: "model" | "ensemble"; ok: boolean; source: string; run: string | null }[]
+  status: { label: string; kind: "model" | "ensemble"; ok: boolean; source: string; run: string | null; reason?: string | null }[]
   windows: Window[]
   wettest: { start: string; end: string; amount: number }
   events: ImpactEvent[]

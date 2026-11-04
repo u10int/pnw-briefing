@@ -50,7 +50,16 @@ export function RunStatus({ data }: { data: Briefing }) {
               {s.ok ? <CircleCheck className="size-3.5 text-ok" aria-label="arrived" /> :
                 <CircleDashed className="size-3.5" aria-label="missing" />}
               <span className="truncate">{s.label}{s.source === "open-meteo" ? " *" : ""}</span>
-              <span className="ml-auto tabular-nums text-muted-foreground">{s.ok ? (s.run?.split(" ")[0] ?? "API") : "missing"}</span>
+              {s.ok || !s.reason ? (
+                <span className="ml-auto tabular-nums text-muted-foreground">{s.ok ? (s.run?.split(" ")[0] ?? "API") : "missing"}</span>
+              ) : (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="ml-auto cursor-help text-muted-foreground underline decoration-dotted underline-offset-2">missing</span>
+                  </TooltipTrigger>
+                  <TooltipContent className="max-w-[320px]">{s.reason}</TooltipContent>
+                </Tooltip>
+              )}
             </li>
           ))}
         </ul>

@@ -16,7 +16,7 @@ from zoneinfo import ZoneInfo
 import numpy as np
 import yaml
 
-from . import alerts, analysis, change, cogs, impacts, maps, normals
+from . import alerts, analysis, change, cogs, impacts, maps, normals, report
 from .grib import day0
 
 ROOT = Path(__file__).resolve().parent
@@ -26,6 +26,16 @@ TIER_ORDER = {"regional": 0, "blend": 1, "global": 2}
 
 def model_order(models):
     return sorted(models, key=lambda m: (TIER_ORDER.get(m.get("tier"), 3), m.get("source") != "grib", m["label"]))
+
+
+def safe(what: str, fn, default=None):
+    """Run an optional product; on failure log it, annotate the run, and carry on without it."""
+    try:
+        return fn()
+    except Exception as e:
+        log.exception("%s failed; the briefing is published without it", what)
+        report.annotate("warning", f"{what} left out", report.short(e))
+        return default
 
 
 def clean(x):
@@ -63,7 +73,9 @@ def collect(cfg: dict, out: Path, demo: bool = False, products: bool = True) -> 
     models = model_order(grib_models + sup)
     ensembles = grib_ens + sup_ens
     if not models:
-        raise SystemExit("No model data arrived; nothing to brief.")
+        lines = [f"{k}: {v}" for k, v in report.REASONS.items()] or ["no source reported a reason"]
+        report.annotate("error", "No model data arrived", "Every source failed. " + " | ".join(lines))
+        raise SystemExit("No model data arrived; nothing to brief.\n  " + "\n  ".join(lines))
 
     # ---- which runs made it
     expected = ([(s["label"], "model") for s in cfg["grib_models"] if s.get("enabled", True)] +
@@ -74,7 +86,7 @@ def collect(cfg: dict, out: Path, demo: bool = False, products: bool = True) -> 
     status = []
     for label, kind in expected:
         hit = next((x for x in models + ensembles if x["label"] == label), None)
-        status.append({"label": label, "kind": kind, "ok": hit is not None,
+        status.append({"label": label, "kind": kind, "ok": hit is not None, "reason": report.REASONS.get(label),
                        "source": (hit or {}).get("source", "grib"),
                        "run": hit["run"].strftime("%HZ %-d %b") if hit is not None and hit.get("run") else None})
 
@@ -83,24 +95,25 @@ def collect(cfg: dict, out: Path, demo: bool = False, products: bool = True) -> 
     summ = analysis.summary(models, ensembles, cfg)
     for w in summ["windows"]:
         top = max([r["hi"] for r in w["regions"]] + [0.1])
-        w["scale"] = float(next(s for s in (0.5, 1, 2, 3, 4, 5, 6, 8, 10, 12, 15, 20, 25, 30, 40, 50, 75, 100)
-                                if s >= top * 1.05))
+        steps = [s for s in (0.5, 1, 2, 3, 4, 5, 6, 8, 10, 12, 15, 20, 25, 30, 40, 50, 75, 100) if s >= top * 1.05]
+        w["scale"] = float(steps[0] if steps else np.ceil(top * 1.05 / 10) * 10)   # never fails on large totals
     dates, agree = impacts.detect(models, cfg)
     evts = impacts.events(dates, agree, cfg)
     tl_labels, tl = impacts.timeline(dates, agree)
 
     # ---- normals and departure from normal
     norm_cache = Path(cfg.get("cache_dir", ".cache")) / "prism"
-    norm, norm_grid = normals.summarize(models, cfg, norm_cache, demo)
+    norm, norm_grid = safe("normals", lambda: normals.summarize(models, cfg, norm_cache, demo), (None, None))
 
     # ---- maps and COGs
     img = {} if not products else {
-        "short": maps.window_precip(grib_models, cfg, wins[0]["days"], out / "precip_48h.png"),
-        "snow_short": maps.snow(grib_models, cfg, wins[0]["days"], out / "snow_48h.png"),
-        "long": maps.full_range_precip(grib_models, cfg, 7, out / "precip_long.png"),
-        "snow_long": maps.snow(grib_models, cfg, 7, out / "snow_7d.png"),
+        "short": safe("48-hour maps", lambda: maps.window_precip(grib_models, cfg, wins[0]["days"], out / "precip_48h.png")),
+        "snow_short": safe("48-hour snow maps", lambda: maps.snow(grib_models, cfg, wins[0]["days"], out / "snow_48h.png")),
+        "long": safe("long-range maps", lambda: maps.full_range_precip(grib_models, cfg, 7, out / "precip_long.png")),
+        "snow_long": safe("7-day snow maps", lambda: maps.snow(grib_models, cfg, 7, out / "snow_7d.png")),
     }
-    cog_manifest = cogs.export(grib_models, cfg, out / "cogs", norm_grid) if products and grib_models else []
+    cog_manifest = safe("GeoTIFF export", lambda: cogs.export(grib_models, cfg, out / "cogs", norm_grid), []) \
+        if products and grib_models else []
 
     # ---- per-window totals by model (regions and points)
     totals = []
@@ -158,7 +171,7 @@ def collect(cfg: dict, out: Path, demo: bool = False, products: bool = True) -> 
         "cogs": cog_manifest,
         "domain": cfg["domain"],
         "normals": norm,
-        "alerts": alerts.fetch(cfg, demo) if products else None,
+        "alerts": safe("NWS alerts", lambda: alerts.fetch(cfg, demo)) if products else None,
     }
     return clean(data)
 
@@ -180,10 +193,14 @@ def build(cfg: dict, out: Path, demo: bool = False, previous: Path | None = None
             prev = json.loads(previous.read_text())
         except Exception as e:
             log.warning("previous briefing unreadable (%s)", e)
-    data["change"] = clean(change.compare(data, prev, analysis.windows(cfg)))
+    data["change"] = clean(safe("change since yesterday", lambda: change.compare(data, prev, analysis.windows(cfg))))
     if data["change"] is None:
         log.info("no previous briefing to compare with")
 
+    ok = [x["label"] for x in data["status"] if x["ok"]]
+    missing = [x["label"] for x in data["status"] if not x["ok"]]
+    report.annotate("notice", "Briefing built",
+                    f"{len(ok)} of {len(data['status'])} sources arrived. Missing: {', '.join(missing) or 'none'}")
     path = out / "briefing.json"
     path.write_text(json.dumps(data, separators=(",", ":")), encoding="utf-8")
     log.info("wrote %s (%.0f KB)", path, path.stat().st_size / 1024)
