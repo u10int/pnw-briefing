@@ -785,13 +785,13 @@ export function SnowLevelCard({ data }: { data: Briefing }) {
           Each model's freezing level minus {sl.offset_ft.toLocaleString("en-US")} ft, where snow usually starts reaching the
           ground. Below the pass elevation (shaded), precipitation at the pass falls as snow.
         </CardDescription>
-        <CardAction>
+      </CardHeader>
+      <CardContent className="space-y-2">
+        <div className="overflow-x-auto">
           <Tabs value={p.name} onValueChange={setName}>
             <TabsList>{passes.map((x) => <TabsTrigger key={x.name} value={x.name}>{x.name.replace(" Pass", "")}</TabsTrigger>)}</TabsList>
           </Tabs>
-        </CardAction>
-      </CardHeader>
-      <CardContent className="space-y-2">
+        </div>
         <SeriesChart series={p.series} unit="ft" height={260} domain={[0, top]} yTicks={ticksOf(0, top, top > 8000 ? 2000 : 1000)}
                      format={(v) => v.toLocaleString("en-US")}>
           <ReferenceArea y1={0} y2={p.elev_ft} fill="#3f80dc" fillOpacity={0.08} />
