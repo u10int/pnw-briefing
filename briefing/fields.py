@@ -2,7 +2,7 @@
 pressure, freezing level, simulated composite reflectivity and precipitation type.
 
 Temperature and gusts reuse the samples fetch_model already downloads for daily highs, lows and
-peak gusts. The rest are fetched here, one GRIB message at a time (anchored regex, as elsewhere),
+peak gusts (an `hourly` request adds only the hours those lack). The rest are fetched here, one GRIB message at a time (anchored regex, as elsewhere),
 in parallel over forecast hours.
 
 Each model's fields are exported as one multi-band Cloud-Optimized GeoTIFF per variable, one
@@ -47,10 +47,12 @@ PATTERNS = {
         "v10": [":VGRD:10 m above ground:", ":UGRD:10 m above ground:"],
         "mslp": [":MSLMA:mean sea level:", ":PRMSL:mean sea level:", ":MSLET:mean sea level:"],
         "frz": [":HGT:0C isotherm:"], "refc": [":REFC:entire atmosphere"],
+        "t2m": [":TMP:2 m above ground:"], "gust": [":GUST:surface:", ":GUST:10 m above ground:"],
         "crain": [":CRAIN:surface:"], "csnow": [":CSNOW:surface:"],
         "cfrzr": [":CFRZR:surface:"], "cicep": [":CICEP:surface:"],
     },
-    "ecmwf": {"u10": [":10u:"], "v10": [":10v:"], "mslp": [":msl:"], "ptype": [":ptype:"]},
+    "ecmwf": {"u10": [":10u:"], "v10": [":10v:"], "mslp": [":msl:"], "ptype": [":ptype:"],
+              "t2m": [":2t:"], "gust": [":10fg:", ":10fg3:", ":10fg6:"]},
 }
 
 CONVERT = {
@@ -108,6 +110,8 @@ def fetch(spec, run, lead0, last_hour, stepped_hours, samples, dom):
 
     fam = spec["family"]
     out = {}
+    # Temperature and gusts start from the samples already downloaded for the daily values; an
+    # `hourly` request for either adds only the hours those samples don't have.
     for var in ("t2m", "gust"):
         s = samples.get(var) or {}
         if s:
@@ -115,6 +119,7 @@ def fetch(spec, run, lead0, last_hour, stepped_hours, samples, dom):
             out[var] = {"hours": hrs, "data": CONVERT[var](np.stack([s[h] for h in hrs]))}
 
     stepped, hourly, hourly_hours = _wanted(spec)
+    stepped = [v for v in stepped if v not in ("t2m", "gust")]      # always from the samples
     if not stepped and not hourly:
         return out
     hourly_hours_list = list(range(lead0 + 1, min(last_hour, lead0 + hourly_hours) + 1)) if hourly else []
@@ -126,7 +131,8 @@ def fetch(spec, run, lead0, last_hour, stepped_hours, samples, dom):
     for h in stepped_hours:
         plan.setdefault(h, []).extend(n for v in stepped for n in raw_names(v))
     for h in hourly_hours_list:
-        plan.setdefault(h, []).extend(n for v in hourly for n in raw_names(v))
+        plan.setdefault(h, []).extend(n for v in hourly for n in raw_names(v)
+                                      if not (v in ("t2m", "gust") and h in (samples.get(v) or {})))
     if 0 in plan:          # analysis hour: accumulations/categoricals are absent; skip it
         plan.pop(0)
 
@@ -157,9 +163,15 @@ def fetch(spec, run, lead0, last_hour, stepped_hours, samples, dom):
 
     for var in [v for v in dict.fromkeys(stepped + hourly) if v != "ptype"]:
         hrs, arr = collect(var)
-        if arr is not None:
+        if arr is not None and var in out:
+            # hourly reads merged into the samples (t2m, gust)
+            merged = {h: out[var]["data"][i] for i, h in enumerate(out[var]["hours"])}
+            merged.update({h: CONVERT[var](arr[i]) for i, h in enumerate(hrs)})
+            hs = sorted(merged)
+            out[var] = {"hours": hs, "data": np.stack([merged[h] for h in hs])}
+        elif arr is not None:
             out[var] = {"hours": hrs, "data": CONVERT[var](arr)}
-        else:
+        elif var not in out:
             log.info("%s: no %s field", spec["label"], var)
 
     if "ptype" in stepped + hourly:

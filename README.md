@@ -132,7 +132,7 @@ Values are int16 with a scale factor recorded in the file, so GIS tools read phy
 |---|---|---|---|
 | `refc` simulated composite reflectivity | dBZ | HRRR, RRFS, NAM | hourly, 48 h |
 | `ptype` precipitation type (0 none, 1 rain, 2 snow, 3 freezing rain, 4 sleet, 5 mix) | | HRRR, RRFS, NAM hourly; GFS, ECMWF every 6 h | |
-| `t2m` temperature at 2 m | °F | all GRIB models | 3 h regional, 6 h others |
+| `t2m` temperature at 2 m | °F | all GRIB models | hourly for 48 h for HRRR, RRFS, NAM (then 3 h); 6 h others |
 | `gust`, `u10`, `v10` | mph | all but AIFS (no gust field) | same |
 | `mslp` sea-level pressure | hPa | all but NBM | same |
 | `frz` freezing level above sea level | ft | HRRR, RRFS, NAM, GFS | same |

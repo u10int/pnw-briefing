@@ -100,8 +100,8 @@ points:
 # (`maxuv` when published as components, `speed` for NBM's instantaneous 10 m speed). Models without it use `sample_hours` instantaneous values.
 #
 # `fields` adds time-stepped grids to the interactive map. Temperature and gusts come from the
-# samples above for free. `stepped` fields are taken every `sample_hours`; `hourly` fields every
-# hour for the first `hourly_hours`. Names: wind (10 m u and v), mslp, frz (freezing level),
+# samples above for free (listing them under `hourly` adds the hours in between). `stepped` fields
+# are taken every `sample_hours`; `hourly` fields every hour for the first `hourly_hours`. Names: wind (10 m u and v), mslp, frz (freezing level),
 # refc (simulated composite reflectivity), ptype (precipitation type). A field a model doesn't
 # publish is skipped and logged.
 # ----------------------------------------------------------------------------
@@ -110,17 +110,17 @@ grib_models:
   - {id: hrrr, label: HRRR, tier: regional, family: ncep, herbie: {model: hrrr, product: sfc},
      cycles: [0, 6, 12, 18], max_hours: 48, range_days: 2, sample_hours: 3, chain_step: 1,
      extremes: {step: 1, wind: max},                          # no 2 m max/min: hourly temperature
-     fields: {hourly: [refc, ptype], hourly_hours: 48, stepped: [wind, mslp, frz]}}
+     fields: {hourly: [refc, ptype, t2m, gust, wind, mslp, frz], hourly_hours: 48, stepped: [wind, mslp, frz]}}
   - {id: rrfs, label: RRFS, tier: regional, family: ncep,
      herbie: {model: rrfs, product: 2dfld, domain: conus},   # operational RRFS: deterministic = no member
      cycles: [0, 6, 12, 18], max_hours: 84, range_days: 3, sample_hours: 3, chain_step: 1,
      extremes: {step: 1, temp: maxmin, wind: max},
-     fields: {hourly: [refc, ptype], hourly_hours: 48, stepped: [wind, mslp, frz]}}
+     fields: {hourly: [refc, ptype, t2m, gust, wind, mslp, frz], hourly_hours: 48, stepped: [wind, mslp, frz]}}
   - {id: namnest, label: NAM 3 km, tier: regional, family: ncep,
      herbie: {model: nam, product: conusnest.hiresf},
      cycles: [0, 6, 12, 18], max_hours: 60, range_days: 2, sample_hours: 3, chain_step: 1,
      extremes: {step: 1, temp: maxmin, wind: maxuv},          # max wind as components
-     fields: {hourly: [refc, ptype], hourly_hours: 48, stepped: [wind, mslp, frz]}}
+     fields: {hourly: [refc, ptype, t2m, gust, wind, mslp, frz], hourly_hours: 48, stepped: [wind, mslp, frz]}}
   # blend
   - {id: nbm, label: NBM, tier: blend, family: ncep, herbie: {model: nbm, product: co},
      cycles: [0, 6, 12, 18], max_hours: 264, range_days: 11, sample_hours: 6, chain_step: 6,

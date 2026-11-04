@@ -839,7 +839,7 @@ export function InteractiveMap({ data }: { data: Briefing }) {
         <CardDescription>
           {mode === "totals"
             ? "Totals and extremes for each window, from each model's own grid. Model spread and percent of normal use the multi-model mean; extremes come from each model's 3- or 6-hourly output."
-            : "Forecast maps through time. Regional models step hourly for precipitation and every 3 hours otherwise; global models every 6 hours. Playback blends smoothly between forecast steps."}
+            : "Forecast maps through time. HRRR, RRFS and NAM step hourly for the first 48 hours (RRFS every 3 hours after that); NBM and the global models every 6 hours. Playback blends smoothly between forecast steps."}
           {" "}Hover for values; drag and zoom to look closer.
         </CardDescription>
       </CardHeader>

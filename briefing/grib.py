@@ -522,8 +522,12 @@ def fetch_model(spec, cfg, start, points):
             model_fields = {}
         # highs, lows, strongest wind and gusts from interval max/min records at native steps
         from . import extremes
+        # reuse the map's hourly temperature and gusts (display units back to raw) so the extremes
+        # don't download those hours again
+        t2m_all = {**t2m, **{h: (f - 32) * 5 / 9 + 273.15 for h, f in _by_hour(model_fields.get("t2m")).items()}}
+        gust_all = {**gust, **_by_hour(model_fields.get("gust"), 1 / M_S_TO_MPH)}
         try:
-            ext_series = extreme_series(spec, run, lead0, targets[-1], dom, t2m, gust, model_fields)
+            ext_series = extreme_series(spec, run, lead0, targets[-1], dom, t2m_all, gust_all, model_fields)
         except Exception as e:
             log.warning("%s: interval extremes skipped (%s)", spec["label"], report.short(e))
             ext_series = {}

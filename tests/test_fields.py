@@ -118,6 +118,27 @@ def test_export_multiband_roundtrip():
             assert s.descriptions[1] == e["times"][1]
 
 
+def test_hourly_temperature_fills_between_samples():
+    """t2m/gust listed as hourly: the samples are kept and only the hours between are downloaded."""
+    asked = []
+    rows = {":TMP:2 m above ground:": [":TMP:2 m above ground:x hour fcst:"]}
+    vals = {":TMP:2 m above ground:x hour fcst:": np.full(SHAPE, 283.15)}       # 50 °F
+    fake_grib(rows, vals)
+    real_rows = grib._rows
+    grib._rows = lambda H, p: (asked.append((H, p)), real_rows(H, p))[1]
+    try:
+        spec = {"label": "fake", "family": "ncep", "fields": {"hourly": ["t2m"], "hourly_hours": 6}}
+        samples = {"t2m": {h: np.full(SHAPE, 273.15) for h in (0, 3, 6, 9)}}   # 32 °F every 3 h
+        out = fields.fetch(spec, None, 0, 9, [0, 3, 6, 9], samples, {})
+    finally:
+        restore()
+    t = out["t2m"]
+    assert t["hours"] == [0, 1, 2, 3, 4, 5, 6, 9]
+    by = dict(zip(t["hours"], t["data"][:, 0, 0]))
+    assert abs(by[3] - 32) < 1e-4 and abs(by[1] - 50) < 1e-4            # samples kept, gaps filled
+    assert sorted({h for h, p in asked if "TMP" in p}) == [1, 2, 4, 5]   # no re-download at 3 and 6
+
+
 if __name__ == "__main__":
     test_ncep_ptype_and_instant_records()
     test_shared_wind_message()
