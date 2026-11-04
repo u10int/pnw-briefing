@@ -44,9 +44,26 @@ def day0(cfg) -> datetime:
     return now.replace(hour=12, minute=0, second=0, microsecond=0) - (timedelta(days=1) if now.hour < 12 else timedelta(0))
 
 
+TRANSIENT = re.compile(r"\b(429|500|502|503|504)\b|slow ?down|connection (reset|aborted)|timed? ?out|"
+                       r"remotedisconnected|incompleteread|temporarily unavailable|max retries", re.I)
+
+
+def _retry(fn, *args, tries=4, **kw):
+    """Retry network calls that fail transiently (S3 throttling, dropped connections), with backoff."""
+    import random
+    import time
+    for attempt in range(tries):
+        try:
+            return fn(*args, **kw)
+        except Exception as e:
+            if attempt == tries - 1 or not TRANSIENT.search(f"{type(e).__name__}: {e}"):
+                raise
+            time.sleep((3, 8, 20)[min(attempt, 2)] + random.uniform(0, 2))
+
+
 def _H(spec, run, fxx):
     from herbie import Herbie
-    return Herbie(run, fxx=fxx, verbose=False, **spec["herbie"])
+    return _retry(Herbie, run, fxx=fxx, verbose=False, **spec["herbie"])
 
 
 def _latest_run(spec, start: datetime):
@@ -93,7 +110,7 @@ def _first_var(ds):
 
 
 def _rows(H, pattern):
-    inv = H.inventory(pattern)
+    inv = _retry(H.inventory, pattern)
     return [s for s in inv["search_this"] if not SKIP_RE.search(s)] if len(inv) else []
 
 
@@ -115,7 +132,7 @@ def water_mm_factor(da, default: float = 1.0) -> float:
 
 def _read(H, row, dom, water=False, default=1.0):
     """Crop one GRIB message to the domain. With water=True, convert to mm from the message's units."""
-    da = _first_var(H.xarray(re.escape(row), remove_grib=True))
+    da = _first_var(_retry(H.xarray, re.escape(row), remove_grib=True))
     lat, lon, v = _crop(da, dom)
     return (lat, lon, v * water_mm_factor(da, default)) if water else (lat, lon, v)
 
@@ -347,7 +364,7 @@ def fetch_ensemble(spec, cfg, start, points):
         if spec["family"] == "ecmwf":
             # one file per step holds every member; cfgrib returns cf and pf as separate datasets
             def step(h):
-                ds = _H(spec, run, h).xarray(":tp:", remove_grib=True)
+                ds = _retry(_H(spec, run, h).xarray, ":tp:", remove_grib=True)
                 ds = ds if isinstance(ds, list) else [ds]
                 parts = []
                 for d in ds:
@@ -377,7 +394,8 @@ def fetch_ensemble(spec, cfg, start, points):
                 except Exception as e:
                     log.info("%s %s: skipped (%s)", spec["label"], mem, e)
                     return None
-            with ThreadPoolExecutor(WORKERS) as ex:
+            # fewer parallel members than other fetches: 31 members at once trips S3's "Slow Down"
+            with ThreadPoolExecutor(3) as ex:
                 res = [r for r in ex.map(one, members) if r is not None]
             lat, lon = res[0][0], res[0][1]
             idx = nearest_index(lat, lon, points)

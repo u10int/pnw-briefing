@@ -21,20 +21,35 @@ import requests
 from . import analysis
 
 log = logging.getLogger(__name__)
-PRISM_URL = "https://services.nacse.org/prism/data/public/normals/4km/ppt/{month:02d}"
+# Since October 2025 PRISM serves normals from data.prism.oregonstate.edu ("25m" is its code for 4 km).
+# The old web-service URL is kept as a fallback.
+PRISM_URLS = [
+    "https://data.prism.oregonstate.edu/normals/us/4km/ppt/monthly/prism_ppt_us_25m_2020{month:02d}_avg_30y.zip",
+    "https://services.nacse.org/prism/data/public/normals/4km/ppt/{month:02d}",
+]
 MM_TO_IN = 1 / 25.4
 
 
 def _download(month: int, cache: Path) -> Path:
+    """Fetch one month's normal as a zip, trying each known URL; only a real zip is cached."""
     path = cache / f"prism_ppt_normal_4km_{month:02d}.zip"
-    if path.exists() and path.stat().st_size > 10_000:
+    if path.exists() and path.read_bytes()[:2] == b"PK":
         return path
     cache.mkdir(parents=True, exist_ok=True)
-    r = requests.get(PRISM_URL.format(month=month), timeout=180, headers={"User-Agent": "pnw-briefing/1.0"})
-    r.raise_for_status()
-    path.write_bytes(r.content)
-    time.sleep(2)  # PRISM asks for a pause between requests
-    return path
+    problems = []
+    for url in PRISM_URLS:
+        u = url.format(month=month)
+        try:
+            r = requests.get(u, timeout=180, headers={"User-Agent": "pnw-briefing/1.0"})
+            time.sleep(2)  # PRISM asks for a pause between requests
+            if r.status_code == 200 and r.content[:2] == b"PK":
+                path.write_bytes(r.content)
+                return path
+            snippet = " ".join(r.content[:120].decode("utf-8", "replace").split())
+            problems.append(f"{u} -> HTTP {r.status_code}, {r.headers.get('content-type', '?')}: {snippet!r}")
+        except requests.RequestException as e:
+            problems.append(f"{u} -> {type(e).__name__}")
+    raise RuntimeError("PRISM normal not available. " + " | ".join(problems))
 
 
 def _read(zip_path: Path, dom):
