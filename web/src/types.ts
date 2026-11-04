@@ -87,6 +87,7 @@ export interface AtmosphericRivers {
 }
 export interface Gradient {
   id: string; a: string; b: string; meaning: string
+  codes?: (string | null)[]
   thresholds: { value: number; label: string }[]
   series: ModelSeries[]
 }
