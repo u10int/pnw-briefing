@@ -12,6 +12,10 @@ on:
         description: "Render with synthetic data (layout test, no downloads)"
         type: boolean
         default: false
+      page_only:
+        description: "Rebuild the page only: reuse the published data with the current code (no downloads)"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -51,6 +55,7 @@ jobs:
           key: prism-ppt-normals-4km-v1
 
       - name: Get yesterday's briefing for the change view
+        if: ${{ !inputs.page_only }}
         run: |
           # The newest archived briefing from an earlier day, so a second run on the same day
           # (manual, or a late schedule) still compares with yesterday rather than with itself.
@@ -68,12 +73,13 @@ jobs:
           ls -la previous.json 2>/dev/null || echo "no earlier briefing yet"
 
       - name: Preflight checks (environment and data hosts)
-        if: ${{ !inputs.demo }}
+        if: ${{ !inputs.demo && !inputs.page_only }}
         shell: micromamba-shell {0}
         env: { PYTHONUNBUFFERED: "1" }
         run: python -m briefing.check
 
       - name: Fetch models and write briefing data
+        if: ${{ !inputs.page_only }}
         shell: micromamba-shell {0}
         run: |
           DATE=$(TZ=America/Los_Angeles date +%Y-%m-%d)
@@ -81,6 +87,20 @@ jobs:
           export PYTHONUNBUFFERED=1
           PREV=""; [ -s previous.json ] && PREV="--previous previous.json"
           python -m briefing.main --out web/public/data $PREV ${{ inputs.demo && '--demo' || '' }}
+
+      - name: Reuse the published briefing data (page-only rebuild)
+        if: ${{ inputs.page_only }}
+        shell: micromamba-shell {0}
+        run: |
+          # The latest data/ from gh-pages (briefing.json, maps, COGs, hourly fields), with the
+          # labels that come straight from config.yaml refreshed. The archive date is the
+          # briefing's own date, so a rebuild the next morning doesn't file it under the wrong day.
+          git fetch --depth=1 origin gh-pages
+          rm -rf web/public/data && mkdir -p web/public
+          git archive FETCH_HEAD data | tar -x -C web/public
+          DATE=$(python -m briefing.repage web/public/data/briefing.json)
+          echo "DATE=$DATE" >> "$GITHUB_ENV"
+          echo "rebuilding the page for the briefing of $DATE"
 
       - name: Build the page (React + shadcn/ui)
         working-directory: web
@@ -100,4 +120,4 @@ jobs:
         run: |
           scripts/publish_site.sh \
             "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
-            "Briefing ${DATE}"
+            "${{ inputs.page_only && 'Page rebuild' || 'Briefing' }} ${DATE}"
