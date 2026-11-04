@@ -1,0 +1,222 @@
+# PNW precipitation and impacts
+
+A daily, automated forecast briefing for **Western Washington and Northwest Oregon**. It compares
+precipitation totals across regional, blended and global models and flags weather impacts from
+precipitation, snow, temperature and wind. It runs on GitHub Actions each morning and publishes a
+static page to GitHub Pages, with a dated archive.
+
+It has two parts:
+
+- **`briefing/` (Python)** fetches the models, runs the analysis, draws the maps and writes
+  `briefing.json`.
+- **`web/` (React + [shadcn/ui](https://ui.shadcn.com))** renders that JSON with shadcn's Card,
+  Table, Badge, Tabs, Select, Tooltip, Progress, Separator and Chart (Recharts) components.
+
+## Models
+
+GRIB2 is the primary source. Herbie reads each file's `.idx` sidecar and downloads only the
+messages it needs (precipitation, snowfall, 2 m temperature, gust), so each model costs MBs, not GBs.
+
+| Tier | Model | Source | Range used |
+|---|---|---|---|
+| Regional | HRRR | NOAA NODD | 2 days |
+| Regional | RRFS | NOAA NODD | 3 days |
+| Regional | NAM 3 km nest | NOAA NODD | 2 days |
+| Blend | NBM | NOAA NODD | 11 days |
+| Global | GFS | NOAA NODD | 14 days |
+| Global | ECMWF IFS | ECMWF open data | 9 days (10-day run from 00Z) |
+| Global | ECMWF AIFS | ECMWF open data | 14 days |
+| Ensemble | GEFS (31 members) | NOAA NODD | 14 days |
+| Ensemble | ECMWF ENS (51 members) | ECMWF open data | 14 days |
+
+**Optional supplement.** Models with no public GRIB feed (HRDPS, GEM, ICON, UKMO, Météo-France,
+JMA and the GEPS ensemble) come from Open-Meteo. They're marked * on the page. Turn them off
+with `supplement.enabled: false`. The free tier is for non-commercial use. For work use, take
+their commercial tier or swap in Xweather points in `briefing/points.py`.
+
+### How models are compared fairly
+
+- **One day definition.** Every model, GRIB or not, is summed over the same **12Z–12Z days**
+  starting today at 12Z (4 AM PST). That lets 00Z globals and 12Z regionals line up exactly.
+- **Windows.** Totals are compared over the next 48 hours, 7 days and 14 days. A model appears
+  only in windows it fully covers, so a 2-day HRRR is never set against a 14-day GFS.
+- **Grids.** Regional models stay on their native projected grids for their own maps. For the
+  multi-model mean and spread, every model is resampled by nearest neighbour onto a common
+  0.05° grid.
+
+## What's on the page
+
+- **Headline.** The 14-day model-median total for each region, written as a sentence.
+- **Run status.** Every model, the run that was used, and anything that's missing.
+- **Window cards.** The 48 h, 7 d and 14 d medians per region, with the model range drawn as a bar,
+  percent of normal, and the change since yesterday's briefing.
+- **Since yesterday.** Region totals now and in yesterday's briefing, compared over the *same
+  dates* (today's 14-day window overlaps yesterday's for 13 days), plus hazards that are new,
+  upgraded, downgraded or dropped.
+- **NWS alerts.** Active watches, warnings and advisories for the forecast locations, beside the
+  automated flags. The list is captured at build time and refreshed live in the browser.
+- **Impacts.** Heavy rain (24 h and 72 h), snow, hard freeze, possible icy precipitation, strong
+  gusts and heat. Each shows *Likely* or *Possible* confidence, the share of models agreeing,
+  and the peak value per location, followed by a hazard-by-day agreement grid.
+- **Interactive map.** MapLibre map of every gridded model, the multi-model mean, spread and
+  percent of normal for each window. Hover for values, compare two models side by side, adjust
+  opacity, download the GeoTIFF.
+- **Next 48 hours.** Small-multiple maps from every model (regional, blend and global), the
+  mean and spread, and snowfall.
+- **Totals by model.** Region totals for each window, a model × location table with window and
+  inches / % of normal switches and a since-yesterday row, and GRIB area means over every grid cell inside each region.
+- **Through day 14.** Full-range maps, 7-day snowfall, and the running total at each location.
+- **Ensembles.** GEFS and ECMWF ENS (plus GEPS from the supplement) medians and 10–90% plumes.
+- **Day by day.** Precipitation, high and low, and gust per location, with the model range.
+
+## Gridded products (Cloud-Optimized GeoTIFFs)
+
+Every run publishes its grids under `data/cogs/` next to the page:
+
+| File | Contents |
+|---|---|
+| `<model>_precip_<N>d.tif` | Each GRIB model's precipitation over the next N days (2, 7, 14), inches |
+| `<model>_snow_<N>d.tif` | Snowfall where the model has a snow field, inches |
+| `mean_precip_<N>d.tif`, `spread_precip_<N>d.tif` | Multi-model mean and max − min, inches |
+| `pctnormal_precip_<N>d.tif` | Model mean as percent of the 1991–2020 normal |
+
+All are single-band float32, EPSG:4326, DEFLATE-compressed with tiled overviews, and NaN where
+there is no data. Global models keep their native 0.25° grid; HRRR, RRFS, NAM and NBM are
+resampled by nearest neighbour from their projected grids to 0.03°. The `cogs` list in
+`briefing.json` describes each file (model, tier, run, window, units). They load directly in
+QGIS, rio-tiler or TiTiler, geotiff.js, or a custom Mapbox GL / WebGL layer. The archive keeps
+GeoTIFFs for the last 14 days.
+
+## Normals, alerts and yesterday's briefing
+
+- **Normals.** PRISM 1991–2020 monthly precipitation normals at 4 km, spread into daily values
+  by interpolating between mid-month rates, so windows that cross a month boundary are handled.
+  Region normals are averaged over the same forecast locations as the region totals, so the
+  percentages compare like with like. Grids are cached (`.cache/prism`, kept by the workflow).
+- **Alerts.** Each location is resolved once to its NWS forecast zone, county and fire-weather
+  zone (`api.weather.gov/points`). One `alerts/active?area=WA,OR` request is then matched by
+  zone. NWS asks for an identifying User-Agent; it defaults to your GitHub repository name, or
+  set `nws_user_agent` in the config.
+- **Yesterday.** The workflow reads the current `data/briefing.json` from the `gh-pages` branch
+  before building, and passes it to `--previous`. The first run has nothing to compare with, so
+  the "Since yesterday" card says so until the second day.
+
+## Setup (about 5 minutes)
+
+1. Create a GitHub repository and push this folder:
+   ```bash
+   git init && git add -A && git commit -m "PNW briefing"
+   git branch -M main
+   git remote add origin git@github.com:<you>/pnw-briefing.git
+   git push -u origin main
+   ```
+2. In **Settings → Actions → General → Workflow permissions**, choose **Read and write permissions**.
+3. Go to **Actions → Daily forecast briefing → Run workflow**. Tick **demo** for a quick layout
+   check, or leave it unticked for a live run. The first live run takes 20–40 minutes while the
+   conda environment builds and every model downloads; later runs reuse the cached environment.
+   The first run also installs the Node packages for the page (cached after that).
+4. After the first run creates the `gh-pages` branch, go to **Settings → Pages** and choose
+   **Deploy from a branch → `gh-pages` / root**. The page is then at `https://<you>.github.io/pnw-briefing/`.
+
+It runs daily at 15:17 UTC (7:17 AM PST, 8:17 AM PDT), after the 12Z regional runs finish.
+GitHub pauses scheduled workflows in repos with no activity for 60 days and emails you; one
+click re-enables it.
+
+## Tuning (`config.yaml`)
+
+- **`grib_models` / `grib_ensembles`**: add, drop or `enabled: false` a model. `herbie` is passed
+  straight to `herbie.Herbie()`, so any model Herbie supports can be added. `cycles` lists the
+  runs to consider, `range_days` caps the days used, `sample_hours` spaces the temperature and gust
+  samples, and `chain_step` is the bucket length when a file has no running total (1 h for
+  HRRR, RRFS and NAM).
+- **`windows`**: the comparison windows.
+- **`points`**: locations. `kind` (lowland, coast or pass) picks the thresholds, and `plume: true`
+  adds a location to the ensemble chart.
+- **`regions`**: the W WA and NW OR polygons, west of the Cascade crest and inside the coastline.
+- **`impacts`**: thresholds (in, °F, mph) and `min_agreement` (default 30%; 60% or more shows as *Likely*).
+
+A late, renamed or incomplete model is skipped and listed as missing in the run-status panel; it
+never fails the run.
+
+## Running locally
+
+```bash
+# data: live (optionally against a previous briefing.json), or synthetic with --demo
+micromamba env create -f environment.yml && micromamba activate pnw-briefing
+python -m briefing.main --out web/public/data --demo
+python -m briefing.main --out web/public/data --previous path/to/yesterday/briefing.json
+
+# page
+cd web && npm install && npm run dev      # http://localhost:5173
+npm run build                             # static site in web/dist
+```
+
+Tests: `PYTHONPATH=. python tests/test_grib_accum.py` and `PYTHONPATH=. python tests/test_products.py`.
+
+For a single self-contained file (maps, GeoTIFFs and the map worker all embedded; opens from
+disk or as an email attachment):
+
+```bash
+cd web && npm run build:single && cd ..
+python -m briefing.standalone web/public/data web/dist-single/index.html briefing.html
+```
+
+The page reads `data/briefing.json` next to itself, so the same build works at the site root
+and in each `archive/<date>/` copy.
+
+## Front end
+
+The components in `web/src/components/ui/` are the official shadcn/ui sources (new-york v4
+style), copied from the shadcn-ui repository and owned by this project, as shadcn intends.
+Add more with `npx shadcn@latest add <component>` from `web/`; `components.json` is set up
+for that. Two project-specific additions:
+
+- **Badge variants** `likely`, `possible`, `regional`, `blend` and `global` in `badge.tsx`.
+- **Theme tokens** in `src/index.css`: shadcn's neutral theme, plus `--chart-1..3` set to a
+  colorblind-checked blue, orange and aqua, and status colors for hazards.
+
+Sections live in `web/src/sections/`, and the data contract is `web/src/types.ts`.
+
+## Notes and limits
+
+- **RRFS naming.** RRFS file naming on NODD has changed during its rollout. If RRFS shows as missing,
+  check Herbie's RRFS template against the bucket, and update the `herbie` block in `config.yaml`
+  or upgrade Herbie.
+- **NAM.** The NAM nest is slated for retirement as RRFS takes over. When it stops publishing, it
+  will show as missing; set `enabled: false`.
+- **Daily extremes.** Highs, lows and peak gusts come from 3-hourly (regional) or 6-hourly
+  (global) samples, so true extremes can sit a degree or a few mph beyond them. AIFS publishes
+  no gust field, so it's left out of the wind check.
+- **Snow.** Snowfall uses each model's own field: `ASNOW` for NOAA models, and ECMWF `sf` water
+  equivalent at 10:1. Models without one are left out of the snow maps.
+- **The icy-precipitation flag is a screen.** It needs a day with low ≤ 32°F, high ≤ 36°F and
+  liquid precip. Daily values can't resolve the shallow cold-air setups behind PNW freezing rain.
+- **Basemap.** The interactive map uses CARTO's free light tiles (OpenStreetMap data), with
+  labels drawn above the data. Their free tier is for non-commercial use; swap the `STYLE` in
+  `web/src/sections/InteractiveMap.tsx` for a Mapbox or self-hosted style if you need more.
+  MapLibre's API matches Mapbox GL's, so moving to Mapbox is mostly the import and a token.
+- Impact flags are not official warnings. Check NWS Seattle and Portland.
+
+## Layout
+
+```
+config.yaml                 domain, regions, points, windows, models, thresholds
+briefing/grib.py            Herbie GRIB fetch: accumulations, samples, projected grids, ensembles
+briefing/points.py          optional Open-Meteo supplement, binned to 12Z–12Z days
+briefing/analysis.py        windows, region masks, regridding, summary
+briefing/impacts.py         hazard rules, model agreement, event grouping
+briefing/maps.py            cartopy small-multiple maps (PNG)
+briefing/cogs.py            Cloud-Optimized GeoTIFF export
+briefing/normals.py         PRISM normals, daily interpolation, percent of normal
+briefing/alerts.py          NWS zones and active alerts
+briefing/change.py          comparison with the previous briefing over the same days
+briefing/standalone.py      single-file briefing with everything embedded
+briefing/main.py            writes briefing.json + maps
+briefing/demo.py            synthetic data for offline tests
+web/src/components/ui/      shadcn/ui components
+web/src/sections/           page sections (overview, changes, alerts, impacts, interactive map,
+                            maps, totals, location detail)
+web/src/lib/cog.ts          COG reading (geotiff.js) and Web Mercator rendering for MapLibre
+web/src/types.ts            the briefing.json contract
+.github/workflows/          daily schedule: Python data step, Node build, gh-pages publish, archive
+```

@@ -1,0 +1,16 @@
+name: pnw-briefing
+channels: [conda-forge]
+dependencies:
+  - python=3.12
+  - herbie-data          # GRIB byte-range download (pulls eccodes + cfgrib)
+  - eccodes
+  - cfgrib
+  - xarray
+  - numpy
+  - scipy               # nearest-neighbour regridding of projected grids
+  - pandas
+  - matplotlib
+  - cartopy
+  - rasterio            # Cloud-Optimized GeoTIFF export and PRISM normals
+  - pyyaml
+  - requests

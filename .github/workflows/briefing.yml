@@ -1,0 +1,112 @@
+name: Daily forecast briefing
+
+on:
+  schedule:
+    # 15:17 UTC = 7:17 AM PST / 8:17 AM PDT. The 12Z HRRR, RRFS, NAM and NBM runs
+    # are complete by then, alongside the 00Z globals and ensembles.
+    # Odd minute avoids the top-of-hour queue.
+    - cron: "17 15 * * *"
+  workflow_dispatch:
+    inputs:
+      demo:
+        description: "Render with synthetic data (layout test, no downloads)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: briefing
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: mamba-org/setup-micromamba@v2
+        with:
+          environment-file: environment.yml
+          cache-environment: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Cache Natural Earth outlines
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/cartopy
+          key: natural-earth-10m-v1
+
+      - name: Cache PRISM normals
+        uses: actions/cache@v4
+        with:
+          path: .cache/prism
+          key: prism-ppt-normals-4km-v1
+
+      - name: Get yesterday's briefing for the change view
+        run: |
+          # the latest published briefing.json, if the site exists yet
+          git fetch --depth=1 origin gh-pages 2>/dev/null && \
+            git show origin/gh-pages:data/briefing.json > previous.json 2>/dev/null || rm -f previous.json
+          ls -la previous.json 2>/dev/null || echo "no previous briefing yet"
+
+      - name: Fetch models and write briefing data
+        shell: micromamba-shell {0}
+        run: |
+          DATE=$(TZ=America/Los_Angeles date +%Y-%m-%d)
+          echo "DATE=$DATE" >> "$GITHUB_ENV"
+          PREV=""; [ -s previous.json ] && PREV="--previous previous.json"
+          python -m briefing.main --out web/public/data $PREV ${{ inputs.demo && '--demo' || '' }}
+
+      - name: Build the page (React + shadcn/ui)
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+
+      - name: Assemble site (latest + dated archive copy)
+        run: |
+          mkdir -p "out/archive/$DATE"
+          cp -r web/dist/. "out/archive/$DATE/"
+          cp -r web/dist/. out/
+
+      - name: Publish to gh-pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./out
+          keep_files: true          # keep earlier days under /archive/
+          commit_message: "Briefing ${{ env.DATE }}"
+
+  archive-index:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {ref: gh-pages}
+      - name: Rebuild archive listing and prune to 60 days
+        run: |
+          cd archive
+          ls -1d 20*/ 2>/dev/null | sort -r | tail -n +61 | xargs -r rm -rf
+          # keep the GeoTIFFs for the last 14 days only; older pages keep their PNG maps
+          for d in $(ls -1d 20*/ 2>/dev/null | sort -r | tail -n +15); do rm -rf "${d}data/cogs"; done
+          {
+            echo '<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
+            echo '<title>Past briefings</title><style>body{font:15px/1.6 Inter,system-ui,sans-serif;max-width:640px;margin:40px auto;padding:0 16px;color:#1b1f24;background:#f8f9fb}a{color:#2a78d6}</style>'
+            echo '<h1>Past briefings</h1><p><a href="../">Latest</a></p><ul>'
+            for d in $(ls -1d 20*/ | sort -r); do d=${d%/}; echo "<li><a href=\"$d/\">$d</a></li>"; done
+            echo '</ul>'
+          } > index.html
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898333+github-actions[bot]@users.noreply.github.com"
+          git add -A && git commit -m "Update archive index" || echo "no changes"
+          git push

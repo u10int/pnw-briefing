@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+site/
+out/
+*.idx
+*.grib2
+data/
+web/node_modules/
+web/dist/
+web/public/data/
+.cache/
+previous.json
+web/dist-single/

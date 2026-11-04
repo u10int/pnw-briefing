@@ -1,0 +1,364 @@
+"""GRIB2 from NOAA (NODD on AWS/NOMADS) and ECMWF open data, via Herbie.
+
+Every model is reduced to the same shape, on the briefing's 12Z-12Z days:
+
+    {"id", "label", "source": "grib", "run", "range_days",
+     "dates": [local date of each day start],
+     "lat", "lon": 1-D (regular grids) or 2-D (projected: HRRR, RRFS, NAM, NBM),
+     "precip_mm": [day_boundary, y, x] cumulative from the first boundary,
+     "snow_in":   same or None, "snow_method",
+     "data": {point: {precipitation_sum, rain_sum, snowfall_sum,
+                      temperature_2m_max, temperature_2m_min, wind_gusts_10m_max}}}
+
+Ensembles reduce to {"id", "label", "dates", "members": {point: [member, day]}}.
+
+Only the needed GRIB messages are downloaded (byte ranges from .idx files).
+A model that is late, renamed or missing a field is skipped or partially
+filled and logged; it never fails the briefing.
+"""
+from __future__ import annotations
+
+import logging
+import re
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
+
+import numpy as np
+
+log = logging.getLogger(__name__)
+
+ACC_RE = re.compile(r"(\d+)-(\d+) (hour|day) acc")
+SKIP_RE = re.compile(r"prob|std dev|ens spread|%", re.I)  # NBM/ensemble statistic records
+WORKERS = 8
+M_S_TO_MPH = 2.23694
+
+
+# ---------------------------------------------------------------- timing
+
+def day0(cfg) -> datetime:
+    """First briefing-day boundary: today's 12Z (naive UTC)."""
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    return now.replace(hour=12, minute=0, second=0, microsecond=0) - (timedelta(days=1) if now.hour < 12 else timedelta(0))
+
+
+def _H(spec, run, fxx):
+    from herbie import Herbie
+    return Herbie(run, fxx=fxx, verbose=False, **spec["herbie"])
+
+
+def _latest_run(spec, start: datetime):
+    """Latest cycle at or before `start` whose last needed step exists."""
+    cycles = spec.get("cycles", [0, 12])
+    for back in range(0, 48):
+        run = start - timedelta(hours=back)
+        if run.hour not in cycles:
+            continue
+        lead0 = int((start - run).total_seconds() // 3600)
+        ndays = min(spec["range_days"], (spec["max_hours"] - lead0) // 24)
+        if ndays < 1:
+            continue
+        H = _H(spec, run, lead0 + 24 * ndays)
+        if H.grib is not None and H.idx is not None:
+            return run, lead0, ndays
+    return None, None, 0
+
+
+# ---------------------------------------------------------------- reading
+
+def _crop(da, dom):
+    """DataArray -> (lat, lon, values) cut to the domain; handles 1-D and 2-D coords."""
+    lat_name = "latitude" if "latitude" in da.coords else "lat"
+    lon_name = "longitude" if "longitude" in da.coords else "lon"
+    lat, lon = da[lat_name].values, ((da[lon_name].values + 180) % 360) - 180
+    vals = np.asarray(da.values, dtype="float32")
+    if lat.ndim == 1:
+        oi, oj = np.argsort(lat), np.argsort(lon)
+        lat, lon, vals = lat[oi], lon[oj], vals[..., oi, :][..., oj]
+        yi = (lat >= dom["lat_min"]) & (lat <= dom["lat_max"])
+        xi = (lon >= dom["lon_min"]) & (lon <= dom["lon_max"])
+        return lat[yi], lon[xi], vals[..., yi, :][..., xi]
+    m = (lat >= dom["lat_min"]) & (lat <= dom["lat_max"]) & (lon >= dom["lon_min"]) & (lon <= dom["lon_max"])
+    ys, xs = np.where(m)
+    sl = (slice(ys.min(), ys.max() + 1), slice(xs.min(), xs.max() + 1))
+    return lat[sl], lon[sl], vals[(..., *sl)]
+
+
+def _first_var(ds):
+    if isinstance(ds, list):
+        ds = ds[0]
+    return ds[list(ds.data_vars)[0]]
+
+
+def _rows(H, pattern):
+    inv = H.inventory(pattern)
+    return [s for s in inv["search_this"] if not SKIP_RE.search(s)] if len(inv) else []
+
+
+def _read(H, row, dom):
+    return _crop(_first_var(H.xarray(re.escape(row), remove_grib=True)), dom)
+
+
+def _read_first(H, patterns, dom):
+    for p in patterns:
+        rows = _rows(H, p)
+        if rows:
+            return _read(H, rows[0], dom)
+    raise LookupError(f"none of {patterns}")
+
+
+# ---------------------------------------------------------------- accumulations
+
+def _accum_ncep(spec, run, var, targets, dom):
+    """Cumulative-from-init field at each target hour for NCEP 'VAR:a-b acc' records.
+
+    Prefers a record spanning from a known hour (0-N running total, or a bucket
+    that starts where we already are). Otherwise chains buckets every
+    `chain_step` hours.
+    """
+    cum, grid = {0: 0.0}, {}
+    step = spec.get("chain_step", 6)
+
+    def options(fxx):
+        H = _H(spec, run, fxx)
+        out = []
+        for s in _rows(H, f":{var}:surface:"):
+            m = ACC_RE.search(s)
+            if m:
+                mult = 24 if m[3] == "day" else 1
+                a, b = int(m[1]) * mult, int(m[2]) * mult
+                if b == fxx:
+                    out.append((a, s))
+        return H, out
+
+    def take(H, a, s):
+        lat, lon, v = _read(H, s, dom)
+        grid.update(lat=lat, lon=lon)
+        return v if a == 0 else cum[a] + v
+
+    for h in sorted(targets):
+        if h == 0:
+            continue
+        H, opts = options(h)
+        known = [(a, s) for a, s in opts if a in cum]
+        if known:
+            cum[h] = take(H, *min(known))
+            continue
+        last = max(k for k in cum if k < h)
+        for sub in range(last + step, h + 1, step):
+            if sub in cum:
+                continue
+            Hs, o = options(sub)
+            ok = [(a, s) for a, s in o if a in cum]
+            if not ok:
+                raise LookupError(f"{spec['label']} {var}: nothing chainable at f{sub:03d}")
+            cum[sub] = take(Hs, *min(ok))
+    zeros = None
+    out = []
+    for h in sorted(targets):
+        v = cum[h]
+        if isinstance(v, float):
+            zeros = zeros if zeros is not None else np.zeros_like(next(x for x in cum.values() if not isinstance(x, float)))
+            v = zeros
+        out.append(v)
+    return grid["lat"], grid["lon"], np.stack(out)
+
+
+def _accum_ecmwf(spec, run, param, targets, dom):
+    """ECMWF open data: accumulated from init, metres."""
+    def one(h):
+        if h == 0:
+            return None
+        return _read_first(_H(spec, run, h), [f":{param}:"], dom)
+
+    with ThreadPoolExecutor(WORKERS) as ex:
+        res = list(ex.map(one, sorted(targets)))
+    ref = next(r for r in res if r is not None)
+    lat, lon = ref[0], ref[1]
+    return lat, lon, np.stack([np.zeros_like(ref[2]) if r is None else r[2] for r in res]) * 1000.0
+
+
+# ---------------------------------------------------------------- instantaneous samples
+
+def _samples(spec, run, hours, patterns, dom):
+    """{hour: 2-D field} for instantaneous fields; missing steps are skipped."""
+    def one(h):
+        try:
+            return h, _read_first(_H(spec, run, h), patterns, dom)[2]
+        except Exception:
+            return h, None
+    with ThreadPoolExecutor(WORKERS) as ex:
+        return {h: v for h, v in ex.map(one, hours) if v is not None}
+
+
+# ---------------------------------------------------------------- points
+
+def nearest_index(lat, lon, points):
+    """Grid index (tuple) of the nearest cell for each point; works for 1-D or 2-D coords."""
+    if lat.ndim == 1:
+        return [(int(np.abs(lat - p["lat"]).argmin()), int(np.abs(lon - p["lon"]).argmin())) for p in points]
+    from scipy.spatial import cKDTree
+    k = np.cos(np.deg2rad(46))
+    tree = cKDTree(np.column_stack([lat.ravel(), lon.ravel() * k]))
+    _, idx = tree.query([[p["lat"], p["lon"] * k] for p in points])
+    return [tuple(int(i) for i in np.unravel_index(j, lat.shape)) for j in idx]
+
+
+def _daily_extreme(samples, lead0, ndays, idx, fn):
+    """Per point, per day: fn over samples whose valid time falls inside that 12Z-12Z day."""
+    out = np.full((len(idx), ndays), np.nan)
+    for d in range(ndays):
+        a, b = lead0 + 24 * d, lead0 + 24 * (d + 1)
+        fields = [samples[h] for h in samples if a < h <= b] if fn is np.nanmax else \
+                 [samples[h] for h in samples if a <= h < b]
+        if fields:
+            st = np.stack(fields)
+            out[:, d] = [fn(st[:, i, j]) for i, j in idx]
+    return out
+
+
+# ---------------------------------------------------------------- one deterministic model
+
+FIELDS = {
+    "ncep":  {"t2m": [":TMP:2 m above ground:"],
+              "gust": [":GUST:surface:", ":GUST:10 m above ground:"]},
+    "ecmwf": {"t2m": [":2t:"],
+              "gust": [":10fg:", ":fg10:", ":10fg6:", ":10fg3:"]},
+}
+
+
+def fetch_model(spec, cfg, start, points):
+    dom = cfg["domain"]
+    tz = ZoneInfo(cfg["timezone"])
+    try:
+        run, lead0, ndays = _latest_run(spec, start)
+        if run is None:
+            log.warning("%s: no usable run", spec["label"])
+            return None
+        targets = [lead0 + 24 * d for d in range(ndays + 1)]
+        log.info("%s: %s run, %d days", spec["label"], run.strftime("%Y-%m-%d %HZ"), ndays)
+
+        fam = spec["family"]
+        if fam == "ncep":
+            lat, lon, cum = _accum_ncep(spec, run, "APCP", targets, dom)
+        else:
+            lat, lon, cum = _accum_ecmwf(spec, run, "tp", targets, dom)
+        cum = np.maximum(cum - cum[0], 0)  # from today's 12Z
+
+        snow, snow_method = None, None
+        try:
+            if fam == "ncep":
+                _, _, s = _accum_ncep(spec, run, "ASNOW", targets, dom)
+                snow, snow_method = np.maximum(s - s[0], 0) * 39.37, "model snowfall (ASNOW)"
+            else:
+                _, _, s = _accum_ecmwf(spec, run, "sf", targets, dom)
+                snow, snow_method = np.maximum(s - s[0], 0) / 25.4 * 10, "snowfall water equivalent at 10:1"
+        except Exception as e:
+            log.info("%s: no snowfall field (%s)", spec["label"], e)
+
+        step = spec.get("sample_hours", 6)
+        hours = list(range(lead0, targets[-1] + 1, step))
+        t2m = _samples(spec, run, hours, FIELDS[fam]["t2m"], dom)
+        gust = _samples(spec, run, hours, FIELDS[fam]["gust"], dom) if spec.get("gust", True) else {}
+
+        idx = nearest_index(lat, lon, points)
+        daily_p = np.diff(np.stack([[c[i, j] for i, j in idx] for c in cum]), axis=0).T / 25.4
+        daily_s = (np.diff(np.stack([[c[i, j] for i, j in idx] for c in snow]), axis=0).T
+                   if snow is not None else np.full_like(daily_p, np.nan))
+        tmax = (_daily_extreme(t2m, lead0, ndays, idx, np.nanmax) - 273.15) * 9 / 5 + 32 if t2m else np.full_like(daily_p, np.nan)
+        tmin = (_daily_extreme(t2m, lead0, ndays, idx, np.nanmin) - 273.15) * 9 / 5 + 32 if t2m else np.full_like(daily_p, np.nan)
+        gmax = _daily_extreme(gust, lead0, ndays, idx, np.nanmax) * M_S_TO_MPH if gust else np.full_like(daily_p, np.nan)
+        rain = np.clip(daily_p - np.nan_to_num(daily_s) / 10, 0, None)
+
+        n = cfg["days"]
+
+        def pad(a):
+            out = np.full(n, np.nan)
+            out[: min(n, len(a))] = a[:n]
+            return list(out)
+
+        data = {p["name"]: {"precipitation_sum": pad(daily_p[k]), "rain_sum": pad(rain[k]),
+                            "snowfall_sum": pad(daily_s[k]), "temperature_2m_max": pad(tmax[k]),
+                            "temperature_2m_min": pad(tmin[k]), "wind_gusts_10m_max": pad(gmax[k])}
+                for k, p in enumerate(points)}
+        dates = [(start + timedelta(days=d)).replace(tzinfo=timezone.utc).astimezone(tz).date() for d in range(n)]
+        return {"id": spec["id"], "label": spec["label"], "source": "grib", "tier": spec.get("tier", "global"),
+                "run": run, "range_days": ndays, "dates": dates, "data": data,
+                "lat": lat, "lon": lon, "precip_mm": cum, "snow_in": snow, "snow_method": snow_method}
+    except Exception:
+        log.exception("%s: GRIB fetch failed", spec["label"])
+        return None
+
+
+# ---------------------------------------------------------------- ensembles
+
+def fetch_ensemble(spec, cfg, start, points):
+    """Per-member daily precip at plume points."""
+    dom = cfg["domain"]
+    tz = ZoneInfo(cfg["timezone"])
+    try:
+        probe = {**spec, "herbie": {**spec["herbie"], **spec.get("probe_member", {})}}
+        run, lead0, ndays = _latest_run(probe, start)
+        if run is None:
+            log.warning("%s: no usable run", spec["label"])
+            return None
+        targets = [lead0 + 24 * d for d in range(ndays + 1)]
+
+        if spec["family"] == "ecmwf":
+            # one file per step holds every member; cfgrib returns cf and pf as separate datasets
+            def step(h):
+                ds = _H(spec, run, h).xarray(":tp:", remove_grib=True)
+                ds = ds if isinstance(ds, list) else [ds]
+                parts = []
+                for d in ds:
+                    da = d[list(d.data_vars)[0]]
+                    lat, lon, v = _crop(da, dom)
+                    parts.append(v.reshape(-1, *v.shape[-2:]))
+                return lat, lon, np.concatenate(parts) * 1000.0
+            with ThreadPoolExecutor(4) as ex:
+                res = list(ex.map(step, [t for t in targets if t > 0]))
+            lat, lon = res[0][0], res[0][1]
+            stack = np.stack([r[2] for r in res])                # [t, member, y, x]
+            if targets[0] == 0:
+                stack = np.concatenate([np.zeros_like(stack[:1]), stack])
+            idx = nearest_index(lat, lon, points)
+            # stack[:, :, i, j] is [t, member]; daily totals are the diff along t
+            per = {p["name"]: np.diff(stack[:, :, i, j], axis=0).T / 25.4
+                   for p, (i, j) in zip(points, idx)}
+        else:
+            members = spec["members"]
+
+            def one(mem):
+                s = {**spec, "herbie": {**spec["herbie"], "member": mem}}
+                try:
+                    lat, lon, cum = _accum_ncep(s, run, "APCP", targets, dom)
+                    return lat, lon, cum
+                except Exception as e:
+                    log.info("%s %s: skipped (%s)", spec["label"], mem, e)
+                    return None
+            with ThreadPoolExecutor(WORKERS) as ex:
+                res = [r for r in ex.map(one, members) if r is not None]
+            lat, lon = res[0][0], res[0][1]
+            idx = nearest_index(lat, lon, points)
+            per = {}
+            for p, (i, j) in zip(points, idx):
+                cum = np.stack([r[2][:, i, j] for r in res])     # [member, t]
+                per[p["name"]] = np.diff(cum, axis=1) / 25.4
+        dates = [(start + timedelta(days=d)).replace(tzinfo=timezone.utc).astimezone(tz).date() for d in range(ndays)]
+        n = next(iter(per.values())).shape[0]
+        log.info("%s: %s run, %d members, %d days", spec["label"], run.strftime("%Y-%m-%d %HZ"), n, ndays)
+        return {"id": spec["id"], "label": spec["label"], "source": "grib", "run": run,
+                "dates": dates, "members": per}
+    except Exception:
+        log.exception("%s: ensemble fetch failed", spec["label"])
+        return None
+
+
+def fetch_all(cfg):
+    start = day0(cfg)
+    pts = cfg["points"]
+    det = [m for m in (fetch_model(s, cfg, start, pts) for s in cfg["grib_models"] if s.get("enabled", True)) if m]
+    plume_pts = [p for p in pts if p.get("plume")]
+    ens = [e for e in (fetch_ensemble(s, cfg, start, plume_pts) for s in cfg.get("grib_ensembles", [])
+                       if s.get("enabled", True)) if e]
+    return det, ens

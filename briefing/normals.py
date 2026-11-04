@@ -1,0 +1,131 @@
+"""1991–2020 precipitation normals from PRISM, for departure-from-normal.
+
+PRISM publishes monthly normals as one grid per month (4 km here). Monthly totals are
+spread into daily normals by interpolating between mid-month daily rates, so a window
+that crosses a month boundary is handled smoothly.
+
+Grids are cached on disk (the workflow keeps the cache between runs), so PRISM is only
+contacted when a new month is needed.
+"""
+from __future__ import annotations
+
+import calendar
+import logging
+import time
+from datetime import date, timedelta
+from pathlib import Path
+
+import numpy as np
+import requests
+
+from . import analysis
+
+log = logging.getLogger(__name__)
+PRISM_URL = "https://services.nacse.org/prism/data/public/normals/4km/ppt/{month:02d}"
+MM_TO_IN = 1 / 25.4
+
+
+def _download(month: int, cache: Path) -> Path:
+    path = cache / f"prism_ppt_normal_4km_{month:02d}.zip"
+    if path.exists() and path.stat().st_size > 10_000:
+        return path
+    cache.mkdir(parents=True, exist_ok=True)
+    r = requests.get(PRISM_URL.format(month=month), timeout=180, headers={"User-Agent": "pnw-briefing/1.0"})
+    r.raise_for_status()
+    path.write_bytes(r.content)
+    time.sleep(2)  # PRISM asks for a pause between requests
+    return path
+
+
+def _read(zip_path: Path, dom):
+    """Monthly normal (mm) cropped to the domain, as (lat asc, lon asc, grid)."""
+    import zipfile
+
+    import rasterio
+    from rasterio.windows import from_bounds
+
+    names = zipfile.ZipFile(zip_path).namelist()
+    grid_name = next(n for n in names if n.lower().endswith((".bil", ".tif", ".tiff")))
+    with rasterio.open(f"/vsizip/{zip_path}/{grid_name}") as src:
+        win = from_bounds(dom["lon_min"], dom["lat_min"], dom["lon_max"], dom["lat_max"], src.transform).round_offsets().round_lengths()
+        a = src.read(1, window=win, masked=True).astype("float32").filled(np.nan)
+        t = src.window_transform(win)
+    lon = t.c + t.a * (np.arange(a.shape[1]) + 0.5)
+    lat = t.f + t.e * (np.arange(a.shape[0]) + 0.5)
+    a[a < -1000] = np.nan  # PRISM nodata
+    return lat[::-1], lon, a[::-1]
+
+
+def _daily_rate(months: dict[int, np.ndarray], d: date) -> np.ndarray:
+    """Daily normal for date d, interpolated between mid-month daily rates."""
+    def rate(y, m):
+        return months[m] / calendar.monthrange(y, m)[1]
+
+    mid = date(d.year, d.month, 15)
+    if d >= mid:
+        nxt = (d.replace(day=1) + timedelta(days=32)).replace(day=15)
+        a, b, t = rate(d.year, d.month), rate(nxt.year, nxt.month), (d - mid).days / (nxt - mid).days
+    else:
+        prv = (d.replace(day=1) - timedelta(days=1)).replace(day=15)
+        a, b, t = rate(prv.year, prv.month), rate(d.year, d.month), (d - prv).days / (mid - prv).days
+    return a + (b - a) * t
+
+
+def daily_normals(dates: list[date], cfg, cache: Path, demo: bool = False):
+    """(lat, lon, normals[day, y, x] in inches/day) for the briefing's days."""
+    dom = cfg["domain"]
+    need = set()
+    for d in dates:
+        need |= {d.month, ((d.month - 2) % 12) + 1, (d.month % 12) + 1}
+    months, lat, lon = {}, None, None
+    for m in sorted(need):
+        if demo:
+            lat, lon, months[m] = _demo_month(m, dom)
+        else:
+            lat, lon, months[m] = _read(_download(m, cache), dom)
+    return lat, lon, np.stack([_daily_rate(months, d) for d in dates]) * MM_TO_IN
+
+
+def _demo_month(month, dom):
+    from .demo import _terrain
+    lat = np.arange(dom["lat_min"], dom["lat_max"], 0.04)
+    lon = np.arange(dom["lon_min"], dom["lon_max"], 0.04)
+    la, lo = np.meshgrid(lat, lon, indexing="ij")
+    season = 0.55 + 0.45 * np.cos((month - 12) / 12 * 2 * np.pi)   # wettest Nov–Jan
+    return lat, lon, (_terrain(la, lo) * 175 * season).astype("float32")  # mm/month
+
+
+def summarize(models, cfg, cache: Path, demo: bool = False):
+    """Normals at points, region averages and percent of normal for each window."""
+    dates = models[0]["dates"]
+    try:
+        lat, lon, daily = daily_normals(dates, cfg, cache, demo)
+    except Exception as e:
+        log.warning("normals unavailable (%s); departure from normal is left out", e)
+        return None, None
+    from .grib import nearest_index
+    idx = nearest_index(lat, lon, cfg["points"])
+    pts = {p["name"]: [float(daily[t, i, j]) for t in range(len(dates))] for p, (i, j) in zip(cfg["points"], idx)}
+
+    windows = []
+    for w in analysis.windows(cfg):
+        n = w["days"]
+        pn = {p: float(np.nansum(v[:n])) for p, v in pts.items()}
+        tot, ravg = analysis.point_window_totals(models, cfg, n)
+        region = {}
+        for rid in cfg["regions"]:
+            names = [p["name"] for p in cfg["points"] if p["region"] == rid]
+            normal = float(np.nanmean([pn[p] for p in names]))
+            vals = [v[rid] for v in ravg.values() if np.isfinite(v[rid])]
+            med = float(np.median(vals)) if vals else None
+            region[rid] = {"normal": normal, "median": med, "pct": (100 * med / normal) if med is not None and normal > 0 else None}
+        points = {}
+        for p in pts:
+            vals = [t[p] for t in tot.values() if t.get(p) is not None and np.isfinite(t[p])]
+            med = float(np.median(vals)) if vals else None
+            points[p] = {"normal": pn[p], "median": med, "pct": (100 * med / pn[p]) if med is not None and pn[p] > 0 else None}
+        windows.append({"days": n, "label": w["label"], "regions": region, "points": points})
+
+    grid = {"lat": lat, "lon": lon, "daily": daily}
+    return {"source": "PRISM 1991–2020 monthly normals, 4 km" + (" (synthetic in demo)" if demo else ""),
+            "points": pts, "windows": windows}, grid

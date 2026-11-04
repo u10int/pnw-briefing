@@ -1,0 +1,156 @@
+# PNW 14-day multi-model precipitation & impacts briefing — configuration
+# Everything you are likely to tune lives here.
+
+title: "PNW precipitation and impacts"
+timezone: America/Los_Angeles
+days: 14
+
+# Comparison windows, in 12Z-12Z days from today's 12Z.
+windows:
+  - {days: 2,  label: Next 48 hours}
+  - {days: 7,  label: Next 7 days}
+  - {days: 14, label: Next 14 days}
+
+# Map / GRIB subset box (degrees, lon in -180..180)
+domain:
+  lat_min: 43.0
+  lat_max: 49.4
+  lon_min: -125.8
+  lon_max: -120.0
+
+# Comparison regions, west of the Cascade crest. Coarse hand-drawn polygons
+# (lon, lat), coastline-ish on the west so ocean grid points are excluded.
+regions:
+  wwa:
+    name: Western Washington
+    short: W WA
+    polygon:
+      - [-124.73, 48.38]   # Cape Flattery
+      - [-124.62, 47.90]
+      - [-124.30, 47.30]
+      - [-124.12, 46.90]
+      - [-124.05, 46.28]   # Columbia mouth
+      - [-123.40, 46.20]
+      - [-122.90, 46.10]
+      - [-122.77, 45.65]   # Vancouver WA
+      - [-122.20, 45.55]
+      - [-121.90, 45.66]
+      - [-121.50, 46.20]   # Mt Adams (crest)
+      - [-121.38, 46.64]   # White Pass
+      - [-121.41, 47.42]   # Snoqualmie Pass
+      - [-121.09, 47.75]   # Stevens Pass
+      - [-120.75, 48.52]   # Washington Pass
+      - [-120.85, 49.00]
+      - [-123.05, 49.00]
+      - [-123.10, 48.70]
+      - [-123.25, 48.28]
+      - [-124.00, 48.18]
+  nwor:
+    name: Northwest Oregon
+    short: NW OR
+    polygon:
+      - [-124.05, 46.28]   # Columbia mouth
+      - [-123.40, 46.20]
+      - [-122.90, 46.10]
+      - [-122.77, 45.65]
+      - [-122.20, 45.55]
+      - [-121.90, 45.66]
+      - [-121.70, 45.37]   # Mt Hood (crest)
+      - [-121.87, 44.42]   # Santiam Pass
+      - [-121.95, 44.30]
+      - [-124.12, 44.30]
+      - [-124.08, 44.80]
+      - [-123.97, 45.50]
+      - [-123.96, 45.95]
+
+# Forecast points. kind controls which impact thresholds apply.
+points:
+  - {name: Bellingham,       lat: 48.75, lon: -122.48, kind: lowland, region: wwa}
+  - {name: Everett,          lat: 47.98, lon: -122.20, kind: lowland, region: wwa}
+  - {name: Seattle,          lat: 47.61, lon: -122.33, kind: lowland, region: wwa, plume: true}
+  - {name: Tacoma,           lat: 47.25, lon: -122.44, kind: lowland, region: wwa}
+  - {name: Olympia,          lat: 47.04, lon: -122.90, kind: lowland, region: wwa}
+  - {name: Forks,            lat: 47.95, lon: -124.39, kind: coast,   region: wwa}
+  - {name: Aberdeen,         lat: 46.98, lon: -123.82, kind: coast,   region: wwa}
+  - {name: Stevens Pass,     lat: 47.75, lon: -121.09, kind: pass,    region: wwa}
+  - {name: Snoqualmie Pass,  lat: 47.42, lon: -121.41, kind: pass,    region: wwa, plume: true}
+  - {name: White Pass,       lat: 46.64, lon: -121.38, kind: pass,    region: wwa}
+  - {name: Vancouver WA,     lat: 45.64, lon: -122.66, kind: lowland, region: wwa}
+  - {name: Astoria,          lat: 46.19, lon: -123.83, kind: coast,   region: nwor}
+  - {name: Tillamook,        lat: 45.46, lon: -123.84, kind: coast,   region: nwor}
+  - {name: Portland,         lat: 45.52, lon: -122.68, kind: lowland, region: nwor, plume: true}
+  - {name: Salem,            lat: 44.94, lon: -123.04, kind: lowland, region: nwor}
+  - {name: Corvallis,        lat: 44.56, lon: -123.26, kind: lowland, region: nwor}
+  - {name: Government Camp,  lat: 45.30, lon: -121.75, kind: pass,    region: nwor, plume: true}
+
+# ----------------------------------------------------------------------------
+# GRIB models — the primary source. NOAA models come from NODD (AWS, with
+# NOMADS/Google fallbacks); ECMWF from its open-data service. `herbie` is
+# passed straight to herbie.Herbie(); `cycles` are the runs worth using;
+# `range_days` caps how many 12Z-12Z days to take; `sample_hours` is the
+# spacing of the temperature/gust samples used for daily max/min.
+# ----------------------------------------------------------------------------
+grib_models:
+  # regional, convection-allowing
+  - {id: hrrr, label: HRRR, tier: regional, family: ncep, herbie: {model: hrrr, product: sfc},
+     cycles: [0, 6, 12, 18], max_hours: 48, range_days: 2, sample_hours: 3, chain_step: 1}
+  - {id: rrfs, label: RRFS, tier: regional, family: ncep,
+     herbie: {model: rrfs, product: prslev, domain: conus, member: control},
+     cycles: [0, 6, 12, 18], max_hours: 84, range_days: 3, sample_hours: 3, chain_step: 1}
+  - {id: namnest, label: NAM 3 km, tier: regional, family: ncep,
+     herbie: {model: nam, product: conusnest.hiresf},
+     cycles: [0, 6, 12, 18], max_hours: 60, range_days: 2, sample_hours: 3, chain_step: 1}
+  # blend
+  - {id: nbm, label: NBM, tier: blend, family: ncep, herbie: {model: nbm, product: co},
+     cycles: [0, 6, 12, 18], max_hours: 264, range_days: 11, sample_hours: 6, chain_step: 6}
+  # global
+  - {id: gfs, label: GFS, tier: global, family: ncep, herbie: {model: gfs, product: pgrb2.0p25},
+     cycles: [0, 6, 12, 18], max_hours: 384, range_days: 14, sample_hours: 6}
+  - {id: ifs, label: ECMWF IFS, tier: global, family: ecmwf, herbie: {model: ifs, product: oper},
+     cycles: [0, 12], max_hours: 240, range_days: 14, sample_hours: 6}
+  - {id: aifs, label: ECMWF AIFS, tier: global, family: ecmwf, herbie: {model: aifs, product: oper},
+     cycles: [0, 12], max_hours: 360, range_days: 14, sample_hours: 6, gust: false}
+
+grib_ensembles:
+  - {id: gefs, label: GEFS, family: ncep, herbie: {model: gefs, product: atmos.5},
+     probe_member: {member: c00}, cycles: [0, 6, 12, 18], max_hours: 384, range_days: 14,
+     members: [c00, p01, p02, p03, p04, p05, p06, p07, p08, p09, p10, p11, p12, p13, p14, p15,
+               p16, p17, p18, p19, p20, p21, p22, p23, p24, p25, p26, p27, p28, p29, p30]}
+  - {id: ens, label: ECMWF ENS, family: ecmwf, herbie: {model: ifs, product: enfo},
+     cycles: [0, 12], max_hours: 360, range_days: 14}
+
+# ----------------------------------------------------------------------------
+# Optional supplement: models with no public GRIB feed, from Open-Meteo
+# (non-commercial free tier). Set `enabled: false` to run on GRIB alone.
+# `ids` lists candidate API names; the first one that answers is used.
+# ----------------------------------------------------------------------------
+supplement:
+  enabled: true
+  point_models:
+    - {ids: [cmc_gem_hrdps, gem_hrdps_continental], label: HRDPS, tier: regional}
+    - {ids: [gem_seamless, gem_global],             label: Canadian GEM, tier: global}
+    - {ids: [icon_seamless, icon_global],           label: DWD ICON, tier: global}
+    - {ids: [ukmo_seamless, ukmo_global_deterministic_10km], label: UK Met Office, tier: global}
+    - {ids: [meteofrance_seamless, meteofrance_arpege_world], label: Météo-France, tier: global}
+    - {ids: [jma_seamless, jma_gsm],                label: JMA, tier: global}
+  ensemble_models:
+    - {ids: [gem_global],                           label: Canadian GEPS}
+
+# Impact thresholds (US units: inches, °F, mph).
+# A hazard is flagged when at least `min_agreement` of models exceed it.
+impacts:
+  min_agreement: 0.3
+  heavy_rain_24h:   {lowland: 1.25, coast: 2.5, pass: 3.0}
+  heavy_rain_72h:   {lowland: 2.5,  coast: 5.0, pass: 6.0}   # atmospheric-river / flood signal
+  snow_24h:         {lowland: 1.0,  coast: 1.0, pass: 8.0}
+  hard_freeze_f:    {lowland: 27,   coast: 27,  pass: null}
+  freezing_precip_f: 32      # min temp <= this AND precip >= 0.05" -> frozen/icing precip possible
+  wind_gust_mph:    {lowland: 45,   coast: 60,  pass: 60}
+  heat_f:           {lowland: 90,   coast: 85,  pass: null}
+
+# ----------------------------------------------------------------------------
+# NWS alerts and normals
+# ----------------------------------------------------------------------------
+nws_areas: [WA, OR]          # states queried for active alerts
+nws_user_agent: "(pnw-briefing, nshipes@urban10.com)"   # optional; defaults to the GitHub repo name
+cache_dir: .cache            # PRISM normals are cached here between runs
