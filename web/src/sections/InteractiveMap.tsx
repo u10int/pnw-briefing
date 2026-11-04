@@ -599,7 +599,15 @@ const gradCache = new WeakMap<Float32Array, Float32Array>()
 const gradOf = (g: Grid, p: Float32Array, elev: Elevation | null) => {
   if (!gradCache.has(p)) {
     const out = pressureGradient(g, p, g.width > 120 ? 6 : 2)
-    if (elev) for (let i = 0; i < out.length; i++) if (masked(elev, i)) out[i] = NaN
+    if (elev) {
+      // one cell wider than the mountains: a cell's central difference uses its neighbours' pressure
+      const W = g.width, m = new Uint8Array(out.length)
+      for (let i = 0; i < out.length; i++) if (masked(elev, i)) m[i] = 1
+      for (let i = 0; i < out.length; i++) {
+        const x = i % W
+        if (m[i] || (x > 0 && m[i - 1]) || (x < W - 1 && m[i + 1]) || m[i - W] || m[i + W]) out[i] = NaN
+      }
+    }
     gradCache.set(p, out)
   }
   return gradCache.get(p)!
