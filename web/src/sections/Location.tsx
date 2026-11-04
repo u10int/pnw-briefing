@@ -1,7 +1,9 @@
 import * as React from "react"
 import { Area, Bar, CartesianGrid, ComposedChart, ErrorBar, Line, LineChart, XAxis, YAxis } from "recharts"
 
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Label } from "@/components/ui/label"
+import { Switch } from "@/components/ui/switch"
 import { type ChartConfig, ChartContainer, ChartLegend, ChartLegendContent, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart"
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
@@ -168,29 +170,92 @@ export function EnsembleTable({ data }: { data: Briefing }) {
   )
 }
 
+/** A boolean setting remembered in this browser (when storage is available). */
+function useStoredFlag(key: string, initial: boolean): [boolean, (v: boolean) => void] {
+  const [v, setV] = React.useState(() => {
+    try {
+      const s = localStorage.getItem(key)
+      return s == null ? initial : s === "1"
+    } catch { return initial }
+  })
+  return [v, (x: boolean) => {
+    setV(x)
+    try { localStorage.setItem(key, x ? "1" : "0") } catch { /* storage unavailable */ }
+  }]
+}
+
+/** One decimal, for tooltips. */
+const r1 = (v: number | null | undefined) => (v == null ? null : Math.round(v * 10) / 10)
+
+const MODEL_GRAY = "#bcc2ca"
+const MODEL_HOVER = "#4b5563"
+
+type Hover = { chart: "temp" | "gust"; model: number } | null
+const modelOf = (k: string) => Number(k.slice(1))
+
+/**
+ * Thin gray per-model lines drawn under the medians. Hovering one highlights that model in every
+ * chart and names it above the chart being hovered.
+ */
+function modelLines(chart: "temp" | "gust", keys: string[], hovered: Hover, setHovered: (h: Hover) => void) {
+  return keys.map((k) => {
+    const on = hovered?.model === modelOf(k)
+    return (
+      <Line isAnimationActive={false} key={k} dataKey={k} type="linear" dot={false} activeDot={false}
+            stroke={on ? MODEL_HOVER : MODEL_GRAY} strokeWidth={on ? 1.75 : 1}
+            strokeOpacity={hovered && !on ? 0.55 : 0.9} connectNulls={false}
+            tooltipType="none" legendType="none"
+            onMouseEnter={() => setHovered({ chart, model: modelOf(k) })} onMouseLeave={() => setHovered(null)} />
+    )
+  })
+}
+
 /** Precipitation, temperature and gusts on a shared date axis: model median with the model range. */
 export function DayByDay({ data, point }: { data: Briefing; point: string }) {
+  const [all, setAll] = useStoredFlag("pnw-briefing.daybyday.allModels", false)
+  const [hovered, setHovered] = React.useState<Hover>(null)
+  const names = data.models.map((m) => m.label + (m.source === "open-meteo" ? " *" : ""))
+  // models with any value at this location, per variable
+  const has = (k: "temperature_2m_max" | "temperature_2m_min" | "wind_gusts_10m_max") =>
+    data.models.map((m, i) => (m.data[point]?.[k]?.some((v) => v != null) ? i : -1)).filter((i) => i >= 0)
+  const hiIdx = has("temperature_2m_max"), loIdx = has("temperature_2m_min"), guIdx = has("wind_gusts_10m_max")
+
   const rows = data.dates.map((d, t) => {
     const col = (k: keyof (typeof data.models)[0]["data"][string]) => data.models.map((m) => m.data[point][k][t])
     const pr = col("precipitation_sum"), tx = col("temperature_2m_max"), tn = col("temperature_2m_min"), gu = col("wind_gusts_10m_max")
     const pm = median(pr) ?? 0
-    return {
+    const row: Record<string, unknown> = {
       date: d,
       precip: +pm.toFixed(2), precipErr: [+(pm - (minOf(pr) ?? pm)).toFixed(2), +((maxOf(pr) ?? pm) - pm).toFixed(2)],
-      high: median(tx), highRange: [minOf(tx), maxOf(tx)],
-      low: median(tn), lowRange: [minOf(tn), maxOf(tn)],
-      gust: median(gu), gustMax: maxOf(gu),
+      high: r1(median(tx)), highRange: [minOf(tx), maxOf(tx)],
+      low: r1(median(tn)), lowRange: [minOf(tn), maxOf(tn)],
+      gust: r1(median(gu)), gustMax: r1(maxOf(gu)),
     }
+    hiIdx.forEach((i) => { row[`h${i}`] = tx[i] })
+    loIdx.forEach((i) => { row[`l${i}`] = tn[i] })
+    guIdx.forEach((i) => { row[`g${i}`] = gu[i] })
+    return row
   })
   const pConf: ChartConfig = { precip: { label: "Median precip (in)", color: "var(--chart-1)" } }
   const tConf: ChartConfig = { high: { label: "High °F", color: "var(--chart-2)" }, low: { label: "Low °F", color: "var(--chart-1)" } }
   const gConf: ChartConfig = { gust: { label: "Median gust (mph)", color: "var(--foreground)" }, gustMax: { label: "Highest model (mph)", color: "#9ca3af" } }
   const x = <XAxis dataKey="date" tickFormatter={dayShort} {...axis} minTickGap={16} />
+  const hoverLabel = (chart: "temp" | "gust") =>
+    all && hovered?.chart === chart ? <span className="font-normal text-muted-foreground"> · {names[hovered.model]}</span> : null
   return (
     <Card>
       <CardHeader>
         <CardTitle>Day by day</CardTitle>
-        <CardDescription>Model median, with the full range across models as whiskers or shading.</CardDescription>
+        <CardDescription>
+          Model median, with the full range across models as whiskers or shading.
+          {all && " Gray lines are individual models; hover one to see which."}
+        </CardDescription>
+        <CardAction>
+          <div className="flex items-center gap-2">
+            <Switch id="daybyday-all" checked={all} onCheckedChange={setAll} />
+            <Label htmlFor="daybyday-all">All models</Label>
+          </div>
+        </CardAction>
       </CardHeader>
       <CardContent className="grid gap-6 lg:grid-cols-3">
         <div>
@@ -207,27 +272,30 @@ export function DayByDay({ data, point }: { data: Briefing; point: string }) {
           </ChartContainer>
         </div>
         <div>
-          <p className="mb-2 text-sm font-medium">High and low</p>
+          <p className="mb-2 truncate text-sm font-medium">High and low{hoverLabel("temp")}</p>
           <ChartContainer config={tConf} className="aspect-auto h-[220px] w-full">
             <ComposedChart data={rows} margin={{ left: 0, right: 4, top: 8 }}>
               <CartesianGrid vertical={false} />{x}
               <YAxis {...axis} width={40} domain={[(m: number) => Math.floor((m - 3) / 5) * 5, (m: number) => Math.ceil((m + 3) / 5) * 5]} tickFormatter={(v) => `${v}°`} />
               <ChartTooltip content={<ChartTooltipContent labelFormatter={(v) => dayShort(String(v))} />} />
-              <Area isAnimationActive={false} dataKey="highRange" stroke="none" fill="var(--color-high)" fillOpacity={0.12} tooltipType="none" />
-              <Area isAnimationActive={false} dataKey="lowRange" stroke="none" fill="var(--color-low)" fillOpacity={0.12} tooltipType="none" />
+              {!all && <Area isAnimationActive={false} dataKey="highRange" stroke="none" fill="var(--color-high)" fillOpacity={0.12} tooltipType="none" />}
+              {!all && <Area isAnimationActive={false} dataKey="lowRange" stroke="none" fill="var(--color-low)" fillOpacity={0.12} tooltipType="none" />}
+              {all && modelLines("temp", [...hiIdx.map((i) => `h${i}`), ...loIdx.map((i) => `l${i}`)], hovered, setHovered)}
               <Line isAnimationActive={false} dataKey="high" stroke="var(--color-high)" strokeWidth={2} dot={{ r: 2.5 }} />
               <Line isAnimationActive={false} dataKey="low" stroke="var(--color-low)" strokeWidth={2} dot={{ r: 2.5 }} />
             </ComposedChart>
           </ChartContainer>
         </div>
         <div>
-          <p className="mb-2 text-sm font-medium">Peak gust</p>
+          <p className="mb-2 truncate text-sm font-medium">Peak gust{hoverLabel("gust")}</p>
           <ChartContainer config={gConf} className="aspect-auto h-[220px] w-full">
             <LineChart data={rows} margin={{ left: 0, right: 4, top: 8 }}>
               <CartesianGrid vertical={false} />{x}
               <YAxis {...axis} width={40} />
               <ChartTooltip content={<ChartTooltipContent labelFormatter={(v) => dayShort(String(v))} />} />
-              <Line isAnimationActive={false} dataKey="gustMax" stroke="var(--color-gustMax)" strokeWidth={1.5} strokeDasharray="3 3" dot={false} />
+              {all
+                ? modelLines("gust", guIdx.map((i) => `g${i}`), hovered, setHovered)
+                : <Line isAnimationActive={false} dataKey="gustMax" stroke="var(--color-gustMax)" strokeWidth={1.5} strokeDasharray="3 3" dot={false} />}
               <Line isAnimationActive={false} dataKey="gust" stroke="var(--color-gust)" strokeWidth={2} dot={{ r: 2.5 }} />
             </LineChart>
           </ChartContainer>
