@@ -97,10 +97,22 @@ Every run publishes its grids under `data/cogs/` next to the page:
 | `<model>_wind_<N>d.tif`, `<model>_gust_<N>d.tif` | Strongest sustained 10 m wind and strongest gust over the window, mph |
 | `mean_<tmax\|tmin\|wind\|gust>_<N>d.tif` | Multi-model mean of those extremes |
 
-Extremes are taken from each model's time-stepped output (every 3 h for HRRR, RRFS and NAM,
-every 6 h otherwise), so a peak or low between output times can be missed by a degree or two.
-ECMWF's gust is the maximum since the previous step; NCEP gusts are at the output time. AIFS has
-no gust field. NBM's wind comes from its 10 m wind speed field.
+Extremes, and the daily highs, lows and peak gusts at the forecast locations, are read at each
+model's native output steps, using the max/min-since-the-previous-output records wherever the
+model publishes them, so a peak between output times isn't missed:
+
+| Model | Highs and lows | Strongest wind | Gusts |
+|---|---|---|---|
+| HRRR | hourly 2 m temperature (no max/min records) | hourly max 10 m wind | hourly |
+| RRFS | hourly 2 m max/min | hourly max 10 m wind | hourly |
+| NAM 3 km | hourly 2 m max/min | hourly max wind (MAXUW/MAXVW components) | hourly |
+| NBM | 12-hour daytime max / overnight min | 10 m speed, hourly → 3-hourly → 6-hourly | same steps |
+| GFS | 2 m max/min per 6-hour bucket (3-hour after day 5) | from u/v every 3 h | every 3 h |
+| ECMWF IFS | mx2t3/mn2t3 to day 6, then mx2t6/mn2t6 | from u/v every 3 h, then 6 h | max since the previous step |
+| ECMWF AIFS | 6-hourly 2 m temperature | from u/v every 6 h | none published |
+
+The schedule for each model is its `extremes` block in `config.yaml`. NCEP gusts are values at
+the output time, so a gust between outputs can still be missed.
 
 All are single-band float32, EPSG:4326, DEFLATE-compressed with tiled overviews, and NaN where
 there is no data. Global models keep their native 0.25° grid; HRRR, RRFS, NAM and NBM are

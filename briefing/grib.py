@@ -255,6 +255,174 @@ def _samples(spec, run, hours, patterns, dom):
         return {h: v for h, v in ex.map(one, hours) if v is not None}
 
 
+# ---------------------------------------------------------------- interval extremes
+#
+# Highs, lows, strongest wind and gusts are read at each model's native output steps, using the
+# max/min-since-the-previous-output records wherever the model publishes them, so a peak between
+# output times isn't missed. What each model publishes (checked against their inventories):
+#   HRRR        hourly max 10 m wind; no 2 m max/min (hourly 2 m temperature instead)
+#   RRFS        hourly 2 m max/min and max 10 m wind
+#   NAM 3 km    hourly 2 m max/min; hourly max 10 m wind as components (MAXUW/MAXVW)
+#   NBM         12-hour daytime max / overnight min; instantaneous 10 m wind speed and gust
+#   GFS         2 m max/min over each 6-hour bucket (3-hour after day 5); instantaneous wind, gust
+#   ECMWF IFS   mx2t3/mn2t3 (to day 6), then mx2t6/mn2t6; 10fg = max gust since the last step
+#   ECMWF AIFS  6-hourly instantaneous values only
+# The schedule comes from each model's `extremes` block in config.yaml; models without one keep
+# their `sample_hours` instantaneous samples.
+
+EXT_PATTERNS = {
+    "ncep": {
+        "tmax": [":TMAX:2 m above ground:"], "tmin": [":TMIN:2 m above ground:"],
+        "t2m": [":TMP:2 m above ground:"],
+        "gust": [":GUST:surface:", ":GUST:10 m above ground:"],
+        "wind_max": [r":WIND:10 m above ground:\d+-\d+ hour max fcst:"],
+        "wind_speed": [r":WIND:10 m above ground:\d+ hour fcst:"],
+        "u10": [":UGRD:10 m above ground:", ":VGRD:10 m above ground:"],
+        "v10": [":VGRD:10 m above ground:", ":UGRD:10 m above ground:"],
+    },
+    "ecmwf": {
+        "tmax": [":mx2t3:", ":mx2t6:", ":mx2t1:"], "tmin": [":mn2t3:", ":mn2t6:", ":mn2t1:"],
+        "t2m": [":2t:"], "gust": [":10fg:", ":10fg3:", ":10fg6:", ":fg10:"],
+        "u10": [":10u:"], "v10": [":10v:"],
+    },
+}
+K_TO_F = lambda k: (k - 273.15) * 9 / 5 + 32
+_SPAN = re.compile(r":(\d+)-(\d+) hour (?:max|min|acc|ave) fcst:")
+_ECMWF_SPAN = re.compile(r":(?:mx2t|mn2t|10fg)(\d+):")
+
+
+def extreme_hours(spec, lead0, last):
+    """The model's native output steps from today's 12Z to `last`: `extremes.steps` is a list of
+    [up_to_fxx, step_hours] segments, or `extremes.step` a single step."""
+    ex = spec.get("extremes") or {}
+    segs = ex.get("steps") or [[last, ex.get("step", spec.get("sample_hours", 6))]]
+    out, h = [], 0
+    for upto, step in segs:
+        while h + step <= min(upto, last):
+            h += step
+            if h > lead0:
+                out.append(h)
+        if h >= last:
+            break
+    return out
+
+
+def _read_row(H, patterns, dom):
+    """(row, values) for the first pattern with a record at this step."""
+    for p in patterns:
+        rows = _rows(H, p)
+        if rows:
+            return rows[0], _read(H, rows[0], dom)[2]
+    raise LookupError(f"none of {patterns}")
+
+
+def _span(row, h, prev):
+    """(start, end) forecast hours a record covers: the range in NCEP rows, ECMWF's suffix
+    (mx2t3 = 3 h), or since the previous step for ECMWF's plain 10fg."""
+    m = _SPAN.search(row)
+    if m:
+        return int(m[1]), int(m[2])
+    m = _ECMWF_SPAN.search(row)
+    if m:
+        return h - int(m[1]), h
+    return prev, h
+
+
+def _plan(spec, lead0, last, t2m, gust, model_fields):
+    """{name: (hours, patterns, interval?, have)} for what to read at each step."""
+    fam = spec["family"]
+    P = EXT_PATTERNS[fam]
+    ex = spec.get("extremes") or {}
+    hours = extreme_hours(spec, lead0, last) if ex else sorted(set(t2m) | set(gust))
+    plan = {}
+    # instantaneous 2 m temperature: every step when there's no max/min record (HRRR), else the
+    # samples already downloaded for the map
+    plan["t2m"] = (hours if ex.get("temp") != "maxmin" else sorted(t2m), P["t2m"], False, t2m)
+    if ex.get("temp") == "maxmin":
+        plan["tmax"] = (hours, P["tmax"], True, {})
+        plan["tmin"] = (hours, P["tmin"], True, {})
+    if spec.get("gust", True):
+        # ECMWF's gust is already a max since the previous step; NCEP's is instantaneous
+        plan["gust"] = (hours, P["gust"], fam == "ecmwf", {} if fam == "ecmwf" else gust)
+    wind = ex.get("wind")
+    if wind == "max":
+        plan["wind"] = (hours, P["wind_max"], True, {})
+    elif wind == "maxuv":
+        plan["maxuw"] = (hours, [r":MAXUW:10 m above ground:\d+-\d+ hour max fcst:"], True, {})
+        plan["maxvw"] = (hours, [r":MAXVW:10 m above ground:\d+-\d+ hour max fcst:"], True, {})
+    elif wind == "speed":
+        plan["wind"] = (hours, P["wind_speed"], False, {})
+    else:
+        plan["u10"] = (hours, P["u10"], False, _by_hour(model_fields.get("u10"), 1 / M_S_TO_MPH))
+        plan["v10"] = (hours, P["v10"], False, _by_hour(model_fields.get("v10"), 1 / M_S_TO_MPH))
+    return plan
+
+
+def extreme_series(spec, run, lead0, last, dom, t2m, gust, model_fields):
+    """{tmax, tmin, gust, wind: [(start, end, field)]} in °F / mph, for the window extremes and the
+    daily values at the forecast locations. One index lookup per forecast hour serves every field
+    read at that hour; samples already downloaded are reused."""
+    plan = _plan(spec, lead0, last, t2m, gust, model_fields)
+    all_hours = sorted({h for hrs, *_ in plan.values() for h in hrs})
+    prev = {h: (all_hours[i - 1] if i else h) for i, h in enumerate(all_hours)}
+    failures: dict[str, int] = {}
+
+    def one(h):
+        got, H = {}, None
+        for name, (hrs, pats, interval, have) in plan.items():
+            if h not in hrs:
+                continue
+            if h in have:
+                got[name] = (h, h, have[h])
+                continue
+            try:
+                if H is None:
+                    H = _H(spec, run, h)
+                rows = next((r for p in pats for r in _rows(H, p)[:1]), None)
+                if rows is None:
+                    continue                                  # not published at this step
+                v = _read(H, rows, dom)[2]
+                a, b = _span(rows, h, prev[h]) if interval else (h, h)
+                got[name] = (a, b, v)
+            except Exception as e:
+                got.setdefault("_errors", []).append(f"{name}: {report.short(e)}")
+        return got
+
+    raw: dict[str, list] = {k: [] for k in plan}
+    with ThreadPoolExecutor(WORKERS) as ex:
+        for got in ex.map(one, all_hours):
+            for msg in got.pop("_errors", []):
+                failures[msg.split(":")[0]] = failures.get(msg.split(":")[0], 0) + 1
+            for name, entry in got.items():
+                raw[name].append(entry)
+    if failures:
+        log.warning("%s extremes: read failures %s", spec["label"], failures)
+
+    f = lambda entries, conv: [(a, b, conv(v)) for a, b, v in entries]
+    mph = lambda v: v * M_S_TO_MPH
+    inst_t = f(raw["t2m"], K_TO_F)
+    out = {"tmax": f(raw.get("tmax", []), K_TO_F) + inst_t, "tmin": f(raw.get("tmin", []), K_TO_F) + inst_t}
+    if "gust" in raw:
+        out["gust"] = f(raw["gust"], mph)
+    if "wind" in raw:
+        out["wind"] = f(raw["wind"], mph)
+    pairs = [("maxuw", "maxvw"), ("u10", "v10")]
+    for un, vn in pairs:
+        if un in raw:
+            vb = {(a, b): v for a, b, v in raw[vn]}
+            out["wind"] = [(a, b, np.hypot(u, vb[(a, b)]) * M_S_TO_MPH) for a, b, u in raw[un] if (a, b) in vb]
+    out = {k: v for k, v in out.items() if v}
+    log.info("%s extremes: %s", spec["label"], ", ".join(f"{k} {len(v)} steps" for k, v in out.items()) or "none")
+    return out
+
+
+def _by_hour(entry, factor=1.0):
+    """Map-field entry {"hours", "data"} back to {hour: raw field}."""
+    if not entry:
+        return {}
+    return {h: entry["data"][i] * factor for i, h in enumerate(entry["hours"])}
+
+
 # ---------------------------------------------------------------- points
 
 def nearest_index(lat, lon, points):
@@ -352,19 +520,24 @@ def fetch_model(spec, cfg, start, points):
         except Exception as e:
             log.warning("%s: hourly fields skipped (%s)", spec["label"], report.short(e))
             model_fields = {}
-        # Models without 10 m wind components on the map (NBM) still publish wind speed; sample it
-        # for the window's strongest sustained wind.
-        wind_speed = None
-        if "u10" not in model_fields and fam == "ncep":
-            ws = _samples(spec, run, hours, [":WIND:10 m above ground:"], dom)
-            if ws:
-                hrs = sorted(ws)
-                wind_speed = {"hours": hrs, "data": np.stack([ws[h] for h in hrs]) * M_S_TO_MPH}
+        # highs, lows, strongest wind and gusts from interval max/min records at native steps
+        from . import extremes
+        try:
+            ext_series = extreme_series(spec, run, lead0, targets[-1], dom, t2m, gust, model_fields)
+        except Exception as e:
+            log.warning("%s: interval extremes skipped (%s)", spec["label"], report.short(e))
+            ext_series = {}
         daily_s = (np.diff(np.stack([[c[i, j] for i, j in idx] for c in snow]), axis=0).T
                    if snow is not None else np.full_like(daily_p, np.nan))
-        tmax = (_daily_extreme(t2m, lead0, ndays, idx, np.nanmax) - 273.15) * 9 / 5 + 32 if t2m else np.full_like(daily_p, np.nan)
-        tmin = (_daily_extreme(t2m, lead0, ndays, idx, np.nanmin) - 273.15) * 9 / 5 + 32 if t2m else np.full_like(daily_p, np.nan)
-        gmax = _daily_extreme(gust, lead0, ndays, idx, np.nanmax) * M_S_TO_MPH if gust else np.full_like(daily_p, np.nan)
+        def at_points(var, fallback):
+            if ext_series.get(var):
+                d = extremes.daily(ext_series[var], lead0, ndays, "min" if var == "tmin" else "max")
+                return np.array([d[:, i, j] for i, j in idx])
+            return fallback()
+        nan = lambda: np.full_like(daily_p, np.nan)
+        tmax = at_points("tmax", lambda: K_TO_F(_daily_extreme(t2m, lead0, ndays, idx, np.nanmax)) if t2m else nan())
+        tmin = at_points("tmin", lambda: K_TO_F(_daily_extreme(t2m, lead0, ndays, idx, np.nanmin)) if t2m else nan())
+        gmax = at_points("gust", lambda: _daily_extreme(gust, lead0, ndays, idx, np.nanmax) * M_S_TO_MPH if gust else nan())
         rain = np.clip(daily_p - np.nan_to_num(daily_s) / 10, 0, None)
 
         n = cfg["days"]
@@ -382,7 +555,7 @@ def fetch_model(spec, cfg, start, points):
         return {"id": spec["id"], "label": spec["label"], "source": "grib", "tier": spec.get("tier", "global"),
                 "run": run, "lead0": lead0, "range_days": ndays, "dates": dates, "data": data,
                 "lat": lat, "lon": lon, "precip_mm": cum, "snow_in": snow, "snow_method": snow_method,
-                "fields": model_fields, "wind_speed": wind_speed}
+                "fields": model_fields, "ext_series": ext_series}
     except Exception as e:
         log.exception("%s: GRIB fetch failed", spec["label"])
         report.fail(spec["label"], report.short(e))
