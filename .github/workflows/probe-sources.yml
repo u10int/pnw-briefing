@@ -2,6 +2,8 @@ name: Temporary page probe
 on:
   push:
     branches: [probe/sources]
+permissions:
+  contents: write
 jobs:
   probe:
     runs-on: ubuntu-latest
@@ -32,9 +34,9 @@ jobs:
           await card.scrollIntoViewIfNeeded()
           await pg.waitForTimeout(5000)
           await card.screenshot({ path: "/tmp/shots/summary_terrain.png" })
-          await pg.getByRole("tab", { name: "Through time", exact: true }).click()
-          await pg.getByRole("tab", { name: "Wind", exact: true }).click()
-          const iso = pg.getByLabel("Isobars")
+          await card.getByRole("tab", { name: "Through time", exact: true }).click()
+          await card.getByRole("tab", { name: "Wind", exact: true }).click()
+          const iso = card.getByLabel("Isobars")
           if (!(await iso.isChecked())) await iso.click()
           await pg.waitForTimeout(7000)
           await card.screenshot({ path: "/tmp/shots/isobars.png" })
@@ -43,5 +45,10 @@ jobs:
           JS
           mkdir -p /tmp/shots && node shot.mjs
       - if: always()
-        uses: actions/upload-artifact@v4
-        with: {name: shots, path: /tmp/shots}
+        name: Push the screenshots to a scratch branch
+        run: |
+          mkdir -p /tmp/shotrepo && cd /tmp/shotrepo && git init -q -b probe/shots
+          cp /tmp/shots/*.png . 2>/dev/null || true
+          git config user.name probe && git config user.email probe@example.com
+          git add -A && git commit -q -m shots
+          git push -q -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" probe/shots
