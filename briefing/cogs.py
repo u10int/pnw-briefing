@@ -20,27 +20,45 @@ log = logging.getLogger(__name__)
 REGIONAL_RES = 0.03
 
 
-def write_cog(path: Path, lat, lon, data, units: str, description: str):
-    """Write a north-up COG from 1-D ascending lat/lon cell centres."""
+def write_cog(path: Path, lat, lon, data, units: str, description: str, *, dtype="float32",
+              nodata=np.nan, scale=None, band_names=None):
+    """Write a north-up COG from 1-D ascending lat/lon cell centres.
+
+    `data` is [y, x] for one band or [band, y, x] for several (e.g. one band per forecast hour).
+    With `scale`, values are stored as round(value / scale) in `dtype` and the scale is recorded
+    in the file, so GIS tools read physical units back.
+    """
     import rasterio
     import rasterio.shutil
     from rasterio.io import MemoryFile
     from rasterio.transform import from_origin
 
+    arr = np.asarray(data, dtype="float32")
+    arr = arr[None] if arr.ndim == 2 else arr
+    arr = arr[:, ::-1]                                     # north-up
+    if scale is not None:
+        info = np.iinfo(dtype)
+        q = np.round(arr / scale)
+        q = np.where(np.isfinite(q), np.clip(q, info.min + 1, info.max), nodata)
+        arr = q.astype(dtype)
     dx, dy = float(np.median(np.diff(lon))), float(np.median(np.diff(lat)))
-    arr = np.asarray(data, dtype="float32")[::-1]          # north-up
     transform = from_origin(float(lon[0]) - dx / 2, float(lat[-1]) + dy / 2, dx, dy)
-    profile = dict(driver="GTiff", height=arr.shape[0], width=arr.shape[1], count=1, dtype="float32",
-                   crs="EPSG:4326", transform=transform, nodata=np.nan)
+    profile = dict(driver="GTiff", height=arr.shape[1], width=arr.shape[2], count=arr.shape[0], dtype=dtype,
+                   crs="EPSG:4326", transform=transform, nodata=nodata)
     with MemoryFile() as mem:
         with mem.open(**profile) as tmp:
-            tmp.write(arr, 1)
+            tmp.write(arr)
             tmp.update_tags(units=units, description=description)
-            tmp.set_band_description(1, description)
+            for b in range(arr.shape[0]):
+                tmp.set_band_description(b + 1, band_names[b] if band_names else description)
+            if scale is not None:
+                tmp.scales = (scale,) * arr.shape[0]
+                tmp.offsets = (0.0,) * arr.shape[0]
         with mem.open() as tmp:
             path.parent.mkdir(parents=True, exist_ok=True)
-            rasterio.shutil.copy(tmp, str(path), driver="COG", compress="DEFLATE", predictor=3,
-                                 blocksize=256, overview_resampling="average")
+            rasterio.shutil.copy(tmp, str(path), driver="COG", compress="DEFLATE",
+                                 predictor=3 if dtype == "float32" else 2,
+                                 blocksize=256, overview_resampling="nearest" if scale else "average")
     return path
 
 

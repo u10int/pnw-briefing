@@ -321,6 +321,14 @@ def fetch_model(spec, cfg, start, points):
         idx = nearest_index(lat, lon, points)
         daily_p = np.diff(np.stack([[c[i, j] for i, j in idx] for c in cum]), axis=0).T / 25.4
         check_plausible(spec["label"], daily_p)
+
+        # time-stepped fields for the interactive map; optional, never fails the model
+        try:
+            from . import fields
+            model_fields = fields.fetch(spec, run, lead0, targets[-1], hours, {"t2m": t2m, "gust": gust}, dom)
+        except Exception as e:
+            log.warning("%s: hourly fields skipped (%s)", spec["label"], report.short(e))
+            model_fields = {}
         daily_s = (np.diff(np.stack([[c[i, j] for i, j in idx] for c in snow]), axis=0).T
                    if snow is not None else np.full_like(daily_p, np.nan))
         tmax = (_daily_extreme(t2m, lead0, ndays, idx, np.nanmax) - 273.15) * 9 / 5 + 32 if t2m else np.full_like(daily_p, np.nan)
@@ -342,7 +350,8 @@ def fetch_model(spec, cfg, start, points):
         dates = [(start + timedelta(days=d)).replace(tzinfo=timezone.utc).astimezone(tz).date() for d in range(n)]
         return {"id": spec["id"], "label": spec["label"], "source": "grib", "tier": spec.get("tier", "global"),
                 "run": run, "range_days": ndays, "dates": dates, "data": data,
-                "lat": lat, "lon": lon, "precip_mm": cum, "snow_in": snow, "snow_method": snow_method}
+                "lat": lat, "lon": lon, "precip_mm": cum, "snow_in": snow, "snow_method": snow_method,
+                "fields": model_fields}
     except Exception as e:
         log.exception("%s: GRIB fetch failed", spec["label"])
         report.fail(spec["label"], report.short(e))

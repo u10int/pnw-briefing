@@ -24,6 +24,14 @@ def embed(data_dir: Path, page: Path, out: Path) -> Path:
         f = data_dir / c["path"]
         if f.exists():
             c["path"] = "data:image/tiff;base64," + base64.b64encode(f.read_bytes()).decode()
+    fields_path = data_dir / "fields.json"
+    if fields_path.exists():
+        fl = json.loads(fields_path.read_text())
+        for e in fl.get("fields", []):
+            f = data_dir / e["path"]
+            if f.exists():
+                e["path"] = "data:image/tiff;base64," + base64.b64encode(f.read_bytes()).decode()
+        data["_fields"] = fl
     payload = json.dumps(data, separators=(",", ":")).replace("</", "<\\/")
     html = page.read_text(encoding="utf-8")
     inject = f"<script>window.__BRIEFING__={payload}</script>"

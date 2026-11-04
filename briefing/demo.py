@@ -97,10 +97,66 @@ def grib(cfg):
                    "wind_gusts_10m_max": gust}
             data[p["name"]] = {k: list(np.concatenate([v, np.full(n - nd, np.nan)])) for k, v in row.items()}
         run = start - timedelta(hours=0 if spec.get("tier") != "global" else 12)
+        lead0 = int((start - run).total_seconds() // 3600)
         out.append({"id": spec["id"], "label": spec["label"], "source": "grib", "tier": spec.get("tier", "global"),
                     "run": run, "range_days": nd, "dates": dates, "data": data,
                     "lat": lat, "lon": lon, "precip_mm": cum, "snow_in": snow,
-                    "snow_method": "model snowfall (ASNOW)" if spec["family"] == "ncep" else "snowfall water equivalent at 10:1"})
+                    "snow_method": "model snowfall (ASNOW)" if spec["family"] == "ncep" else "snowfall water equivalent at 10:1",
+                    "fields": _fields(spec, la, lo, lead0, nd)})
+    return out
+
+
+def _elev_ft(la, lo):
+    """Rough terrain height: Cascades and Olympics."""
+    return (6000 * np.exp(-((lo + 121.55) / 0.3) ** 2) * (1 + 0.25 * np.sin(la * 4))
+            + 5000 * np.exp(-(((lo + 123.6) / 0.3) ** 2 + ((la - 47.8) / 0.3) ** 2)))
+
+
+def _fields(spec, la, lo, lead0, nd):
+    """Synthetic time-stepped fields in display units: a Pacific low tracking inland with a trailing
+    cold front, snow in the Cascades behind it, and a pocket of freezing rain in the Columbia Gorge."""
+    from .fields import _wanted
+    stepped, hourly, hourly_hours = _wanted(spec)
+    step = spec.get("sample_hours", 6)
+    s_hours = list(range(lead0, lead0 + 24 * nd + 1, step))
+    h_hours = list(range(lead0 + 1, lead0 + min(hourly_hours, 24 * nd) + 1)) if hourly else []
+    elev = _elev_ft(la, lo)
+    gorge = np.exp(-(((lo + 121.95) / 0.25) ** 2 + ((la - 45.65) / 0.08) ** 2))
+    noise = np.random.default_rng(3).normal(0, 1, (6,) + la.shape)
+
+    def state(h):
+        t = (h - lead0) % 120                      # a new system every five days
+        lon_c, lat_c = -131 + 0.18 * t, 47.6 + 0.015 * t
+        dx, dy = (lo - lon_c) * np.cos(np.deg2rad(47)), la - lat_c
+        e = np.exp(-(dx ** 2 + dy ** 2) / 3.5 ** 2)
+        mslp = 1019 - 21 * e
+        k = 1.25 * (1 - 0.35 * np.clip(elev / 4000, 0, 1))
+        u, v = -k * 21 * 2 * dy / 3.5 ** 2 * e * 9, k * 21 * 2 * dx / 3.5 ** 2 * e * 9 + 4
+        local = (h - lead0 + 4) % 24                # hours after 4 AM local
+        cold = (h - lead0) / 24 > 8
+        front = lon_c + 2.6 - 0.45 * (la - lat_c)
+        behind = np.clip((front - lo) / 1.2, 0, 1)
+        t_sl = 49 + 6 * np.sin(2 * np.pi * (local - 6) / 24) + 4 * (1 - behind) - 7 * behind - (6 if cold else 0)
+        t2m = t_sl - 3.5 * elev / 1000 - 9 * gorge * (t < 30)
+        frz = np.clip(3000 + 260 * (t_sl - 40), 0, None)
+        band = np.exp(-((lo - front) / 0.35) ** 2) * (la > lat_c - 5)
+        refc = 44 * band + 10 * band * np.clip(elev / 5000, 0, 1) + 4 * noise[h % 6] * band - 4
+        refc += 18 * np.exp(-((lo - (lon_c + 0.6)) ** 2 + (la - lat_c - 0.4) ** 2) / 0.6)   # comma head
+        pt = np.zeros_like(refc)
+        wet = refc >= 12
+        pt[wet] = 1
+        pt[wet & (t2m <= 35)] = 5
+        pt[wet & (t2m <= 33)] = 2
+        pt[wet & (gorge > 0.4) & (t2m < 32)] = 3
+        return {"t2m": t2m, "gust": np.hypot(u, v) * 1.45 + 6, "u10": u, "v10": v, "mslp": mslp,
+                "frz": frz, "refc": np.where(refc >= 5, refc, np.nan), "ptype": pt}
+
+    out = {}
+    names = ["t2m"] + (["gust"] if spec.get("gust", True) else []) + stepped
+    for name in dict.fromkeys(names):
+        out[name] = {"hours": s_hours, "data": np.stack([state(h)[name] for h in s_hours]).astype("float32")}
+    for name in hourly:
+        out[name] = {"hours": h_hours, "data": np.stack([state(h)[name] for h in h_hours]).astype("float32")}
     return out
 
 

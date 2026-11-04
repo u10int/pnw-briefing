@@ -16,7 +16,7 @@ from zoneinfo import ZoneInfo
 import numpy as np
 import yaml
 
-from . import alerts, analysis, change, cogs, impacts, maps, normals, report
+from . import alerts, analysis, change, cogs, fields, impacts, maps, normals, report
 from .grib import day0
 
 ROOT = Path(__file__).resolve().parent
@@ -112,6 +112,10 @@ def collect(cfg: dict, out: Path, demo: bool = False, products: bool = True) -> 
         "long": safe("long-range maps", lambda: maps.full_range_precip(grib_models, cfg, 7, out / "precip_long.png")),
         "snow_long": safe("7-day snow maps", lambda: maps.snow(grib_models, cfg, 7, out / "snow_7d.png")),
     }
+    field_manifest = safe("hourly fields", lambda: fields.export(grib_models, cfg, out / "fields"), []) \
+        if products and grib_models else []
+    if products:
+        (out / "fields.json").write_text(json.dumps(clean({"fields": field_manifest})), encoding="utf-8")
     cog_manifest = safe("GeoTIFF export", lambda: cogs.export(grib_models, cfg, out / "cogs", norm_grid), []) \
         if products and grib_models else []
 

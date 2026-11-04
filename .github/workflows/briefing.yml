@@ -78,42 +78,13 @@ jobs:
           npm ci
           npm run build
 
-      - name: Assemble site (latest + dated archive copy)
-        run: |
-          mkdir -p "out/archive/$DATE"
-          cp -r web/dist/. "out/archive/$DATE/"
-          cp -r web/dist/. out/
+      - name: Assemble site (latest page, dated archive, pruning)
+        run: scripts/assemble_site.sh web/dist "$DATE"
 
-      - name: Publish to gh-pages
-        uses: peaceiris/actions-gh-pages@v4
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./out
-          keep_files: true          # keep earlier days under /archive/
-          commit_message: "Briefing ${{ env.DATE }}"
-
-  archive-index:
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with: {ref: gh-pages}
-      - name: Rebuild archive listing and prune to 60 days
+      - name: Publish to gh-pages as a single commit
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          cd archive
-          ls -1d 20*/ 2>/dev/null | sort -r | tail -n +61 | xargs -r rm -rf
-          # keep the GeoTIFFs for the last 14 days only; older pages keep their PNG maps
-          for d in $(ls -1d 20*/ 2>/dev/null | sort -r | tail -n +15); do rm -rf "${d}data/cogs"; done
-          {
-            echo '<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
-            echo '<title>Past briefings</title><style>body{font:15px/1.6 Inter,system-ui,sans-serif;max-width:640px;margin:40px auto;padding:0 16px;color:#1b1f24;background:#f8f9fb}a{color:#2a78d6}</style>'
-            echo '<h1>Past briefings</h1><p><a href="../">Latest</a></p><ul>'
-            for d in $(ls -1d 20*/ | sort -r); do d=${d%/}; echo "<li><a href=\"$d/\">$d</a></li>"; done
-            echo '</ul>'
-          } > index.html
-      - name: Commit
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898333+github-actions[bot]@users.noreply.github.com"
-          git add -A && git commit -m "Update archive index" || echo "no changes"
-          git push
+          scripts/publish_site.sh \
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            "Briefing ${DATE}"

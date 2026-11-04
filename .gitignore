@@ -12,3 +12,4 @@ web/public/data/
 previous.json
 web/dist-single/
 .DS_Store
+web/tsconfig.tsbuildinfo

@@ -41,19 +41,34 @@ def common_grid(cfg, res=0.05):
     return np.arange(d["lat_min"], d["lat_max"] + 1e-6, res), np.arange(d["lon_min"], d["lon_max"] + 1e-6, res)
 
 
+class Regridder:
+    """Nearest-neighbour mapping from a model grid onto a regular grid, built once and reused.
+
+    Cells farther than 2.5 source grid spacings from any source cell (outside a regional
+    model's domain) come out NaN.
+    """
+
+    def __init__(self, lat, lon, glat, glon):
+        from scipy.spatial import cKDTree
+        la, lo = _ll2d(lat, lon)
+        k = np.cos(np.deg2rad(46))
+        tree = cKDTree(np.column_stack([la.ravel(), lo.ravel() * k]))
+        GL, GO = np.meshgrid(glat, glon, indexing="ij")
+        dist, self.idx = tree.query(np.column_stack([GL.ravel(), GO.ravel() * k]))
+        spacing = np.median(np.abs(np.diff(la, axis=0))) if la.shape[0] > 1 else 0.25
+        self.outside = dist > 2.5 * max(spacing, 0.03)
+        self.shape = GL.shape
+
+    def __call__(self, field):
+        f = np.asarray(field)
+        out = f.reshape(*f.shape[:-2], -1)[..., self.idx].astype("float32")   # works for [y,x] or [t,y,x]
+        out[..., self.outside] = np.nan
+        return out.reshape(*f.shape[:-2], *self.shape)
+
+
 def regrid(lat, lon, field, glat, glon):
     """Nearest-neighbour onto a regular grid; good enough for display mean/spread."""
-    from scipy.spatial import cKDTree
-    la, lo = _ll2d(lat, lon)
-    k = np.cos(np.deg2rad(46))
-    tree = cKDTree(np.column_stack([la.ravel(), lo.ravel() * k]))
-    GL, GO = np.meshgrid(glat, glon, indexing="ij")
-    dist, idx = tree.query(np.column_stack([GL.ravel(), GO.ravel() * k]))
-    out = field.ravel()[idx].reshape(GL.shape)
-    # outside the model's own domain (e.g. regional grids near edges) -> blank
-    spacing = np.median(np.abs(np.diff(la, axis=0))) if la.shape[0] > 1 else 0.25
-    out[dist.reshape(GL.shape) > 2.5 * max(spacing, 0.03)] = np.nan
-    return out
+    return Regridder(lat, lon, glat, glon)(field)
 
 
 def grid_window(m, wdays):

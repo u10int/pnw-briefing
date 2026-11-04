@@ -1,7 +1,7 @@
 // Colour ramps for gridded fields. Precipitation, snowfall and spread match briefing/maps.py so the
 // interactive map and the PNG small multiples read the same way.
 
-export interface Ramp { levels: number[]; colors: string[]; units: string; label: string }
+export interface Ramp { levels: number[]; colors: string[]; units: string; label: string; clampLow?: boolean }
 // colors[i] fills [levels[i], levels[i+1]); the last colour fills >= the last level. Below levels[0] is clear.
 
 export const PRECIP: Ramp = {
@@ -36,10 +36,63 @@ function hexToRgb(h: string): [number, number, number] {
 export function colorizer(r: Ramp) {
   const rgb = r.colors.map(hexToRgb)
   return (v: number): [number, number, number, number] | null => {
-    if (!Number.isFinite(v) || v < r.levels[0]) return null
+    if (!Number.isFinite(v)) return null
+    if (v < r.levels[0]) {
+      if (!r.clampLow) return null
+      const c = rgb[0]
+      return [c[0], c[1], c[2], 255]
+    }
     let i = r.levels.length - 1
     while (i > 0 && v < r.levels[i]) i--
     const c = rgb[Math.min(i, rgb.length - 1)]
     return [c[0], c[1], c[2], 255]
   }
+}
+
+// ---- time-stepped fields
+
+export const TEMP: Ramp = {
+  label: "Temperature at 2 m", units: "°F", clampLow: true,
+  levels: [-10, -5, 0, 5, 10, 15, 20, 25, 30, 32, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100],
+  colors: ["#4b2c7f", "#5e3a9e", "#6b4bb8", "#5867c9", "#4a7fd4", "#3f97d9", "#43acd6", "#5cc0d2", "#8ad3d4",
+           "#b7e3cf", "#d6ecb4", "#e8ef9c", "#f4e98a", "#f7d872", "#f6c25e", "#f2a84f", "#ec8c45", "#e2703f",
+           "#d4543a", "#c13a36", "#a62533", "#87162d", "#661026", "#4a0b1d"],
+}
+export const WIND: Ramp = {
+  label: "Wind speed", units: "mph", clampLow: true,
+  levels: [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 60, 70, 80],
+  colors: ["#f2f4f7", "#dbe7f0", "#bcd7e6", "#95c3d8", "#6eaec9", "#4b98b8", "#3a8f8c", "#5a9f4f", "#a3b23a",
+           "#d9a72c", "#e47c2a", "#d9482b", "#b0203f", "#7a1258"],
+}
+export const GUST: Ramp = { ...WIND, label: "Wind gust" }
+export const FRZ: Ramp = {
+  label: "Freezing level, above sea level", units: "ft", clampLow: true,
+  levels: [0, 1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000, 11000, 12000, 13000, 14000],
+  colors: ["#3b2a87", "#3c4fb0", "#3f74c7", "#4e95d1", "#69b1d6", "#8cc8d8", "#b0dad5", "#d2e8cc", "#ecefb8",
+           "#f6e29a", "#f6cb7a", "#f2ad5d", "#e88b47", "#d9663a", "#c03f33"],
+}
+
+/** Simulated reflectivity, coloured by precipitation type (rain/snow/mix/freezing rain/sleet). */
+const DBZ = [5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65]
+export const REFC: Record<string, Ramp> = {
+  rain: { label: "Rain", units: "dBZ", levels: DBZ,
+    colors: ["#b9ecbd", "#7fd88a", "#45bf5a", "#22993b", "#f2e33a", "#e8c22b", "#f0962a", "#e85d26", "#d6262a",
+             "#b0122d", "#c21d8e", "#8f2fbf", "#f5e9ff"] },
+  snow: { label: "Snow", units: "dBZ", levels: DBZ,
+    colors: ["#d9e9fc", "#b4d3f8", "#8dbcf3", "#67a5ed", "#468ce3", "#2f73d2", "#215cb8", "#18479d", "#133883",
+             "#0f2c6a", "#0b2154", "#081840", "#050f2c"] },
+  mix: { label: "Mix", units: "dBZ", levels: DBZ,
+    colors: ["#f1d6f0", "#e7b6e3", "#dd95d6", "#d273c9", "#c654bb", "#b53caa", "#9f2a97", "#881c84", "#701371",
+             "#590d5e", "#43084b", "#310538", "#220326"] },
+  "freezing rain": { label: "Freezing rain", units: "dBZ", levels: DBZ,
+    colors: ["#fbd3de", "#f7aac1", "#f281a4", "#ea5888", "#dd356f", "#c7205c", "#ad164d", "#921040", "#770c34",
+             "#5e0828", "#46061e", "#320415", "#22020d"] },
+  sleet: { label: "Sleet", units: "dBZ", levels: DBZ,
+    colors: ["#fde2c4", "#fbc993", "#f8ae63", "#f39237", "#e97a1f", "#d86514", "#c1540f", "#a7450c", "#8c380a",
+             "#712c08", "#572106", "#401804", "#2c1003"] },
+}
+export const PTYPE_NAMES = ["none", "rain", "snow", "freezing rain", "sleet", "mix"] as const
+/** Flat colours for precipitation type where a model has no reflectivity (global models). */
+export const PTYPE_COLORS: Record<string, string> = {
+  rain: "#45bf5a", snow: "#2f73d2", "freezing rain": "#dd356f", sleet: "#f39237", mix: "#b53caa",
 }

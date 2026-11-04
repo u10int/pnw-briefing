@@ -97,3 +97,12 @@ export interface Briefing {
   alerts: Alerts | null
   change: Change | null
 }
+
+/** data/fields.json: time-stepped grids for the interactive map (latest briefing only). */
+export type FieldVar = "t2m" | "gust" | "u10" | "v10" | "mslp" | "frz" | "refc" | "ptype"
+export interface FieldEntry {
+  path: string; model: string; tier: string; var: FieldVar; units: string
+  scale: number; nodata: number; times: string[]; run: string; init: string
+  categories?: Record<string, string>
+}
+export interface FieldsManifest { fields: FieldEntry[] }

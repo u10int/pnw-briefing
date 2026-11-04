@@ -10,8 +10,13 @@ function Slider({
   value,
   min = 0,
   max = 100,
+  "aria-label": ariaLabel,
+  getAriaValueText,
   ...props
-}: React.ComponentProps<typeof SliderPrimitive.Root>) {
+}: React.ComponentProps<typeof SliderPrimitive.Root> & {
+  /** Spoken value for each thumb, e.g. a forecast time instead of a raw index. */
+  getAriaValueText?: (value: number) => string
+}) {
   const _values = React.useMemo(
     () =>
       Array.isArray(value)
@@ -52,6 +57,9 @@ function Slider({
         <SliderPrimitive.Thumb
           data-slot="slider-thumb"
           key={index}
+          // the thumb is what takes focus, so it carries the accessible name and value text
+          aria-label={ariaLabel}
+          aria-valuetext={getAriaValueText && _values[index] != null ? getAriaValueText(_values[index]) : undefined}
           className="block size-4 shrink-0 rounded-full border border-primary bg-white shadow-sm ring-ring/50 transition-[color,box-shadow] hover:ring-4 focus-visible:ring-4 focus-visible:outline-hidden disabled:pointer-events-none disabled:opacity-50"
         />
       ))}
