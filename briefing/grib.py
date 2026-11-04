@@ -44,8 +44,11 @@ def day0(cfg) -> datetime:
     return now.replace(hour=12, minute=0, second=0, microsecond=0) - (timedelta(days=1) if now.hour < 12 else timedelta(0))
 
 
+# "Range request not honored": S3 occasionally answers a byte-range request with a redirect (HTTP
+# 302) instead of the bytes; the same request a moment later succeeds.
 TRANSIENT = re.compile(r"\b(429|500|502|503|504)\b|slow ?down|connection (reset|aborted)|timed? ?out|"
-                       r"remotedisconnected|incompleteread|temporarily unavailable|max retries", re.I)
+                       r"remotedisconnected|incompleteread|temporarily unavailable|max retries|"
+                       r"range request not honored", re.I)
 
 
 def _retry(fn, *args, tries=4, **kw):

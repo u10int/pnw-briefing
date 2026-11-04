@@ -46,3 +46,20 @@ if __name__ == "__main__":
     test_falls_back_when_newest_cycle_errors_or_is_unreadable()
     test_unreadable_listing_is_skipped()
     print("ok")
+
+
+def test_range_redirect_is_retried():
+    calls = []
+
+    def flaky():
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError("Range request not honored: server returned HTTP 302 (Content-Length: 721).")
+        return "ok"
+
+    import time as _t
+    sleep, _t.sleep = _t.sleep, lambda s: None
+    try:
+        assert grib._retry(flaky) == "ok" and len(calls) == 2
+    finally:
+        _t.sleep = sleep
