@@ -1,7 +1,8 @@
-"""Export gridded products as Cloud-Optimized GeoTIFFs (EPSG:4326, float32, inches or percent).
+"""Export gridded products as Cloud-Optimized GeoTIFFs (EPSG:4326, float32).
 
-One file per model, window and variable, plus the multi-model mean, spread and percent of
-normal. Global models keep their native 0.25° grid; projected regional grids (HRRR, RRFS,
+One file per model, window and variable (precipitation and snowfall in inches; highest and
+lowest temperature in °F; strongest wind and gust in mph), plus multi-model means, the
+precipitation spread and percent of normal. Global models keep their native 0.25° grid; projected regional grids (HRRR, RRFS,
 NAM, NBM) are resampled by nearest neighbour onto a regular 0.03° grid so every file is a
 plain lat/lon raster any GIS, rio-tiler or geotiff.js can read.
 
@@ -113,6 +114,26 @@ def export(grib_models, cfg, out_dir: Path, normals_grid=None):
                           f"Model mean as percent of 1991–2020 normal, {w['label'].lower()}")
                 add(f"pctnormal_precip_{n}d.tif", model="Percent of normal", tier="consensus", var="pct", days=n,
                     units="%", members=members)
+        # window extremes: each model that covers the window, and their mean
+        from .extremes import VARS, window
+        for var, meta in VARS.items():
+            have = [(m, window(m, var, n)) for m in covering]
+            have = [(m, f) for m, f in have if f is not None]
+            for m, f in have:
+                run = m["run"].strftime("%HZ %-d %b") if m.get("run") else None
+                lat, lon, g = _regular(m, f)
+                rel = f"{m['id']}_{var}_{n}d.tif"
+                write_cog(out_dir / rel, lat, lon, g, meta["units"], f"{m['label']} {meta['label'].lower()}, {w['label'].lower()}")
+                add(rel, model=m["label"], tier=m.get("tier"), var=var, days=n, units=meta["units"], run=run)
+            if len(have) > 1:
+                glat, glon = analysis.common_grid(cfg)
+                stack = np.stack([analysis.regrid(m["lat"], m["lon"], f, glat, glon) for m, f in have])
+                with np.errstate(all="ignore"):
+                    mean = np.nanmean(stack, 0)
+                rel = f"mean_{var}_{n}d.tif"
+                write_cog(out_dir / rel, glat, glon, mean, meta["units"], f"Multi-model mean {meta['label'].lower()}, {w['label'].lower()}")
+                add(rel, model="Model mean", tier="consensus", var=var, days=n, units=meta["units"],
+                    members=[m["label"] for m, _ in have])
     total = sum((out_dir / Path(m["path"]).name).stat().st_size for m in manifest)
     log.info("wrote %d COGs (%.1f MB)", len(manifest), total / 1e6)
     return manifest

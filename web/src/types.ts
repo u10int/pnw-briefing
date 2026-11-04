@@ -64,8 +64,11 @@ export interface Alert {
 }
 export interface Alerts { fetched: string; areas: string[]; zones: Record<string, string[]>; items: Alert[]; ok: boolean; demo?: boolean }
 
+/** Window extremes: highest/lowest 2 m temperature (°F), strongest sustained wind and gust (mph). */
+export type ExtremeVar = "tmax" | "tmin" | "wind" | "gust"
+
 export interface Cog {
-  path: string; model: string; tier: string; var: "precip" | "snow" | "mean" | "spread" | "pct"
+  path: string; model: string; tier: string; var: "precip" | "snow" | "mean" | "spread" | "pct" | ExtremeVar
   days: number; units: string; run?: string | null; members?: string[]
 }
 
@@ -90,6 +93,7 @@ export interface Briefing {
   models: Model[]
   ensembles: Ensemble[]
   maps: { short: string | null; snow_short: string | null; long: string | null; snow_long: string | null }
+    & Partial<Record<`${ExtremeVar}_${"short" | "long"}`, string | null>>
   cogs: Cog[]
   domain: { lat_min: number; lat_max: number; lon_min: number; lon_max: number }
   regionShapes: Record<string, [number, number][]>

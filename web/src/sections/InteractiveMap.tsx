@@ -19,7 +19,7 @@ import { GridLayer, type GridDraw } from "@/lib/gl/grid-layer"
 import { ParticleLayer, type WindDraw } from "@/lib/gl/particle-layer"
 import { type Grid, sameGrid } from "@/lib/gl/util"
 import { FRZ, GUST, PCT, PRECIP, PTYPE_COLORS, PTYPE_NAMES, type Ramp, REFC, SNOW, SPREAD, TEMP, WIND } from "@/lib/ramps"
-import type { Briefing, Cog, FieldEntry, FieldsManifest, FieldVar } from "@/types"
+import type { Briefing, Cog, ExtremeVar, FieldEntry, FieldsManifest, FieldVar } from "@/types"
 
 // ------------------------------------------------------------------ map plumbing
 
@@ -421,16 +421,21 @@ const categoryAt = (g: Grid, a: Float32Array, b: Float32Array | null, t: number,
 
 // ------------------------------------------------------------------ totals mode
 
-type TotVar = "precip" | "snow" | "spread" | "pct"
-const TOT_VARS: { id: TotVar; label: string; ramp: Ramp }[] = [
-  { id: "precip", label: "Precipitation", ramp: PRECIP },
-  { id: "snow", label: "Snowfall", ramp: SNOW },
-  { id: "spread", label: "Model spread", ramp: SPREAD },
-  { id: "pct", label: "% of normal", ramp: PCT },
+type TotVar = "precip" | "snow" | "spread" | "pct" | ExtremeVar
+/** Window products: precipitation totals, and extremes over the window. `digits` for hover values. */
+const TOT_VARS: { id: TotVar; label: string; group: "Totals" | "Extremes"; ramp: Ramp; perModel: boolean; digits: number }[] = [
+  { id: "precip", label: "Precipitation", group: "Totals", ramp: PRECIP, perModel: true, digits: 2 },
+  { id: "snow", label: "Snowfall", group: "Totals", ramp: SNOW, perModel: true, digits: 1 },
+  { id: "spread", label: "Model spread", group: "Totals", ramp: SPREAD, perModel: false, digits: 2 },
+  { id: "pct", label: "% of normal", group: "Totals", ramp: PCT, perModel: false, digits: 0 },
+  { id: "tmax", label: "Highest temperature", group: "Extremes", ramp: { ...TEMP, label: "Highest temperature at 2 m" }, perModel: true, digits: 0 },
+  { id: "tmin", label: "Lowest temperature", group: "Extremes", ramp: { ...TEMP, label: "Lowest temperature at 2 m" }, perModel: true, digits: 0 },
+  { id: "wind", label: "Strongest wind", group: "Extremes", ramp: { ...WIND, label: "Strongest sustained wind at 10 m" }, perModel: true, digits: 0 },
+  { id: "gust", label: "Strongest gust", group: "Extremes", ramp: { ...GUST, label: "Strongest gust" }, perModel: true, digits: 0 },
 ]
 const MEAN = "Model mean"
 
-function totalsView(c: Cog | undefined, ramp: Ramp, windowLabel: string): View | null {
+function totalsView(c: Cog | undefined, ramp: Ramp, windowLabel: string, digits = 2): View | null {
   if (!c) return null
   return {
     key: `tot|${c.path.slice(0, 120)}|${ramp.label}`,
@@ -445,7 +450,8 @@ function totalsView(c: Cog | undefined, ramp: Ramp, windowLabel: string): View |
           sample: (lon, lat, _t, smooth) => {
             const v = valueAt(r, r.data, lon, lat, smooth)
             if (!Number.isFinite(v)) return null
-            return ramp.units === "%" ? `${Math.round(v)}% of normal` : `${v.toFixed(2)} ${ramp.units}`
+            if (ramp.units === "%") return `${Math.round(v)}% of normal`
+            return `${v.toFixed(digits)}${ramp.units === "°F" ? "°F" : ` ${ramp.units}`}`
           },
         }
       },
@@ -764,9 +770,16 @@ export function InteractiveMap({ data }: { data: Briefing }) {
   const d = windows.includes(days) ? days : windows[0]
   const options = cogs.filter((c) => varOf(c) === variable && c.days === d)
   const pick = (name: string) => options.find((o) => o.model === name) ?? options.find((o) => o.model === MEAN) ?? options[0]
-  const totRamp = TOT_VARS.find((v) => v.id === variable)!.ramp
+  // the compare pane never shows the same model as the main one
+  const pickOther = (name: string) => {
+    const main = pick(model)?.model
+    const rest = options.filter((o) => o.model !== main)
+    return rest.find((o) => o.model === name) ?? rest.find((o) => o.model === MEAN) ?? rest[0]
+  }
+  const totDef = TOT_VARS.find((v) => v.id === variable)!
+  const totRamp = totDef.ramp
   const winLabel = (n: number) => data.windows.find((w) => w.days === n)?.label.toLowerCase() ?? `${n} days`
-  const perModel = variable === "precip" || variable === "snow"
+  const perModel = totDef.perModel
 
   // ---- hourly
   const layerModels = [...byModel.entries()].filter(([, v]) => HLAYERS.find((l) => l.id === layer)!.primary(v.entries))
@@ -805,11 +818,11 @@ export function InteractiveMap({ data }: { data: Briefing }) {
   }, [playing, times, mode])
 
   const viewA = mode === "totals"
-    ? totalsView(pick(model), totRamp, winLabel(d))
+    ? totalsView(pick(model), totRamp, winLabel(d), totDef.digits)
     : hA ? hourlyView(hA, byModel.get(hA)!.entries, layer, isobars) : null
   const showB = compare && (mode === "hourly" || perModel)
   const viewB = !showB ? null : mode === "totals"
-    ? totalsView(pick(other), totRamp, winLabel(d))
+    ? totalsView(pickOther(other), totRamp, winLabel(d), totDef.digits)
     : hB ? hourlyView(hB, byModel.get(hB)!.entries, layer, isobars) : null
 
   if (!cogs.length && !fields.length) return null
@@ -825,7 +838,7 @@ export function InteractiveMap({ data }: { data: Briefing }) {
         <CardTitle>Explore the grids</CardTitle>
         <CardDescription>
           {mode === "totals"
-            ? "Totals for each window, from each model's own grid. Model spread and percent of normal use the multi-model mean."
+            ? "Totals and extremes for each window, from each model's own grid. Model spread and percent of normal use the multi-model mean; extremes come from each model's 3- or 6-hourly output."
             : "Forecast maps through time. Regional models step hourly for precipitation and every 3 hours otherwise; global models every 6 hours. Playback blends smoothly between forecast steps."}
           {" "}Hover for values; drag and zoom to look closer.
         </CardDescription>
@@ -835,22 +848,30 @@ export function InteractiveMap({ data }: { data: Briefing }) {
           {hasHourly && (
             <Tabs value={mode} onValueChange={(v) => { setMode(v as "totals" | "hourly"); setPlaying(false) }}>
               <TabsList>
-                <TabsTrigger value="totals">Totals</TabsTrigger>
+                <TabsTrigger value="totals">Summary</TabsTrigger>
                 <TabsTrigger value="hourly">Through time</TabsTrigger>
               </TabsList>
             </Tabs>
           )}
           {mode === "totals" ? (
             <>
-              <Tabs value={variable} onValueChange={(v) => setVariable(v as TotVar)}>
-                <TabsList>{totAvail.map((v) => <TabsTrigger key={v.id} value={v.id}>{v.label}</TabsTrigger>)}</TabsList>
-              </Tabs>
+              <Select value={variable} onValueChange={(v) => setVariable(v as TotVar)}>
+                <SelectTrigger className="w-[190px]" aria-label="Variable"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {(["Totals", "Extremes"] as const).map((g) => [g, totAvail.filter((v) => v.group === g)] as const).filter(([, vs]) => vs.length).map(([g, vs]) => (
+                    <SelectGroup key={g}>
+                      <SelectLabel>{g === "Totals" ? "Totals" : "Extremes over the window"}</SelectLabel>
+                      {vs.map((v) => <SelectItem key={v.id} value={v.id}>{v.label}</SelectItem>)}
+                    </SelectGroup>
+                  ))}
+                </SelectContent>
+              </Select>
               <Tabs value={String(d)} onValueChange={(v) => setDays(Number(v))}>
                 <TabsList>{windows.map((w) => <TabsTrigger key={w} value={String(w)}>{winLabel(w).replace("next ", "")}</TabsTrigger>)}</TabsList>
               </Tabs>
               {perModel && <ModelSelect options={options} value={pick(model)?.model ?? ""} onChange={setModel} label="Model" />}
               {perModel && <Toggle id="compare-t" label="Compare" checked={compare} onChange={setCompare} />}
-              {perModel && compare && <ModelSelect options={options} value={pick(other)?.model ?? ""} onChange={setOther} label="Compare with" />}
+              {perModel && compare && <ModelSelect options={options.filter((o) => o.model !== pick(model)?.model)} value={pickOther(other)?.model ?? ""} onChange={setOther} label="Compare with" />}
             </>
           ) : (
             <>
@@ -884,7 +905,7 @@ export function InteractiveMap({ data }: { data: Briefing }) {
           {showB && <MapPane data={data} view={viewB} clock={clock} opacity={opacity} smooth={smooth} particles={showParticles} particleColor={ink} sync={sync} />}
         </div>
 
-        {mode === "totals" ? <RampLegend ramp={totRamp} /> : (
+        {mode === "totals" ? <RampLegend ramp={totRamp} every={totRamp.levels.length > 16 ? 2 : 1} /> : (
           <div className="space-y-2">
             {layer === "radar" && <RadarLegend withRefc={!!entriesA.refc} />}
             {smooth && layer === "radar" && !entriesA.refc && <p className="text-xs text-muted-foreground">Precipitation type is a category, so it isn't smoothed.</p>}

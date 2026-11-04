@@ -16,7 +16,7 @@ from zoneinfo import ZoneInfo
 import numpy as np
 import yaml
 
-from . import alerts, analysis, change, cogs, fields, impacts, maps, normals, report
+from . import alerts, analysis, change, cogs, extremes, fields, impacts, maps, normals, report
 from .grib import day0
 
 ROOT = Path(__file__).resolve().parent
@@ -70,6 +70,8 @@ def collect(cfg: dict, out: Path, demo: bool = False, products: bool = True) -> 
 
     for m in grib_models:
         m.setdefault("family", next((s["family"] for s in cfg["grib_models"] if s["id"] == m["id"]), "ncep"))
+        # highest/lowest temperature, strongest wind and gust over each window, on the model's grid
+        m["extremes"] = safe(f"{m['label']} extremes", lambda m=m: extremes.compute(m), {})
     models = model_order(grib_models + sup)
     ensembles = grib_ens + sup_ens
     if not models:
@@ -111,6 +113,10 @@ def collect(cfg: dict, out: Path, demo: bool = False, products: bool = True) -> 
         "snow_short": safe("48-hour snow maps", lambda: maps.snow(grib_models, cfg, wins[0]["days"], out / "snow_48h.png")),
         "long": safe("long-range maps", lambda: maps.full_range_precip(grib_models, cfg, 7, out / "precip_long.png")),
         "snow_long": safe("7-day snow maps", lambda: maps.snow(grib_models, cfg, 7, out / "snow_7d.png")),
+        **{f"{v}_short": safe(f"48-hour {v} maps", lambda v=v: maps.window_extreme(grib_models, cfg, v, wins[0]["days"], out / f"{v}_48h.png"))
+           for v in extremes.VARS},
+        **{f"{v}_long": safe(f"long-range {v} maps", lambda v=v: maps.full_range_extreme(grib_models, cfg, v, 7, out / f"{v}_long.png"))
+           for v in extremes.VARS},
     }
     field_manifest = safe("hourly fields", lambda: fields.export(grib_models, cfg, out / "fields"), []) \
         if products and grib_models else []
@@ -171,7 +177,9 @@ def collect(cfg: dict, out: Path, demo: bool = False, products: bool = True) -> 
                     "run": m["run"].strftime("%HZ %-d %b") if m.get("run") else None,
                     "days": analysis.coverage(m), "data": m["data"]} for m in models],
         "ensembles": ens_out,
-        "maps": {k: (v.name if v else None) for k in ("short", "snow_short", "long", "snow_long") for v in [img.get(k)]},
+        "maps": {k: (v.name if v else None)
+                 for k in ("short", "snow_short", "long", "snow_long", *(f"{x}_{h}" for x in extremes.VARS for h in ("short", "long")))
+                 for v in [img.get(k)]},
         "cogs": cog_manifest,
         "domain": cfg["domain"],
         "normals": norm,

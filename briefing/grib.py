@@ -337,6 +337,14 @@ def fetch_model(spec, cfg, start, points):
         except Exception as e:
             log.warning("%s: hourly fields skipped (%s)", spec["label"], report.short(e))
             model_fields = {}
+        # Models without 10 m wind components on the map (NBM) still publish wind speed; sample it
+        # for the window's strongest sustained wind.
+        wind_speed = None
+        if "u10" not in model_fields and fam == "ncep":
+            ws = _samples(spec, run, hours, [":WIND:10 m above ground:"], dom)
+            if ws:
+                hrs = sorted(ws)
+                wind_speed = {"hours": hrs, "data": np.stack([ws[h] for h in hrs]) * M_S_TO_MPH}
         daily_s = (np.diff(np.stack([[c[i, j] for i, j in idx] for c in snow]), axis=0).T
                    if snow is not None else np.full_like(daily_p, np.nan))
         tmax = (_daily_extreme(t2m, lead0, ndays, idx, np.nanmax) - 273.15) * 9 / 5 + 32 if t2m else np.full_like(daily_p, np.nan)
@@ -357,9 +365,9 @@ def fetch_model(spec, cfg, start, points):
                 for k, p in enumerate(points)}
         dates = [(start + timedelta(days=d)).replace(tzinfo=timezone.utc).astimezone(tz).date() for d in range(n)]
         return {"id": spec["id"], "label": spec["label"], "source": "grib", "tier": spec.get("tier", "global"),
-                "run": run, "range_days": ndays, "dates": dates, "data": data,
+                "run": run, "lead0": lead0, "range_days": ndays, "dates": dates, "data": data,
                 "lat": lat, "lon": lon, "precip_mm": cum, "snow_in": snow, "snow_method": snow_method,
-                "fields": model_fields}
+                "fields": model_fields, "wind_speed": wind_speed}
     except Exception as e:
         log.exception("%s: GRIB fetch failed", spec["label"])
         report.fail(spec["label"], report.short(e))

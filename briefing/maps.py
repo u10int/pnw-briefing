@@ -37,8 +37,25 @@ SPREAD_LEVELS = [0.25, 0.5, 1, 2, 3, 4, 6, 8, 12]
 SPREAD_COLORS = ["#f4f4f4", "#e6e6e6", "#d2d2d2", "#bcbcbc", "#a3a3a3", "#898989", "#6e6e6e",
                  "#545454", "#383838", "#1c1c1c"]
 
+# Same ramps as the interactive map (web/src/lib/ramps.ts): colour i covers [level i, level i+1).
+TEMP_LEVELS = [-10, -5, 0, 5, 10, 15, 20, 25, 30, 32, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100]
+TEMP_COLORS = ["#4b2c7f", "#5e3a9e", "#6b4bb8", "#5867c9", "#4a7fd4", "#3f97d9", "#43acd6", "#5cc0d2", "#8ad3d4",
+               "#b7e3cf", "#d6ecb4", "#e8ef9c", "#f4e98a", "#f7d872", "#f6c25e", "#f2a84f", "#ec8c45", "#e2703f",
+               "#d4543a", "#c13a36", "#a62533", "#87162d", "#661026", "#4a0b1d"]
+WIND_LEVELS = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 60, 70, 80]
+WIND_COLORS = ["#f2f4f7", "#dbe7f0", "#bcd7e6", "#95c3d8", "#6eaec9", "#4b98b8", "#3a8f8c", "#5a9f4f", "#a3b23a",
+               "#d9a72c", "#e47c2a", "#d9482b", "#b0203f", "#7a1258"]
+EXTREME_RAMPS = {"tmax": (TEMP_LEVELS, TEMP_COLORS), "tmin": (TEMP_LEVELS, TEMP_COLORS),
+                 "wind": (WIND_LEVELS, WIND_COLORS), "gust": (WIND_LEVELS, WIND_COLORS)}
 
-def _cmap(levels, colors):
+
+def _cmap(levels, colors, clamp=False):
+    if clamp:
+        # every value gets a colour: below the first level takes the first colour
+        cm = ListedColormap(colors[: len(levels) - 1])
+        cm.set_under(colors[0])
+        cm.set_over(colors[len(levels) - 1])
+        return cm, BoundaryNorm(levels, cm.N)
     cm = ListedColormap(colors[1:len(levels)])
     cm.set_under("none")
     cm.set_over(colors[-1])
@@ -95,12 +112,14 @@ def _draw(ax, tr, lat, lon, field, cmap, norm, title, sub, cfg):
     ax.text(0, 1.012, sub, transform=ax.transAxes, fontproperties=REG, fontsize=8, color=GRAY, va="bottom")
 
 
-def _legend(fig, rect, levels, colors, label):
-    cm, nm = _cmap(levels, colors)
+def _legend(fig, rect, levels, colors, label, clamp=False):
+    cm, nm = _cmap(levels, colors, clamp)
     cax = fig.add_axes(rect)
     cb = fig.colorbar(plt.cm.ScalarMappable(norm=nm, cmap=cm), cax=cax, orientation="horizontal",
-                      extend="max", ticks=levels, extendfrac=0.04)
-    cb.ax.set_xticklabels([f"{v:g}" for v in levels], fontproperties=REG, fontsize=7.5, color=BLACK)
+                      extend="both" if clamp else "max", ticks=levels, extendfrac=0.04)
+    every = 2 if len(levels) > 16 else 1
+    cb.ax.set_xticklabels([f"{v:g}" if k % every == 0 else "" for k, v in enumerate(levels)],
+                          fontproperties=REG, fontsize=7.5, color=BLACK)
     cb.ax.tick_params(length=2, width=0.5, color=BLACK)
     cb.outline.set_visible(False)
     cax.set_title(label, loc="left", fontproperties=REG, fontsize=8, color=GRAY, pad=4)
@@ -110,7 +129,7 @@ def _run(m):
     return f"{m['run']:%HZ %a %-d %b} run" if m.get("run") is not None else ""
 
 
-def _figure(panels, cfg, out_path, levels, colors, label, spread=None):
+def _figure(panels, cfg, out_path, levels, colors, label, spread=None, clamp=False):
     """panels: list of (lat, lon, field, title, sub). `spread` appended in its own ramp."""
     n = len(panels) + (1 if spread is not None else 0)
     ncols = n if n <= 6 else 5        # wide rows: small multiples read best side by side
@@ -120,7 +139,7 @@ def _figure(panels, cfg, out_path, levels, colors, label, spread=None):
     gs = fig.add_gridspec(rows, ncols, left=0.01, right=0.99, top=1 - 0.32 / (PH * rows + LEG),
                           bottom=LEG / (PH * rows + LEG), wspace=0.07, hspace=0.24)
     axes, tr = _axes(fig, gs, n, cfg["domain"])
-    cm, nm = _cmap(levels, colors)
+    cm, nm = _cmap(levels, colors, clamp)
     for ax, (lat, lon, f, title, sub) in zip(axes, panels):
         _draw(ax, tr, lat, lon, f, cm, nm, title, sub, cfg)
     leg_y = 0.2 / (PH * rows + LEG)
@@ -131,7 +150,7 @@ def _figure(panels, cfg, out_path, levels, colors, label, spread=None):
         _legend(fig, [0.01, leg_y, 0.5, 0.11 / (PH * rows + LEG)], levels, colors, label)
         _legend(fig, [0.6, leg_y, 0.39, 0.11 / (PH * rows + LEG)], SPREAD_LEVELS, SPREAD_COLORS, "Model spread, max − min (in)")
     else:
-        _legend(fig, [0.01, leg_y, 0.6, 0.11 / (PH * rows + LEG)], levels, colors, label)
+        _legend(fig, [0.01, leg_y, 0.6 if n > 2 else 0.98, 0.11 / (PH * rows + LEG)], levels, colors, label, clamp)
     fig.savefig(out_path, facecolor=PAPER, bbox_inches="tight", pad_inches=0.08)
     plt.close(fig)
     return out_path
@@ -179,3 +198,50 @@ def snow(grib_models, cfg, wdays, out_path):
     panels = [(m["lat"], m["lon"], m["snow_in"][wdays], m["label"], m["snow_method"]) for m in ms]
     return _figure(panels, cfg, out_path, SNOW_LEVELS, SNOW_COLORS,
                    f"Snowfall, next {wdays * 24 if wdays <= 3 else wdays} {'hours' if wdays <= 3 else 'days'} (in)")
+
+
+# ---------------------------------------------------------------- window extremes
+
+def _ext_label(var, horizon):
+    from .extremes import VARS
+    v = VARS[var]
+    return f"{v['label']}{', ' + horizon if horizon else ''} ({v['units']})"
+
+
+def _horizon(wdays):
+    return f"next {wdays * 24} hours" if wdays <= 3 else f"next {wdays} days"
+
+
+def window_extreme(grib_models, cfg, var, wdays, out_path):
+    """Each model's extreme over the window, then the multi-model mean on a common grid."""
+    from .extremes import window
+    ms = [(m, window(m, var, wdays)) for m in grib_models]
+    ms = [(m, f) for m, f in ms if f is not None]
+    if not ms:
+        return None
+    panels = [(m["lat"], m["lon"], f, m["label"], _run(m)) for m, f in ms]
+    if len(ms) > 1:
+        glat, glon = analysis.common_grid(cfg)
+        stack = np.stack([analysis.regrid(m["lat"], m["lon"], f, glat, glon) for m, f in ms])
+        with np.errstate(all="ignore"):
+            panels.append((glat, glon, np.nanmean(stack, 0), "Mean", f"{len(ms)} models"))
+    levels, colors = EXTREME_RAMPS[var]
+    return _figure(panels, cfg, out_path, levels, colors, _ext_label(var, _horizon(wdays)), clamp=True)
+
+
+def full_range_extreme(grib_models, cfg, var, min_days, out_path):
+    """Each longer-range model's extreme over its own full range; mean over the days all of them cover."""
+    from .extremes import window
+    ms = [m for m in grib_models if m["range_days"] >= min_days and window(m, var, m["range_days"]) is not None]
+    if not ms:
+        return None
+    common = min(m["range_days"] for m in ms)
+    panels = [(m["lat"], m["lon"], window(m, var, m["range_days"]), m["label"], f"{m['range_days']} days, {_run(m)}")
+              for m in ms]
+    if len(ms) > 1:
+        glat, glon = analysis.common_grid(cfg, 0.1)
+        stack = np.stack([analysis.regrid(m["lat"], m["lon"], window(m, var, common), glat, glon) for m in ms])
+        with np.errstate(all="ignore"):
+            panels.append((glat, glon, np.nanmean(stack, 0), "Mean", f"First {common} days, {len(ms)} models"))
+    levels, colors = EXTREME_RAMPS[var]
+    return _figure(panels, cfg, out_path, levels, colors, _ext_label(var, None), clamp=True)
