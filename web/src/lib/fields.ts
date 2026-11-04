@@ -208,3 +208,36 @@ export function bicubicAt(g: Grid, data: Float32Array, fx: number, fy: number): 
 const COMPASS = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"]
 /** Compass direction the wind blows *from*. */
 export const windFrom = (u: number, v: number) => COMPASS[Math.round((((Math.atan2(-u, -v) * 180) / Math.PI + 360) % 360) / 22.5) % 16]
+
+/** Pressure centres: cells that are the lowest (L) or highest (H) within about a sixth of the grid
+ *  in every direction, away from the edges (an edge extreme is usually a gradient, not a centre),
+ *  and stand out from their surroundings by at least `prominence`. */
+export function pressureCenters(g: Grid, raw: Float32Array, prominence = 1.5): GeoJSON.FeatureCollection<GeoJSON.Point, { kind: "H" | "L"; value: number }> {
+  const data = smooth(g, raw, g.width > 120 ? 4 : 2)
+  const r = Math.max(3, Math.round(Math.min(g.width, g.height) / 6))
+  const feats: GeoJSON.Feature<GeoJSON.Point, { kind: "H" | "L"; value: number }>[] = []
+  for (let y = r; y < g.height - r; y++) {
+    for (let x = r; x < g.width - r; x++) {
+      const v = data[y * g.width + x]
+      if (!Number.isFinite(v)) continue
+      let lo = true, hi = true, sum = 0, n = 0
+      for (let dy = -r; dy <= r && (lo || hi); dy++) {
+        for (let dx = -r; dx <= r; dx++) {
+          if (!dx && !dy) continue
+          const w = data[(y + dy) * g.width + x + dx]
+          if (!Number.isFinite(w)) { lo = hi = false; break }
+          if (w <= v) lo = false
+          if (w >= v) hi = false
+          sum += w; n++
+        }
+      }
+      if (!(lo || hi) || !n) continue
+      if (Math.abs(sum / n - v) < prominence) continue
+      const lon = g.west + ((x + 0.5) / g.width) * (g.east - g.west)
+      const lat = g.north - ((y + 0.5) / g.height) * (g.north - g.south)
+      feats.push({ type: "Feature", properties: { kind: lo ? "L" : "H", value: Math.round(raw[y * g.width + x]) },
+                   geometry: { type: "Point", coordinates: [lon, lat] } })
+    }
+  }
+  return { type: "FeatureCollection", features: feats }
+}

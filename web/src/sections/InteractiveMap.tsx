@@ -14,11 +14,11 @@ import { Slider } from "@/components/ui/slider"
 import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { loadCog } from "@/lib/cog"
-import { bicubicAt, contourLines, fieldUrl, gridPos, loadField, nearestAt, nearestTime, windArrows, windFrom } from "@/lib/fields"
+import { bicubicAt, contourLines, fieldUrl, gridPos, loadField, nearestAt, nearestTime, pressureCenters, windArrows, windFrom } from "@/lib/fields"
 import { GridLayer, type GridDraw } from "@/lib/gl/grid-layer"
 import { ParticleLayer, type WindDraw } from "@/lib/gl/particle-layer"
 import { type Grid, sameGrid } from "@/lib/gl/util"
-import { FRZ, GUST, PCT, PRECIP, PROB, PTYPE_COLORS, PTYPE_NAMES, type Ramp, REFC, SNOW, SPREAD, TDEP, TEMP, WIND } from "@/lib/ramps"
+import { FRZ, GUST, IVT, PCT, PRECIP, PROB, PTYPE_COLORS, PTYPE_NAMES, type Ramp, REFC, SNOW, SPREAD, TDEP, TEMP, WIND } from "@/lib/ramps"
 import type { Briefing, Cog, ExtremeVar, FieldEntry, FieldsManifest, FieldVar } from "@/types"
 
 // ------------------------------------------------------------------ map plumbing
@@ -30,6 +30,31 @@ const EMPTY: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: 
 // variable to send one (CARTO's raster tiles already require it).
 const CARTO_KEY = (import.meta.env.VITE_CARTO_KEY as string | undefined) || ""
 const STYLE_URL = "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json"
+/** Public AWS Terrain Tiles (Terrarium-encoded elevation), no key needed, read through a protocol
+ *  that flattens everything below sea level: the tiles include bathymetry, and sea-floor relief
+ *  under the ocean grids would read as weather structure. */
+const DEM_TILES = "dem-land://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"
+let demProtocol = false
+function addDemProtocol() {
+  if (demProtocol) return
+  demProtocol = true
+  maplibregl.addProtocol("dem-land", async (params, abort) => {
+    const r = await fetch(params.url.replace("dem-land://", "https://"), { signal: abort.signal })
+    if (!r.ok) throw new Error(`terrain tile ${r.status}`)
+    const img = await createImageBitmap(await r.blob())
+    const c = new OffscreenCanvas(img.width, img.height)
+    const ctx = c.getContext("2d", { willReadFrequently: true })!
+    ctx.drawImage(img, 0, 0)
+    const px = ctx.getImageData(0, 0, img.width, img.height)
+    const d = px.data
+    for (let i = 0; i < d.length; i += 4) {
+      // Terrarium: elevation = R * 256 + G + B / 256 - 32768 (m); R < 128 means below sea level
+      if (d[i] < 128) { d[i] = 128; d[i + 1] = 0; d[i + 2] = 0 }
+    }
+    ctx.putImageData(px, 0, 0)
+    return { data: await (await c.convertToBlob({ type: "image/png" })).arrayBuffer() }
+  })
+}
 const withKey = (url: string) =>
   CARTO_KEY && url.includes("cartocdn.com") && !/[?&]key=/.test(url)
     ? { url: `${url}${url.includes("?") ? "&" : "?"}key=${encodeURIComponent(CARTO_KEY)}` }
@@ -139,7 +164,7 @@ interface Loaded {
   note?: string
   sample: (lon: number, lat: number, t: number, smooth: boolean) => string | null
 }
-interface Overlays { isobars?: FC | null; freezing?: FC | null; arrows?: FC | null; sample?: (lon: number, lat: number, smooth: boolean) => string | null }
+interface Overlays { isobars?: FC | null; centers?: FC | null; freezing?: FC | null; arrows?: FC | null; sample?: (lon: number, lat: number, smooth: boolean) => string | null }
 /** One channel's choice for the current time: `key` identifies the data, `t` blends within it. */
 interface Choice<T> { key: string; t: number; load: () => Promise<T> }
 
@@ -201,9 +226,10 @@ function arrowImage(): ImageData {
 
 type Status = { kind: "loading" | "ready" | "error" | "empty"; note?: string }
 
-function MapPane({ data, view, clock, opacity, smooth, particles, particleColor, sync }: {
+function MapPane({ data, view, clock, opacity, smooth, particles, particleColor, sync, terrain }: {
   data: Briefing; view: View | null; clock: Clock; opacity: number; smooth: boolean
   particles: boolean; particleColor: [number, number, number, number]; sync: ReturnType<typeof useCameraSync>
+  terrain: boolean
 }) {
   const el = React.useRef<HTMLDivElement>(null)
   const ready = React.useRef<Promise<maplibregl.Map> | null>(null)
@@ -215,6 +241,8 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
   smoothRef.current = smooth
   const viewRef = React.useRef(view)
   viewRef.current = view
+  const terrainRef = React.useRef(terrain)
+  terrainRef.current = terrain
   const [hover, setHover] = React.useState<{ x: number; y: number; text: string | null; place: string | null } | null>(null)
   const [status, setStatus] = React.useState<Status>({ kind: "loading" })
   const [sub, setSub] = React.useState<string | undefined>()
@@ -222,6 +250,7 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
   React.useEffect(() => {
     // open on the whole grid crop, not just the comparison regions, so the surroundings show too
     const d = data.domain
+    addDemProtocol()
     const m = new maplibregl.Map({
       container: el.current!, style: STYLE_URL, transformRequest: withKey, attributionControl: { compact: true },
       bounds: [[d.lon_min, d.lat_min], [d.lon_max, d.lat_max]],
@@ -241,8 +270,29 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
       const labels = m.getStyle().layers.find((l) => l.type === "symbol")?.id
       m.addImage("arrow", arrowImage(), { sdf: true })
       m.addLayer(grid, labels)
+      // terrain shading over the weather colours (shadows only darken, so the colours still read)
+      m.addSource("dem", { type: "raster-dem", tiles: [DEM_TILES], tileSize: 256, maxzoom: 12, encoding: "terrarium",
+                           attribution: "Terrain: Mapzen / AWS Terrain Tiles" })
+      m.addLayer({ id: "hillshade", type: "hillshade", source: "dem",
+                   layout: { visibility: terrainRef.current ? "visible" : "none" },
+                   paint: { "hillshade-exaggeration": 0.45, "hillshade-shadow-color": "rgba(20, 24, 30, 0.55)",
+                            "hillshade-highlight-color": "rgba(255, 255, 255, 0.18)", "hillshade-accent-color": "rgba(0, 0, 0, 0)",
+                            "hillshade-illumination-direction": 315 } }, labels)
       m.addSource("isobars", { type: "geojson", data: EMPTY })
       m.addLayer({ id: "isobars", type: "line", source: "isobars", paint: { "line-color": "#3a3f47", "line-width": ["case", ["==", ["%", ["get", "value"], 8], 0], 1.4, 0.8], "line-opacity": 0.75 } }, labels)
+      m.addSource("centers", { type: "geojson", data: EMPTY })
+      // labels need the basemap's glyphs; the plain fallback style has none
+      const font = (m.getStyle().layers.find((l) => l.type === "symbol" && (l.layout as Record<string, unknown> | undefined)?.["text-font"])?.layout as Record<string, unknown> | undefined)?.["text-font"]
+      if (m.getStyle().glyphs && Array.isArray(font)) {
+        m.addLayer({ id: "isobar-labels", type: "symbol", source: "isobars",
+          layout: { "symbol-placement": "line", "symbol-spacing": 260, "text-field": ["to-string", ["get", "value"]],
+                    "text-font": font as string[], "text-size": 10, "text-keep-upright": true, "text-max-angle": 30 },
+          paint: { "text-color": "#3a3f47", "text-halo-color": "rgba(255,255,255,0.9)", "text-halo-width": 1.4 } }, labels)
+        m.addLayer({ id: "centers", type: "symbol", source: "centers",
+          layout: { "text-field": ["format", ["get", "kind"], { "font-scale": 1.5 }, "\n", {}, ["to-string", ["get", "value"]], { "font-scale": 0.75 }],
+                    "text-font": font as string[], "text-size": 14, "text-line-height": 1.0, "text-allow-overlap": true },
+          paint: { "text-color": ["match", ["get", "kind"], "L", "#c0262d", "#1d4fa0"], "text-halo-color": "rgba(255,255,255,0.95)", "text-halo-width": 1.6 } }, labels)
+      }
       m.addSource("freezing", { type: "geojson", data: EMPTY })
       m.addLayer({ id: "freezing", type: "line", source: "freezing", paint: { "line-color": "#1d3f9c", "line-width": 1.6, "line-dasharray": [2, 1.5] } }, labels)
       m.addSource("arrows", { type: "geojson", data: EMPTY })
@@ -299,6 +349,7 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
         overlays.current = o
         ready.current?.then((m) => {
           ;(m.getSource("isobars") as GeoJSONSource).setData(o?.isobars ?? EMPTY)
+          ;(m.getSource("centers") as GeoJSONSource).setData(o?.centers ?? EMPTY)
           ;(m.getSource("freezing") as GeoJSONSource).setData(o?.freezing ?? EMPTY)
           ;(m.getSource("arrows") as GeoJSONSource).setData(o?.arrows ?? EMPTY)
         })
@@ -328,6 +379,9 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
     ready.current?.then((m) => m.setLayoutProperty("arrows", "visibility", particles ? "none" : "visible"))
   }, [particles])
   React.useEffect(() => { layers.current!.particles.setColor(particleColor) }, [particleColor.join()])
+  React.useEffect(() => {
+    ready.current?.then((m) => m.getLayer("hillshade") && m.setLayoutProperty("hillshade", "visibility", terrain ? "visible" : "none"))
+  }, [terrain])
 
   return (
     <div className="relative overflow-hidden rounded-lg border">
@@ -475,14 +529,19 @@ function totalsView(c: Cog | undefined, ramp: Ramp, windowLabel: string, digits 
 
 // ------------------------------------------------------------------ hourly mode
 
-type HLayer = "radar" | "t2m" | "gust" | "wind" | "frz"
+type HLayer = "radar" | "t2m" | "gust" | "wind" | "frz" | "ivt"
 const HLAYERS: { id: HLayer; label: string; primary: (e: Record<string, FieldEntry>) => FieldEntry | undefined }[] = [
   { id: "radar", label: "Precipitation", primary: (e) => e.refc ?? e.ptype },
   { id: "t2m", label: "Temperature", primary: (e) => e.t2m },
   { id: "gust", label: "Gusts", primary: (e) => e.gust },
   { id: "wind", label: "Wind", primary: (e) => (e.u10 && e.v10 ? e.u10 : undefined) },
   { id: "frz", label: "Freezing level", primary: (e) => e.frz },
+  { id: "ivt", label: "Moisture (IVT)", primary: (e) => (e.ivtu && e.ivtv ? e.ivtu : undefined) },
 ]
+/** The vector pair a layer's particles follow: water vapor transport on the IVT layer, else the 10 m wind. */
+const flowOf = (layer: HLayer, e: Record<string, FieldEntry>) =>
+  layer === "ivt" ? (e.ivtu && e.ivtv ? { u: e.ivtu, v: e.ivtv, scale: 1 / 25 } : null)
+    : (e.u10 && e.v10 ? { u: e.u10, v: e.v10, scale: 1 } : null)
 const ISOBARS = Array.from({ length: 31 }, (_, i) => 940 + 4 * i)
 
 const timeLabel = (iso: string) =>
@@ -524,7 +583,7 @@ function hourlyView(model: string, entries: Record<string, FieldEntry>, layer: H
   const iso = isobars && !!entries.mslp
   const name = def.label.toLowerCase()
   const nearest = (time: number | null) => (time == null ? null : bracket(prim.times, time, false, 3.1))
-  const ramp = layer === "t2m" ? TEMP : layer === "gust" ? GUST : layer === "wind" ? WIND : FRZ
+  const ramp = layer === "t2m" ? TEMP : layer === "gust" ? GUST : layer === "wind" ? WIND : layer === "ivt" ? IVT : FRZ
 
   return {
     key: `hr|${model}|${layer}|${iso ? 1 : 0}`,
@@ -568,8 +627,9 @@ function hourlyView(model: string, entries: Record<string, FieldEntry>, layer: H
               const tn = PTYPE_NAMES[categoryAt(f, A, B, t, lon, lat)] ?? "none"
               return tn === "none" ? "No precipitation" : cap(tn)
             }
-          } else if (layer === "wind") {
-            const va = await bandNear(entries.v10, isoA), vb = B ? await bandNear(entries.v10, isoB) : null
+          } else if (layer === "wind" || layer === "ivt") {
+            const vEntry = layer === "ivt" ? entries.ivtv : entries.v10
+            const va = await bandNear(vEntry, isoA), vb = B ? await bandNear(vEntry, isoB) : null
             if (!va || (B && !vb)) return { draw: null, note: `${model} has no matching wind components at this time.`, sample: () => null }
             const SA = speedOf(A, va.data), SB = B && vb ? speedOf(B, vb.data) : null
             draw = { grid: f, a: SA, b: SB, paint: { kind: "ramp", ramp } }
@@ -577,6 +637,7 @@ function hourlyView(model: string, entries: Record<string, FieldEntry>, layer: H
               const s = blendAt(f, SA, SB, t, lon, lat, smooth)
               if (!Number.isFinite(s)) return null
               const u = blendAt(f, A, B, t, lon, lat, smooth), v = blendAt(f, va.data, vb?.data ?? null, t, lon, lat, smooth)
+              if (layer === "ivt") return `IVT ${Math.round(s)} kg/m/s from the ${windFrom(u, v)}${s >= 250 ? " (AR conditions)" : ""}`
               return `${windFrom(u, v)} ${Math.round(s)} mph`
             }
           } else {
@@ -615,6 +676,7 @@ function hourlyView(model: string, entries: Record<string, FieldEntry>, layer: H
             const p = await bandNear(entries.mslp, valid, 1.6)
             if (p) {
               out.isobars = contourLines(p.f, p.data, ISOBARS, p.f.width > 120 ? 3 : 1)
+              out.centers = pressureCenters(p.f, p.data)
               out.sample = (lon, lat, smooth) => {
                 const v = valueAt(p.f, p.data, lon, lat, smooth)
                 return Number.isFinite(v) ? `${v.toFixed(0)} hPa` : null
@@ -626,8 +688,10 @@ function hourlyView(model: string, entries: Record<string, FieldEntry>, layer: H
       }
     },
     wind(time, interp) {
-      const u = entries.u10, v = entries.v10
-      if (!u || !v || time == null) return null
+      const flow = flowOf(layer, entries)
+      if (!flow || time == null) return null
+      const { u, v, scale } = flow
+      const sc = (a: Float32Array) => (scale === 1 ? a : a.map((x) => x * scale))
       const b = bracket(u.times, time, interp, 3.1)
       if (!b) return null
       return {
@@ -637,17 +701,17 @@ function hourlyView(model: string, entries: Record<string, FieldEntry>, layer: H
           const u0 = await f.band(b.i0)
           const v0 = await bandNear(v, u.times[b.i0])
           if (!v0 || !sameGrid(v0.f, f)) throw new Error("no matching v component")
-          if (b.i1 === b.i0) return { grid: f, u0, v0: v0.data }
+          if (b.i1 === b.i0) return { grid: f, u0: sc(u0), v0: sc(v0.data) }
           const u1 = await f.band(b.i1)
           const v1 = await bandNear(v, u.times[b.i1])
-          return v1 ? { grid: f, u0, v0: v0.data, u1, v1: v1.data } : { grid: f, u0, v0: v0.data }
+          return v1 ? { grid: f, u0: sc(u0), v0: sc(v0.data), u1: sc(u1), v1: sc(v1.data) } : { grid: f, u0: sc(u0), v0: sc(v0.data) }
         },
       }
     },
     prefetch(time) {
       // decode the next few steps ahead of playback
       const i = Math.floor(posOf(msOf(prim.times), time))
-      for (const e of [prim, entries.ptype, entries.v10, entries.u10]) {
+      for (const e of [prim, entries.ptype, entries.v10, entries.u10, entries.ivtv]) {
         if (!e) continue
         for (let k = 1; k <= 3; k++) {
           const iso = prim.times[i + k]
@@ -753,6 +817,7 @@ export function InteractiveMap({ data }: { data: Briefing }) {
   const [opacity, setOpacity] = React.useState(0.85)
   const [smooth, setSmooth] = useStoredFlag("pnw-briefing.map.smooth", false)
   const [particles, setParticles] = useStoredFlag("pnw-briefing.map.particles", true)
+  const [terrain, setTerrain] = useStoredFlag("pnw-briefing.map.terrain", true)
   const [compare, setCompare] = React.useState(false)
   const clock = React.useMemo(() => new Clock(), [])
 
@@ -843,7 +908,7 @@ export function InteractiveMap({ data }: { data: Briefing }) {
   if (!cogs.length && !fields.length) return null
   const hasHourly = fields.length > 0
   const entriesA = hA ? byModel.get(hA)!.entries : {}
-  const hasWind = mode === "hourly" && [hA, showB ? hB : undefined].some((m) => m && byModel.get(m)?.entries.u10 && byModel.get(m)?.entries.v10)
+  const hasWind = mode === "hourly" && [hA, showB ? hB : undefined].some((m) => m && flowOf(layer, byModel.get(m)!.entries))
   const showParticles = particles && hasWind
   const ink = layer === "wind" ? WIND_INK : DARK_INK
 
@@ -901,10 +966,11 @@ export function InteractiveMap({ data }: { data: Briefing }) {
               <Toggle id="compare-h" label="Compare" checked={compare} onChange={setCompare} />
               {compare && hB && <ModelSelect options={layerModels.filter((m) => m.model !== hA)} value={hB} onChange={setHOther} label="Compare with" />}
               {entriesA.mslp && <Toggle id="isobars" label="Isobars" checked={isobars} onChange={setIsobars} />}
-              {hasWind && <Toggle id="particles" label="Wind particles" checked={particles} onChange={setParticles} />}
+              {hasWind && <Toggle id="particles" label={layer === "ivt" ? "Moisture particles" : "Wind particles"} checked={particles} onChange={setParticles} />}
             </>
           )}
           <div className="ml-auto flex items-center gap-5">
+            <Toggle id="terrain" label="Terrain" checked={terrain} onChange={setTerrain} />
             <Toggle id="smooth" label="Smooth" checked={smooth} onChange={setSmooth} />
             <div className="flex w-[180px] items-center gap-3">
               <Label className="text-xs text-muted-foreground">Opacity</Label>
@@ -916,8 +982,8 @@ export function InteractiveMap({ data }: { data: Briefing }) {
         {mode === "hourly" && times.length > 0 && <TimeBar times={times} clock={clock} playing={playing} setPlaying={setPlaying} />}
 
         <div className={`grid gap-3 ${showB ? "lg:grid-cols-2" : ""}`}>
-          <MapPane data={data} view={viewA} clock={clock} opacity={opacity} smooth={smooth} particles={showParticles} particleColor={ink} sync={sync} />
-          {showB && <MapPane data={data} view={viewB} clock={clock} opacity={opacity} smooth={smooth} particles={showParticles} particleColor={ink} sync={sync} />}
+          <MapPane data={data} view={viewA} clock={clock} opacity={opacity} smooth={smooth} particles={showParticles} particleColor={ink} sync={sync} terrain={terrain} />
+          {showB && <MapPane data={data} view={viewB} clock={clock} opacity={opacity} smooth={smooth} particles={showParticles} particleColor={ink} sync={sync} terrain={terrain} />}
         </div>
 
         {mode === "totals" ? <RampLegend ramp={totRamp} every={totRamp.levels.length > 16 ? 2 : 1} /> : (
@@ -929,8 +995,9 @@ export function InteractiveMap({ data }: { data: Briefing }) {
             {layer === "gust" && <RampLegend ramp={GUST} />}
             {layer === "wind" && <RampLegend ramp={WIND} note={showParticles ? "Particles trace the 10 m wind; faster particles mean stronger wind." : "Arrows point the way the wind is blowing; longer arrows are stronger winds."} />}
             {layer === "frz" && <RampLegend ramp={FRZ} every={2} note="Snow usually reaches the ground about 1,000 ft below the freezing level." />}
-            {showParticles && layer !== "wind" && <p className="text-xs text-muted-foreground">Moving particles trace the 10 m wind.</p>}
-            {isobars && entriesA.mslp && <p className="text-xs text-muted-foreground">Gray lines are sea-level pressure every 4 hPa; heavier lines every 8 hPa.</p>}
+            {layer === "ivt" && <RampLegend ramp={IVT} note={`Vertically integrated water vapor transport (GFS and ECMWF AIFS), the measure behind the atmospheric-river scale: 250 and up is AR conditions${showParticles ? "; particles follow the moisture flow" : ""}.`} />}
+            {showParticles && layer !== "wind" && layer !== "ivt" && <p className="text-xs text-muted-foreground">Moving particles trace the 10 m wind.</p>}
+            {isobars && entriesA.mslp && <p className="text-xs text-muted-foreground">Gray lines are sea-level pressure every 4 hPa, labelled in hPa; heavier lines every 8 hPa. H and L mark pressure centres.</p>}
           </div>
         )}
 

@@ -107,8 +107,12 @@ their commercial tier or swap in Xweather points in `briefing/points.py`.
   temperature, strongest wind and strongest gust over each window. *Through time* steps through
   the forecast with a time slider and play button: simulated radar coloured by precipitation type
   (rain, snow, mix, freezing rain, sleet), 2 m temperature with the 32°F line, gusts, wind, and
-  freezing level, with optional isobars and animated wind particles. Both modes hover for values,
-  compare two models side by side, and link each grid for download.
+  freezing level, and water vapor transport (IVT, GFS and ECMWF AIFS) on the atmospheric-river
+  scale, with optional isobars (labelled, with H and L at pressure centres) and animated particles
+  that follow the wind, or the moisture flow on the IVT layer. A *Terrain* switch shades the
+  relief over the grids (AWS Terrain Tiles, with everything below sea level flattened so sea-floor
+  relief doesn't show through the ocean grids). Both modes hover for values, compare two models
+  side by side, and link each grid for download.
 
   Grids are drawn by custom WebGL layers from their raw values: each band is uploaded as a float
   texture, and the fragment shader finds every screen pixel's exact lat/lon (inverse Web
@@ -122,7 +126,10 @@ their commercial tier or swap in Xweather points in `briefing/points.py`.
   and strongest gust.
 - **Totals by model.** Region totals for each window, a model × location table with window and
   inches / % of normal switches and a since-yesterday row, and GRIB area means over every grid cell inside each region.
-- **Temperature departures.** Each location's multi-model median daily high and low against its
+- **Day by day.** *Rain by day:* each location's multi-model median for each 12Z–12Z day
+  (liquid equivalent, or snowfall), shaded by amount, with region rows, a 14-day total and the
+  model range and the day's normal on hover.
+  *Temperatures vs normal:* each location's multi-model median daily high and low against its
   PRISM 1991–2020 normal for the date, as a location × day table (highs or lows, colored blue to
   red) with a window average and region rows, plus a one-line summary per region. The
   interactive map's Summary mode has the gridded version ("Temperature vs normal").
@@ -183,6 +190,7 @@ Values are int16 with a scale factor recorded in the file, so GIS tools read phy
 |---|---|---|---|
 | `refc` simulated composite reflectivity | dBZ | HRRR, RRFS, NAM | hourly, 48 h |
 | `ptype` precipitation type (0 none, 1 rain, 2 snow, 3 freezing rain, 4 sleet, 5 mix) | | HRRR, RRFS, NAM hourly; GFS, ECMWF every 6 h | |
+| `ivtu`, `ivtv` water vapor transport components | kg m⁻¹ s⁻¹ | GFS, ECMWF AIFS | every 6 h |
 | `t2m` temperature at 2 m | °F | all GRIB models | hourly for 48 h for HRRR, RRFS, NAM (then 3 h); 6 h others |
 | `gust`, `u10`, `v10` | mph | all but AIFS (no gust field) | same |
 | `mslp` sea-level pressure | hPa | all but NBM | same |
