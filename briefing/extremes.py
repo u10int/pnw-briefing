@@ -1,10 +1,11 @@
 """Extremes over a forecast window on each model's own grid: highest and lowest 2 m temperature,
 strongest sustained 10 m wind and strongest gust.
 
-Built from the time-stepped samples the pipeline already has (every 3 h for regional models,
-every 6 h for global ones), so a peak between output times can be missed: highs and lows may
-run a degree or two short of the true extreme. Gusts are the model's own gust field, which for
-ECMWF is already the maximum since the previous output step.
+Built from `ext_series` (see grib.extreme_series): values at each model's native output steps,
+using the max/min-since-the-previous-output records where the model publishes them, so peaks
+between output times are caught. Each entry is (start, end, field): an interval record covers
+(start, end]; an instantaneous value has start == end. Without a series (demo data, or a model
+whose interval read failed) the time-stepped map fields are used as instantaneous values.
 
 `compute(m)` returns {var: ndarray[days, y, x]}, where index d-1 holds the extreme over the
 first d 12Z–12Z days, so any window up to the model's range is one lookup.
@@ -27,22 +28,45 @@ VARS = {
 }
 
 
-def _cumulative(hours, data, lead0, ndays, fn, closed_hi):
-    """Extreme over the first d days for d = 1..ndays. Max uses (start, end], min uses [start, end),
-    matching the daily highs and lows at the forecast locations."""
-    hours = np.asarray(hours)
-    pick = np.fmax if fn == "max" else np.fmin
-    reduce = np.nanmax if fn == "max" else np.nanmin
-    out, run = [], None
+def _in_day(start, end, a, b, kind):
+    """Whether an entry belongs to the 12Z–12Z day (a, b]. Intervals go by their end; an
+    instantaneous value at exactly 12Z counts toward the following day's low (as before)."""
+    if start < end:
+        return a < end <= b
+    return (a < end <= b) if kind == "max" else (a <= end < b)
+
+
+def daily(entries, lead0, ndays, kind):
+    """Per-day extreme [ndays, y, x] from (start, end, field) entries; NaN for days with none."""
+    reduce = np.nanmax if kind == "max" else np.nanmin
+    shape = entries[0][2].shape
+    out = np.full((ndays, *shape), np.nan, dtype="float32")
     for d in range(ndays):
         a, b = lead0 + 24 * d, lead0 + 24 * (d + 1)
-        sel = ((hours > a) & (hours <= b)) if closed_hi else ((hours >= a) & (hours < b))
-        if sel.any():
-            with np.errstate(all="ignore"), _quiet():
-                day = reduce(data[sel], axis=0)
-            run = day if run is None else pick(run, day)
-        out.append(run if run is not None else np.full(data.shape[1:], np.nan, dtype="float32"))
-    return np.stack(out).astype("float32")
+        day = [f for s0, e0, f in entries if _in_day(s0, e0, a, b, kind)]
+        if day:
+            with _quiet():
+                out[d] = reduce(np.stack(day), axis=0)
+    return out
+
+
+def _cumulative(entries, lead0, ndays, kind):
+    """Extreme over the first d days for d = 1..ndays."""
+    per_day = daily(entries, lead0, ndays, kind)
+    pick = np.fmax if kind == "max" else np.fmin
+    return pick.accumulate(per_day, axis=0).astype("float32")
+
+
+def _from_fields(m):
+    """Instantaneous entries from the time-stepped map fields (demo data, or no series)."""
+    f = m.get("fields") or {}
+    inst = lambda e: [(h, h, e["data"][i]) for i, h in enumerate(e["hours"])] if e and len(e["hours"]) else []
+    out = {"tmax": inst(f.get("t2m")), "tmin": inst(f.get("t2m")), "gust": inst(f.get("gust"))}
+    u, v = f.get("u10"), f.get("v10")
+    if u and v:
+        vi = {h: i for i, h in enumerate(v["hours"])}
+        out["wind"] = [(h, h, np.hypot(u["data"][i], v["data"][vi[h]])) for i, h in enumerate(u["hours"]) if h in vi]
+    return {k: x for k, x in out.items() if x}
 
 
 class _quiet:
@@ -58,31 +82,17 @@ class _quiet:
 
 
 def compute(m) -> dict:
-    """Window extremes for one GRIB model, from its time-stepped fields (display units)."""
-    f = m.get("fields") or {}
+    """Window extremes for one GRIB model, in display units (°F, mph)."""
     lead0, nd = m.get("lead0"), int(m.get("range_days") or 0)
     if lead0 is None or nd <= 0:
         return {}
     shape = analysis._ll2d(m["lat"], m["lon"])[0].shape
-    ok = lambda e: e is not None and len(e["hours"]) and e["data"].shape[-2:] == shape
+    series = {**_from_fields(m), **(m.get("ext_series") or {})}
     out = {}
-    t = f.get("t2m")
-    if ok(t):
-        out["tmax"] = _cumulative(t["hours"], t["data"], lead0, nd, "max", True)
-        out["tmin"] = _cumulative(t["hours"], t["data"], lead0, nd, "min", False)
-    g = f.get("gust")
-    if ok(g):
-        out["gust"] = _cumulative(g["hours"], g["data"], lead0, nd, "max", True)
-    u, v = f.get("u10"), f.get("v10")
-    if ok(u) and ok(v):
-        common = sorted(set(u["hours"]) & set(v["hours"]))
-        iu = [u["hours"].index(h) for h in common]
-        iv = [v["hours"].index(h) for h in common]
-        speed = np.hypot(u["data"][iu], v["data"][iv])
-        out["wind"] = _cumulative(common, speed, lead0, nd, "max", True)
-    elif ok(m.get("wind_speed")):
-        w = m["wind_speed"]
-        out["wind"] = _cumulative(w["hours"], w["data"], lead0, nd, "max", True)
+    for var in VARS:
+        entries = [e for e in series.get(var, []) if e[2].shape == shape]
+        if entries:
+            out[var] = _cumulative(entries, lead0, nd, "min" if var == "tmin" else "max")
     missing = [k for k in VARS if k not in out]
     if missing:
         log.info("%s: no window extremes for %s", m["label"], ", ".join(missing))
