@@ -40,6 +40,14 @@ export const IVT: Ramp = {
   colors: ["#d7e8f4", "#8fc6e6", "#4f9fd8", "#3fae6a", "#9ccc3c", "#e9b625", "#f08a24", "#d9342b"],
 }
 
+/** Sea-level pressure gradient strength. Synoptic gradients run 1–2 hPa per 100 km; 3+ is a
+ *  windstorm-class gradient, and gap flows (Gorge, Fraser) pack even tighter. */
+export const PGRAD: Ramp = {
+  label: "Pressure gradient", units: "hPa per 100 km",
+  levels: [1, 1.5, 2, 2.5, 3, 4, 5, 6.5, 8],
+  colors: ["#fdf0c4", "#fbd98a", "#f7b955", "#f19537", "#e5702b", "#cf4a2a", "#ad2a35", "#831a45", "#56124a"],
+}
+
 /** Departure from normal (°F): blue below, red above, white within ±2°. */
 export const TDEP: Ramp = {
   label: "Departure from 1991–2020 normal", units: "°F", clampLow: true,

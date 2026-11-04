@@ -8,7 +8,8 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { dateRange, dayShort, inch } from "@/lib/format"
 import { pctCell } from "@/sections/Totals"
-import type { ArEvent, Avalanche, AvalancheDanger, Briefing, Landslide, ModelSeries, N, PointOdds, Tier } from "@/types"
+import type { ArEvent, Avalanche, AvalancheDanger, Briefing, Gradient, Landslide, ModelSeries, N, PointOdds, Tier } from "@/types"
+import { GRAD_COLORS, gradLevel, pairName, seriesAt } from "@/lib/gradients"
 
 // ------------------------------------------------------------------ shared: multi-model time series
 
@@ -653,10 +654,69 @@ export function OddsCard({ data }: { data: Briefing }) {
 
 // ------------------------------------------------------------------ pressure gradients
 
+/** One row per pair: 3-hour bins where any model passes a threshold, merged into runs at the same
+ *  level, shaded by the share of models that agree. Per-model peaks are in the tooltip. */
+function GradientTimeline({ gs }: { gs: Gradient[] }) {
+  const all = gs.flatMap((g) => g.series.flatMap((s) => s.times.map((x) => Date.parse(x))))
+  const t0 = Math.min(...all), t1 = Math.max(...all)
+  const BIN = 3 * H
+  const groups: TimelineGroup[] = gs.map((g) => {
+    type Run = { start: number; end: number; level: number; label: string; most: number; n: number; peaks: Map<string, { v: number; at: number }> }
+    const runs: Run[] = []
+    for (let t = t0; t <= t1; t += BIN) {
+      const lv = g.series.map((s) => ({ s, v: seriesAt(s, t, s.times.length > 60 ? 1.6 : 3.5) }))
+        .filter((x): x is { s: ModelSeries; v: number } => x.v != null)
+        .map((x) => ({ ...x, ...gradLevel(g, x.v) }))
+      const top = Math.max(0, ...lv.map((x) => x.level))
+      if (!top) continue
+      const over = lv.filter((x) => x.level >= 1)
+      const label = lv.find((x) => x.level === top)!.label!
+      const last = runs[runs.length - 1]
+      const run = last && last.level === top && last.label === label && last.end >= t - BIN / 2 ? last
+        : (runs.push({ start: t - BIN / 2, end: t + BIN / 2, level: top, label, most: 0, n: 0, peaks: new Map() }), runs[runs.length - 1])
+      run.end = t + BIN / 2
+      run.most = Math.max(run.most, over.length)
+      run.n = Math.max(run.n, lv.length)
+      for (const x of over) {
+        const p = run.peaks.get(x.s.model)
+        if (!p || Math.abs(x.v) > Math.abs(p.v)) run.peaks.set(x.s.model, { v: x.v, at: t })
+      }
+    }
+    return {
+      key: g.id, label: pairName(g), title: g.meaning,
+      rows: [{
+        key: "models", label: <span className="truncate">{g.thresholds.length ? "Models past" : ""}</span>,
+        bars: runs.map((r, k) => {
+          const share = r.n ? r.most / r.n : 0
+          return {
+            key: String(k), start: Math.max(t0, r.start), end: Math.min(t1, r.end),
+            color: `color-mix(in srgb, ${GRAD_COLORS[r.level]} ${Math.round(40 + 60 * share)}%, transparent)`,
+            text: r.level >= 2 && share >= 0.5 ? "#fff" : "#1b1f24",
+            label: `${r.label} · ${r.most}/${r.n}`, short: `${r.most}/${r.n}`,
+            aria: `${pairName(g)}: ${r.label} in up to ${r.most} of ${r.n} models, ${tipTime(r.start)} to ${tipTime(r.end)}`,
+            tip: <>
+              <p className="font-semibold">{pairName(g)} · {r.label}</p>
+              <p>{tipTime(r.start + BIN / 2)} – {tipTime(r.end - BIN / 2)}, up to {r.most} of {r.n} models</p>
+              <div className="grid grid-cols-[auto_auto_auto] gap-x-3 pt-1 opacity-85">
+                {[...r.peaks.entries()].sort((a, b) => Math.abs(b[1].v) - Math.abs(a[1].v)).map(([m, p]) => (
+                  <React.Fragment key={m}><span>{m}</span><span className="text-right tabular-nums">{p.v > 0 ? "+" : ""}{p.v.toFixed(1)} hPa</span><span className="opacity-75">{tipTime(p.at)}</span></React.Fragment>
+                ))}
+              </div>
+              <p className="opacity-75">{g.meaning}</p>
+            </>,
+          }
+        }),
+      }],
+    }
+  })
+  return <Timeline t0={t0} t1={t1} groups={groups} groupW={96} rowW={88} />
+}
+
 export function GradientsCard({ data }: { data: Briefing }) {
   const gs = (data.gradients ?? []).filter((g) => g.series.length)
   if (!gs.length) return null
   const models = [...new Set(gs.flatMap((g) => g.series.map((s) => s.model)))]
+  const anyPast = gs.some((g) => g.series.some((s) => s.values.some((v) => gradLevel(g, v).level > 0)))
   return (
     <Card>
       <CardHeader>
@@ -667,6 +727,18 @@ export function GradientsCard({ data }: { data: Briefing }) {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
+        <div className="space-y-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm font-medium">When each pair passes its thresholds</p>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+              <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-4 rounded-[3px]" style={{ background: GRAD_COLORS[1] }} />first threshold</span>
+              <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-4 rounded-[3px]" style={{ background: GRAD_COLORS[2] }} />second</span>
+              <span>· deeper = more models agree</span>
+            </div>
+          </div>
+          <GradientTimeline gs={gs} />
+          {!anyPast && <p className="text-xs text-muted-foreground">No pair reaches a threshold in any model through this forecast.</p>}
+        </div>
         <ModelLegend models={models} />
         <div className="grid gap-6 lg:grid-cols-2">
           {gs.map((g) => {
