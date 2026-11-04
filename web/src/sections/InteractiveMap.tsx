@@ -279,12 +279,12 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
                             "hillshade-highlight-color": "rgba(255, 255, 255, 0.18)", "hillshade-accent-color": "rgba(0, 0, 0, 0)",
                             "hillshade-illumination-direction": 315 } }, labels)
       m.addSource("isobars", { type: "geojson", data: EMPTY })
-      m.addLayer({ id: "isobars", type: "line", source: "isobars", paint: { "line-color": "#3a3f47", "line-width": ["case", ["==", ["%", ["get", "value"], 8], 0], 1.4, 0.8], "line-opacity": 0.75 } }, labels)
+      m.addLayer({ id: "isobars", type: "line", source: "isobars", paint: { "line-color": "#3a3f47", "line-width": ["case", ["==", ["%", ["get", "value"], 4], 0], 1.3, 0.6], "line-opacity": ["case", ["==", ["%", ["get", "value"], 4], 0], 0.8, 0.55] } }, labels)
       m.addSource("centers", { type: "geojson", data: EMPTY })
       // labels need the basemap's glyphs; the plain fallback style has none
       const font = (m.getStyle().layers.find((l) => l.type === "symbol" && (l.layout as Record<string, unknown> | undefined)?.["text-font"])?.layout as Record<string, unknown> | undefined)?.["text-font"]
       if (m.getStyle().glyphs && Array.isArray(font)) {
-        m.addLayer({ id: "isobar-labels", type: "symbol", source: "isobars",
+        m.addLayer({ id: "isobar-labels", type: "symbol", source: "isobars", filter: ["==", ["%", ["get", "value"], 4], 0],
           layout: { "symbol-placement": "line", "symbol-spacing": 260, "text-field": ["to-string", ["get", "value"]],
                     "text-font": font as string[], "text-size": 10, "text-keep-upright": true, "text-max-angle": 30 },
           paint: { "text-color": "#3a3f47", "text-halo-color": "rgba(255,255,255,0.9)", "text-halo-width": 1.4 } }, labels)
@@ -542,7 +542,8 @@ const HLAYERS: { id: HLayer; label: string; primary: (e: Record<string, FieldEnt
 const flowOf = (layer: HLayer, e: Record<string, FieldEntry>) =>
   layer === "ivt" ? (e.ivtu && e.ivtv ? { u: e.ivtu, v: e.ivtv, scale: 1 / 25 } : null)
     : (e.u10 && e.v10 ? { u: e.u10, v: e.v10, scale: 1 } : null)
-const ISOBARS = Array.from({ length: 31 }, (_, i) => 940 + 4 * i)
+// every 2 hPa: this view is only ~7° across, where 4 hPa leaves one or two lines outside a strong storm
+const ISOBARS = Array.from({ length: 62 }, (_, i) => 940 + 2 * i)
 
 const timeLabel = (iso: string) =>
   new Date(iso).toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", timeZone: "America/Los_Angeles", timeZoneName: "short" })
@@ -675,7 +676,7 @@ function hourlyView(model: string, entries: Record<string, FieldEntry>, layer: H
           if (iso) {
             const p = await bandNear(entries.mslp, valid, 1.6)
             if (p) {
-              out.isobars = contourLines(p.f, p.data, ISOBARS, p.f.width > 120 ? 3 : 1)
+              out.isobars = contourLines(p.f, p.data, ISOBARS, p.f.width > 120 ? 4 : 1)   // extra smoothing on 3 km grids, where sea-level reduction over terrain is noisy
               out.centers = pressureCenters(p.f, p.data)
               out.sample = (lon, lat, smooth) => {
                 const v = valueAt(p.f, p.data, lon, lat, smooth)
@@ -997,7 +998,7 @@ export function InteractiveMap({ data }: { data: Briefing }) {
             {layer === "frz" && <RampLegend ramp={FRZ} every={2} note="Snow usually reaches the ground about 1,000 ft below the freezing level." />}
             {layer === "ivt" && <RampLegend ramp={IVT} note={`Vertically integrated water vapor transport (GFS and ECMWF AIFS), the measure behind the atmospheric-river scale: 250 and up is AR conditions${showParticles ? "; particles follow the moisture flow" : ""}.`} />}
             {showParticles && layer !== "wind" && layer !== "ivt" && <p className="text-xs text-muted-foreground">Moving particles trace the 10 m wind.</p>}
-            {isobars && entriesA.mslp && <p className="text-xs text-muted-foreground">Gray lines are sea-level pressure every 4 hPa, labelled in hPa; heavier lines every 8 hPa. H and L mark pressure centres.</p>}
+            {isobars && entriesA.mslp && <p className="text-xs text-muted-foreground">Gray lines are sea-level pressure every 2 hPa; heavier, labelled lines every 4 hPa. H and L mark pressure centres.</p>}
           </div>
         )}
 
