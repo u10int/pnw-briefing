@@ -37,6 +37,11 @@ export function SinceYesterday({ data }: { data: Briefing }) {
         </CardDescription>
       </CardHeader>
       <CardContent className="grid gap-6 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+        {c.windows.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            No totals to compare: yesterday's briefing doesn't cover the same days or locations.
+          </p>
+        ) : (
         <Table>
           <TableHeader>
             <TableRow>
@@ -53,6 +58,7 @@ export function SinceYesterday({ data }: { data: Briefing }) {
                 </TableCell>
                 {data.regions.map((r) => {
                   const v = w.regions[r.id]
+                  if (!v) return <TableCell key={r.id} className="text-right text-muted-foreground">–</TableCell>
                   return (
                     <TableCell key={r.id} className="text-right">
                       <Delta value={v.delta} />
@@ -64,6 +70,7 @@ export function SinceYesterday({ data }: { data: Briefing }) {
             ))}
           </TableBody>
         </Table>
+        )}
         <div>
           <p className="mb-2 text-sm font-medium">Hazards</p>
           {hazardRows.length ? (

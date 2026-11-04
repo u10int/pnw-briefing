@@ -5,7 +5,8 @@ today's days that yesterday's forecast also covered. For the 14-day window that 
 13 days; the overlap length is reported with each comparison.
 
 Works on the cleaned briefing.json dicts (lists, None for missing), so the previous
-day's file can be read straight off the published site.
+day's file can be read straight off the published site. Only locations present in both
+briefings are compared, so adding or removing a location doesn't blank the comparison.
 """
 from __future__ import annotations
 
@@ -46,7 +47,13 @@ def _overlaps(a, b):
 def compare(now: dict, prev: dict | None, windows: list[dict]):
     if not prev or not prev.get("models"):
         return None
-    regions, points = now["regions"], now["points"]
+    # Compare only locations both briefings have: a location added since yesterday (or removed)
+    # has nothing to compare against and would otherwise rule out every model.
+    prev_names = {p["name"] for p in prev.get("points", [])}
+    points = [p for p in now["points"] if p["name"] in prev_names]
+    regions = [r for r in now["regions"] if any(p.get("region") == r["id"] for p in points)]
+    if not points:
+        return {"prevIssued": prev.get("meta", {}).get("issued"), "windows": [], "events": _events(now, prev)}
     out_w = []
     for w in windows:
         dates = [d for d in now["dates"][: w["days"]] if d in set(prev["dates"])]
@@ -66,7 +73,11 @@ def compare(now: dict, prev: dict | None, windows: list[dict]):
                        for m in a["models"] if m in b["models"]},
         })
 
-    # hazards: new, upgraded, downgraded, dropped (only for dates both briefings cover)
+    return {"prevIssued": prev.get("meta", {}).get("issued"), "windows": out_w, "events": _events(now, prev)}
+
+
+def _events(now, prev):
+    """Hazards: new, upgraded, downgraded, dropped (only for dates both briefings cover)."""
     first = now["dates"][0]
     ev_now = now.get("events", [])
     ev_prev = [e for e in prev.get("events", []) if e["end"] >= first]
@@ -85,4 +96,4 @@ def compare(now: dict, prev: dict | None, windows: list[dict]):
         if not any(p["hazard"] == e["hazard"] and _overlaps(p, e) for e in ev_now):
             changes["dropped"].append({"label": p["label"], "start": p["start"], "end": p["end"],
                                        "level": None, "prevLevel": p["level"]})
-    return {"prevIssued": prev.get("meta", {}).get("issued"), "windows": out_w, "events": changes}
+    return changes
