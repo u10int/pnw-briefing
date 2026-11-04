@@ -261,3 +261,64 @@ export function pressureGradient(g: Grid, raw: Float32Array, passes: number): Fl
   }
   return out
 }
+
+// ---- terrain elevation on a field's grid (for masking where sea-level pressure is extrapolated)
+
+const TERRARIUM = "https://s3.amazonaws.com/elevation-tiles-prod/terrarium"
+const elevCache = new Map<string, Promise<Float32Array>>()
+
+/** Mean terrain height (m) over each cell of `g`, from AWS Terrain Tiles at zoom 7 (~1 km),
+ *  averaging a 3×3 sample per cell the way a model's smoothed terrain would. */
+export function elevationFor(g: Grid): Promise<Float32Array> {
+  const key = `${g.width}x${g.height}|${g.west}|${g.south}|${g.east}|${g.north}`
+  if (!elevCache.has(key)) {
+    const p = loadElevation(g)
+    p.catch(() => elevCache.delete(key))
+    elevCache.set(key, p)
+  }
+  return elevCache.get(key)!
+}
+
+async function loadElevation(g: Grid): Promise<Float32Array> {
+  const z = 7, n = 2 ** z, size = 256
+  const X = (lon: number) => ((lon + 180) / 360) * n * size
+  const Y = (lat: number) => {
+    const r = (Math.max(-85, Math.min(85, lat)) * Math.PI) / 180
+    return ((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2) * n * size
+  }
+  const tx0 = Math.floor(X(g.west) / size), tx1 = Math.floor(X(g.east) / size)
+  const ty0 = Math.floor(Y(g.north) / size), ty1 = Math.floor(Y(g.south) / size)
+  const tiles = new Map<string, Float32Array>()
+  await Promise.all(Array.from({ length: (tx1 - tx0 + 1) * (ty1 - ty0 + 1) }, async (_, k) => {
+    const tx = tx0 + (k % (tx1 - tx0 + 1)), ty = ty0 + Math.floor(k / (tx1 - tx0 + 1))
+    const r = await fetch(`${TERRARIUM}/${z}/${tx}/${ty}.png`)
+    if (!r.ok) throw new Error(`terrain tile ${r.status}`)
+    const img = await createImageBitmap(await r.blob())
+    const c = new OffscreenCanvas(size, size)
+    const ctx = c.getContext("2d", { willReadFrequently: true })!
+    ctx.drawImage(img, 0, 0)
+    const d = ctx.getImageData(0, 0, size, size).data
+    const e = new Float32Array(size * size)
+    for (let i = 0; i < e.length; i++) e[i] = d[4 * i] * 256 + d[4 * i + 1] + d[4 * i + 2] / 256 - 32768
+    tiles.set(`${tx}/${ty}`, e)
+  }))
+  const at = (lon: number, lat: number) => {
+    const px = X(lon), py = Y(lat)
+    const t = tiles.get(`${Math.floor(px / size)}/${Math.floor(py / size)}`)
+    if (!t) return NaN
+    return Math.max(0, t[Math.min(size - 1, Math.floor(py % size)) * size + Math.min(size - 1, Math.floor(px % size))])
+  }
+  const out = new Float32Array(g.width * g.height)
+  const dLon = (g.east - g.west) / g.width, dLat = (g.north - g.south) / g.height
+  for (let y = 0; y < g.height; y++) {
+    for (let x = 0; x < g.width; x++) {
+      let s = 0, m = 0
+      for (const fy of [0.17, 0.5, 0.83]) for (const fx of [0.17, 0.5, 0.83]) {
+        const v = at(g.west + (x + fx) * dLon, g.north - (y + fy) * dLat)
+        if (Number.isFinite(v)) { s += v; m++ }
+      }
+      out[y * g.width + x] = m ? s / m : NaN
+    }
+  }
+  return out
+}

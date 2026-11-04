@@ -14,7 +14,7 @@ import { Slider } from "@/components/ui/slider"
 import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { loadCog } from "@/lib/cog"
-import { bicubicAt, contourLines, fieldUrl, gridPos, loadField, nearestAt, nearestTime, pressureCenters, pressureGradient, windArrows, windFrom } from "@/lib/fields"
+import { bicubicAt, contourLines, fieldUrl, gridPos, loadField, nearestAt, nearestTime, elevationFor, pressureCenters, pressureGradient, windArrows, windFrom } from "@/lib/fields"
 import { GRAD_COLORS, gradLevel, pairName, seriesAt } from "@/lib/gradients"
 import { GridLayer, type GridDraw } from "@/lib/gl/grid-layer"
 import { ParticleLayer, type WindDraw } from "@/lib/gl/particle-layer"
@@ -571,9 +571,15 @@ async function bandNear(e: FieldEntry | undefined, iso: string, tol = 0.6) {
   return { f, i, data: await f.band(i) }
 }
 
+/** Above this height (m) sea-level pressure is an extrapolation, and its gradient shows the mountains. */
+const PGRAD_MAX_ELEV = 900
 const gradCache = new WeakMap<Float32Array, Float32Array>()
-const gradOf = (g: Grid, p: Float32Array) => {
-  if (!gradCache.has(p)) gradCache.set(p, pressureGradient(g, p, g.width > 120 ? 6 : 2))
+const gradOf = (g: Grid, p: Float32Array, elev: Float32Array | null) => {
+  if (!gradCache.has(p)) {
+    const out = pressureGradient(g, p, g.width > 120 ? 6 : 2)
+    if (elev) for (let i = 0; i < out.length; i++) if (elev[i] > PGRAD_MAX_ELEV) out[i] = NaN
+    gradCache.set(p, out)
+  }
   return gradCache.get(p)!
 }
 
@@ -607,7 +613,8 @@ function pairOverlay(pairs: Gradient[], model: string, time: number): FC {
     const v = seriesAt(s, time)
     if (v == null) continue
     const { level, label } = gradLevel(g, v)
-    const text = `${pairName(g)} ${v > 0 ? "+" : ""}${v.toFixed(0)}`
+    const r = Math.round(v)
+    const text = `${pairName(g)} ${r > 0 ? "+" : r < 0 ? "−" : ""}${Math.abs(r)}`
     features.push({ type: "Feature", properties: { level, color: GRAD_COLORS[level], text, what: label ?? "" },
                     geometry: { type: "LineString", coordinates: g.locs } })
     for (const [k, loc] of g.locs.entries()) {
@@ -664,11 +671,13 @@ function hourlyView(model: string, entries: Record<string, FieldEntry>, layer: H
               return `${tn && tn !== "none" ? cap(tn) + ", " : ""}${Math.round(v)} dBZ`
             }
           } else if (layer === "pgrad") {
-            const GA = gradOf(f, A), GB = B ? gradOf(f, B) : null
+            const elev = await elevationFor(f).catch(() => null)
+            const GA = gradOf(f, A, elev), GB = B ? gradOf(f, B, elev) : null
             draw = { grid: f, a: GA, b: GB, paint: { kind: "ramp", ramp } }
             describe = (lon, lat, t, smooth) => {
               const v = blendAt(f, GA, GB, t, lon, lat, smooth)
-              return Number.isFinite(v) ? `Pressure gradient ${v.toFixed(1)} hPa per 100 km` : null
+              if (Number.isFinite(v)) return `Pressure gradient ${v.toFixed(1)} hPa per 100 km`
+              return elev && Number.isFinite(valueAt(f, A, lon, lat, false)) ? `High terrain: not shown (sea-level pressure is extrapolated above ${PGRAD_MAX_ELEV.toLocaleString("en-US")} m)` : null
             }
           } else if (layer === "radar") {
             draw = { grid: f, a: A, b: B, paint: { kind: "ptype" } }
@@ -1048,7 +1057,7 @@ export function InteractiveMap({ data }: { data: Briefing }) {
             {layer === "gust" && <RampLegend ramp={GUST} />}
             {layer === "wind" && <RampLegend ramp={WIND} note={showParticles ? "Particles trace the 10 m wind; faster particles mean stronger wind." : "Arrows point the way the wind is blowing; longer arrows are stronger winds."} />}
             {layer === "frz" && <RampLegend ramp={FRZ} every={2} note="Snow usually reaches the ground about 1,000 ft below the freezing level." />}
-            {layer === "pgrad" && <RampLegend ramp={PGRAD} note="How fast sea-level pressure changes with distance, from the smoothed field: 1–2 is a typical synoptic gradient, 3 and up is windstorm-class, and gap flows (Gorge, Fraser, Strait) pack tighter. Over high terrain sea-level pressure is an extrapolation, so values there are less reliable." />}
+            {layer === "pgrad" && <RampLegend ramp={PGRAD} note="How fast sea-level pressure changes with distance, from the smoothed field: 1–2 is a typical synoptic gradient, 3 and up is windstorm-class, and gap flows (Gorge, Fraser, Strait) pack tighter. Terrain above 900 m (about 3,000 ft) is left blank: sea-level pressure there is an extrapolation, and its gradient would mostly trace the mountains." />}
             {showPairs && pairList.length > 0 && <p className="text-xs text-muted-foreground">Lines join each gradient station pair, labelled with this model's pressure difference (hPa, first station minus second); amber and red mark the pair's first and second thresholds, as on the pressure gradient card.</p>}
             {layer === "ivt" && <RampLegend ramp={IVT} note={`Vertically integrated water vapor transport (GFS and ECMWF AIFS), the measure behind the atmospheric-river scale: 250 and up is AR conditions${showParticles ? "; particles follow the moisture flow" : ""}.`} />}
             {showParticles && layer !== "wind" && layer !== "ivt" && <p className="text-xs text-muted-foreground">Moving particles trace the 10 m wind.</p>}
