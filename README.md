@@ -90,6 +90,8 @@ their commercial tier or swap in Xweather points in `briefing/points.py`.
     thresholds are in `config.yaml` under `gradients`. A station outside the map area (Williams
     Lake) is read from each model's full pressure grid before cropping, so it costs no extra
     downloads; models whose grid doesn't reach it (HRRR, NAM) are left out of that pair.
+    A timeline above the charts shows, for each pair, when any model passes a threshold (amber for
+    the first, red for the second), shaded by how many models agree, with each model's peak on hover.
   - *Snow level at the passes:* each model's freezing level minus 1,000 ft
     (`snow_level_offset_ft`) at Snoqualmie, Stevens, White Pass and Government Camp, against the
     pass elevation (`elev_ft` on each point).
@@ -107,9 +109,13 @@ their commercial tier or swap in Xweather points in `briefing/points.py`.
   temperature, strongest wind and strongest gust over each window. *Through time* steps through
   the forecast with a time slider and play button: simulated radar coloured by precipitation type
   (rain, snow, mix, freezing rain, sleet), 2 m temperature with the 32°F line, gusts, wind, and
-  freezing level, and water vapor transport (IVT, GFS and ECMWF AIFS) on the atmospheric-river
-  scale, with optional isobars (labelled, with H and L at pressure centres) and animated particles
-  that follow the wind, or the moisture flow on the IVT layer. A *Terrain* switch shades the
+  freezing level, water vapor transport (IVT, GFS and ECMWF AIFS) on the atmospheric-river
+  scale, and pressure-gradient strength (hPa per 100 km from the smoothed sea-level pressure, with
+  mountain cells left blank because sea-level pressure there is extrapolated). Overlays: isobars
+  every 2 hPa (labelled every 4, with H and L at pressure centres); the gradient station pairs as
+  lines coloured by each pair's thresholds, labelled with the model's difference and with
+  arrowheads from high to low pressure; and animated particles that follow the wind, or the
+  moisture flow on the IVT layer. A *Terrain* switch shades the
   relief over the grids (AWS Terrain Tiles, with everything below sea level flattened so sea-floor
   relief doesn't show through the ocean grids). Both modes hover for values, compare two models
   side by side, and link each grid for download.
