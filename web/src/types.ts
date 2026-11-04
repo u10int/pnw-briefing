@@ -69,7 +69,7 @@ export type ExtremeVar = "tmax" | "tmin" | "wind" | "gust"
 
 export interface Cog {
   path: string; model: string; tier: string
-  var: "precip" | "snow" | "mean" | "spread" | "pct" | ExtremeVar | "p24" | "p72" | "obs" | "obspct"
+  var: "precip" | "snow" | "mean" | "spread" | "pct" | ExtremeVar | "p24" | "p72" | "obs" | "obspct" | "tmaxdep" | "tmindep"
   days: number; units: string; run?: string | null; members?: string[]; threshold?: number
 }
 
@@ -142,6 +142,16 @@ export interface Briefing {
   outlooks?: Outlooks | null
   landslide?: Landslide | null
   avalanche?: Avalanche | null
+  tempDeparture?: TempDeparture | null
+}
+
+export interface TempDepartureVar { forecast: N[]; low: N[]; high: N[]; models: number[]; departure: N[] }
+export interface TempDeparture {
+  source: string; dates: string[]
+  normals: Record<string, { tmax: N[]; tmin: N[] }>
+  points: Record<string, { tmax: TempDepartureVar; tmin: TempDepartureVar }>
+  regions: Record<string, { tmax: N[]; tmin: N[] }>
+  windows: { days: number; label: string; points: Record<string, { tmax: N; tmin: N }>; regions: Record<string, { tmax: N; tmin: N }> }[]
 }
 
 export interface Landslide {

@@ -99,6 +99,21 @@ def compute(m) -> dict:
     return out
 
 
+def daily_temps(m) -> dict:
+    """Per-day high and low [days, y, x] (°F) on the model's grid, for departure from normal."""
+    lead0, nd = m.get("lead0"), int(m.get("range_days") or 0)
+    if lead0 is None or nd <= 0:
+        return {}
+    shape = analysis._ll2d(m["lat"], m["lon"])[0].shape
+    series = {**_from_fields(m), **(m.get("ext_series") or {})}
+    out = {}
+    for var, kind in (("tmax", "max"), ("tmin", "min")):
+        entries = [e for e in series.get(var, []) if e[2].shape == shape]
+        if entries:
+            out[var] = daily(entries, lead0, nd, kind)
+    return out
+
+
 def window(m, var, days):
     """The extreme over the first `days` days, or None if the model doesn't cover that window."""
     e = (m.get("extremes") or {}).get(var)

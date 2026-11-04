@@ -33,6 +33,13 @@ export const PCT: Ramp = {
   colors: ["#8c510a", "#bf812d", "#dfc27d", "#f6e8c3", "#f5f5f5", "#c7eae5", "#80cdc1", "#35978f", "#01665e", "#003c30"],
 }
 
+/** Departure from normal (°F): blue below, red above, white within ±2°. */
+export const TDEP: Ramp = {
+  label: "Departure from 1991–2020 normal", units: "°F", clampLow: true,
+  levels: [-20, -15, -10, -5, -2, 2, 5, 10, 15],
+  colors: ["#2166ac", "#4393c3", "#92c5de", "#d1e5f0", "#f7f7f7", "#fddbc7", "#f4a582", "#d6604d", "#b2182b"],
+}
+
 function hexToRgb(h: string): [number, number, number] {
   const n = parseInt(h.slice(1), 16)
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255]

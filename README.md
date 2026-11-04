@@ -122,6 +122,10 @@ their commercial tier or swap in Xweather points in `briefing/points.py`.
   and strongest gust.
 - **Totals by model.** Region totals for each window, a model × location table with window and
   inches / % of normal switches and a since-yesterday row, and GRIB area means over every grid cell inside each region.
+- **Temperature departures.** Each location's multi-model median daily high and low against its
+  PRISM 1991–2020 normal for the date, as a location × day table (highs or lows, colored blue to
+  red) with a window average and region rows, plus a one-line summary per region. The
+  interactive map's Summary mode has the gridded version ("Temperature vs normal").
 - **Through day 14.** Full-range maps of precipitation and the same four extremes, 7-day
   snowfall, and the running total at each location.
 - **Ensembles.** GEFS and ECMWF ENS (plus GEPS from the supplement) medians and 10–90% plumes.
@@ -142,6 +146,7 @@ Every run publishes its grids under `data/cogs/` next to the page:
 | `mean_<tmax\|tmin\|wind\|gust>_<N>d.tif` | Multi-model mean of those extremes |
 | `odds_p24_<N>d.tif`, `odds_p72_<N>d.tif` | Chance (% of pooled GEFS + ECMWF ENS members) of 1" or more in a day, or 3" or more in 3 days, within the window (`odds_map` in config) |
 | `observed_obs_<N>d.tif`, `observed_obspct_<N>d.tif` | MRMS observed precipitation over the past 7 or 30 days (in) and percent of normal |
+| `departure_tmax_<N>d.tif`, `departure_tmin_<N>d.tif` | Model-mean departure of the daily high or low from the 1991–2020 normal, averaged over the window, °F |
 
 Extremes, and the daily highs, lows and peak gusts at the forecast locations, are read at each
 model's native output steps, using the max/min-since-the-previous-output records wherever the
@@ -202,7 +207,9 @@ grids to object storage such as Cloudflare R2; only the publish step changes.
 - **Normals.** PRISM 1991–2020 monthly precipitation normals at 4 km, spread into daily values
   by interpolating between mid-month rates, so windows that cross a month boundary are handled.
   Region normals are averaged over the same forecast locations as the region totals, so the
-  percentages compare like with like. Grids are cached (`.cache/prism`, kept by the workflow).
+  percentages compare like with like. Normal daily highs and lows come from PRISM's monthly
+  `tmax` and `tmin` normals, interpolated linearly between mid-month values. PRISM covers the US
+  only, so B.C. locations have no normal. Grids are cached (`.cache/prism`, kept by the workflow).
 - **Alerts.** Each location is resolved once to its NWS forecast zone, county and fire-weather
   zone (`api.weather.gov/points`). One `alerts/active?area=WA,OR` request is then matched by
   zone. NWS asks for an identifying User-Agent; it defaults to your GitHub repository name, or
@@ -328,6 +335,7 @@ briefing/impacts.py         hazard rules, model agreement, event grouping
 briefing/maps.py            cartopy small-multiple maps (PNG)
 briefing/cogs.py            Cloud-Optimized GeoTIFF export
 briefing/normals.py         PRISM normals, daily interpolation, percent of normal
+briefing/tempdep.py         departure of daily highs and lows from normal (table and maps)
 briefing/alerts.py          NWS zones and active alerts
 briefing/change.py          comparison with the previous briefing over the same days
 briefing/standalone.py      single-file briefing with everything embedded

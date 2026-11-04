@@ -18,7 +18,7 @@ import { bicubicAt, contourLines, fieldUrl, gridPos, loadField, nearestAt, neare
 import { GridLayer, type GridDraw } from "@/lib/gl/grid-layer"
 import { ParticleLayer, type WindDraw } from "@/lib/gl/particle-layer"
 import { type Grid, sameGrid } from "@/lib/gl/util"
-import { FRZ, GUST, PCT, PRECIP, PROB, PTYPE_COLORS, PTYPE_NAMES, type Ramp, REFC, SNOW, SPREAD, TEMP, WIND } from "@/lib/ramps"
+import { FRZ, GUST, PCT, PRECIP, PROB, PTYPE_COLORS, PTYPE_NAMES, type Ramp, REFC, SNOW, SPREAD, TDEP, TEMP, WIND } from "@/lib/ramps"
 import type { Briefing, Cog, ExtremeVar, FieldEntry, FieldsManifest, FieldVar } from "@/types"
 
 // ------------------------------------------------------------------ map plumbing
@@ -421,10 +421,10 @@ const categoryAt = (g: Grid, a: Float32Array, b: Float32Array | null, t: number,
 
 // ------------------------------------------------------------------ totals mode
 
-type TotVar = "precip" | "snow" | "spread" | "pct" | ExtremeVar | "p24" | "p72" | "obs" | "obspct"
-type TotGroup = "Totals" | "Extremes" | "Odds" | "Observed"
+type TotVar = "precip" | "snow" | "spread" | "pct" | ExtremeVar | "p24" | "p72" | "obs" | "obspct" | "tmaxdep" | "tmindep"
+type TotGroup = "Totals" | "Extremes" | "Vs normal" | "Odds" | "Observed"
 const GROUP_LABEL: Record<TotGroup, string> = {
-  Totals: "Totals", Extremes: "Extremes over the window", Odds: "Ensemble odds", Observed: "Already fallen (MRMS)",
+  Totals: "Totals", Extremes: "Extremes over the window", "Vs normal": "Temperature vs normal", Odds: "Ensemble odds", Observed: "Already fallen (MRMS)",
 }
 /** Window products: precipitation totals, extremes, ensemble odds and observed rainfall. `digits` for hover. */
 const TOT_VARS: { id: TotVar; label: string; group: TotGroup; ramp: Ramp; perModel: boolean; digits: number; suffix?: string }[] = [
@@ -440,6 +440,8 @@ const TOT_VARS: { id: TotVar; label: string; group: TotGroup; ramp: Ramp; perMod
   { id: "p72", label: "Chance of 3\" in 3 days", group: "Odds", ramp: { ...PROB, label: "Chance of 3\" or more in 72 hours, pooled ensembles" }, perModel: false, digits: 0, suffix: "% of members" },
   { id: "obs", label: "Observed precipitation", group: "Observed", ramp: { ...PRECIP, label: "Observed precipitation (MRMS)" }, perModel: false, digits: 2 },
   { id: "obspct", label: "Observed, % of normal", group: "Observed", ramp: { ...PCT, label: "Observed precipitation, percent of 1991–2020 normal" }, perModel: false, digits: 0, suffix: "% of normal" },
+  { id: "tmaxdep", label: "High temp vs normal", group: "Vs normal", ramp: { ...TDEP, label: "Daily high, model-mean departure from 1991–2020 normal (window average)" }, perModel: false, digits: 1, suffix: "°F vs normal" },
+  { id: "tmindep", label: "Low temp vs normal", group: "Vs normal", ramp: { ...TDEP, label: "Daily low, model-mean departure from 1991–2020 normal (window average)" }, perModel: false, digits: 1, suffix: "°F vs normal" },
 ]
 const MEAN = "Model mean"
 
@@ -460,6 +462,7 @@ function totalsView(c: Cog | undefined, ramp: Ramp, windowLabel: string, digits 
           sample: (lon, lat, _t, smooth) => {
             const v = valueAt(r, r.data, lon, lat, smooth)
             if (!Number.isFinite(v)) return null
+            if (suffix?.startsWith("°")) return `${v > 0.5 ? "+" : ""}${Math.round(v)}${suffix}`   // departures carry a sign
             if (suffix) return `${Math.round(v)}${suffix}`
             if (ramp.units === "%") return `${Math.round(v)}% of normal`
             return `${v.toFixed(digits)}${ramp.units === "°F" ? "°F" : ` ${ramp.units}`}`
@@ -870,7 +873,7 @@ export function InteractiveMap({ data }: { data: Briefing }) {
               <Select value={variable} onValueChange={(v) => setVariable(v as TotVar)}>
                 <SelectTrigger className="w-[190px]" aria-label="Variable"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {(["Totals", "Extremes", "Odds", "Observed"] as const).map((g) => [g, totAvail.filter((v) => v.group === g)] as const).filter(([, vs]) => vs.length).map(([g, vs]) => (
+                  {(["Totals", "Extremes", "Vs normal", "Odds", "Observed"] as const).map((g) => [g, totAvail.filter((v) => v.group === g)] as const).filter(([, vs]) => vs.length).map(([g, vs]) => (
                     <SelectGroup key={g}>
                       <SelectLabel>{GROUP_LABEL[g]}</SelectLabel>
                       {vs.map((v) => <SelectItem key={v.id} value={v.id}>{v.label}</SelectItem>)}
