@@ -11,12 +11,13 @@ windows:
   - {days: 7,  label: Next 7 days}
   - {days: 14, label: Next 14 days}
 
-# Map / GRIB subset box (degrees, lon in -180..180)
+# Map / GRIB subset box (degrees, lon in -180..180). Wider than the comparison regions so the
+# maps show the Lower Mainland of B.C. and central Washington and Oregon for context.
 domain:
   lat_min: 43.0
-  lat_max: 49.4
+  lat_max: 50.0
   lon_min: -125.8
-  lon_max: -120.0
+  lon_max: -118.5
 
 # Comparison regions, west of the Cascade crest. Coarse hand-drawn polygons
 # (lon, lat), coastline-ish on the west so ocean grid points are excluded.
@@ -63,7 +64,8 @@ regions:
       - [-123.97, 45.50]
       - [-123.96, 45.95]
 
-# Forecast points. kind controls which impact thresholds apply.
+# Forecast points. kind controls which impact thresholds apply. region assigns a point to a
+# comparison region; leave it out for a location that shouldn't count toward any region.
 points:
   - {name: Bellingham,       lat: 48.75, lon: -122.48, kind: lowland, region: wwa}
   - {name: Everett,          lat: 47.98, lon: -122.20, kind: lowland, region: wwa}
@@ -82,6 +84,8 @@ points:
   - {name: Salem,            lat: 44.94, lon: -123.04, kind: lowland, region: nwor}
   - {name: Corvallis,        lat: 44.56, lon: -123.26, kind: lowland, region: nwor}
   - {name: Government Camp,  lat: 45.30, lon: -121.75, kind: pass,    region: nwor, plume: true}
+  # outside the comparison regions (no PRISM normals or NWS alerts in Canada)
+  - {name: Vancouver BC,     lat: 49.28, lon: -123.12, kind: lowland}
 
 # ----------------------------------------------------------------------------
 # GRIB models — the primary source. NOAA models come from NODD (AWS, with

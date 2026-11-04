@@ -220,12 +220,12 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
   const [sub, setSub] = React.useState<string | undefined>()
 
   React.useEffect(() => {
-    const ring = Object.values(data.regionShapes).flat()
-    const lons = ring.map((c) => c[0]), lats = ring.map((c) => c[1])
+    // open on the whole grid crop, not just the comparison regions, so the surroundings show too
+    const d = data.domain
     const m = new maplibregl.Map({
       container: el.current!, style: STYLE_URL, transformRequest: withKey, attributionControl: { compact: true },
-      bounds: [[Math.min(...lons) - 0.4, Math.min(...lats) - 0.25], [Math.max(...lons) + 0.4, Math.max(...lats) + 0.25]],
-      fitBoundsOptions: { padding: 16 },
+      bounds: [[d.lon_min, d.lat_min], [d.lon_max, d.lat_max]],
+      fitBoundsOptions: { padding: 8 },
       dragRotate: false, pitchWithRotate: false, touchPitch: false, maxZoom: 11,
     })
     m.touchZoomRotate.disableRotation()
