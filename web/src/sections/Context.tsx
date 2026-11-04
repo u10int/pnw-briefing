@@ -5,6 +5,7 @@ import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle }
 import { type ChartConfig, ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { dateRange, dayShort, inch } from "@/lib/format"
 import { pctCell } from "@/sections/Totals"
 import type { ArEvent, Briefing, ModelSeries, N, PointOdds } from "@/types"
@@ -198,19 +199,157 @@ function ArBadge({ rank }: { rank: number }) {
   )
 }
 
-/** Events at one place from different models, merged where their times overlap. */
-function clusters(events: ArEvent[]) {
-  const sorted = [...events].sort((a, b) => a.start.localeCompare(b.start))
-  const out: { start: string; end: string; byModel: Record<string, ArEvent> }[] = []
-  for (const e of sorted) {
-    const last = out[out.length - 1]
-    if (last && e.start <= last.end) {
-      if (e.end > last.end) last.end = e.end
-      const prev = last.byModel[e.model]
-      if (!prev || e.rank > prev.rank) last.byModel[e.model] = e
-    } else out.push({ start: e.start, end: e.end, byModel: { [e.model]: e } })
-  }
+const AR_RANGE = "kg m⁻¹ s⁻¹"
+const H = 36e5
+
+/** Pacific midnights between two times (ms). */
+function midnights(t0: number, t1: number) {
+  const out: number[] = []
+  for (let t = Math.ceil(t0 / H) * H; t <= t1; t += H) if (ptHour(t) === 0) out.push(t)
   return out
+}
+
+function useWidth<T extends HTMLElement>() {
+  const ref = React.useRef<T>(null)
+  const [w, setW] = React.useState(0)
+  React.useLayoutEffect(() => {
+    if (!ref.current) return
+    const ro = new ResizeObserver(([e]) => setW(e.contentRect.width))
+    ro.observe(ref.current)
+    return () => ro.disconnect()
+  }, [])
+  return [ref, w] as const
+}
+
+/** What the peak alone would rank, and how duration moved it, in words. */
+function rankNote(e: ArEvent, breaks: number[]) {
+  const base = breaks.filter((b) => e.peak >= b).length
+  if (e.rank > base) return `Peak alone is ${AR_SHORT[base]}; lasting 48 h or more raises it one step.`
+  if (e.rank < base) return `Peak alone is ${AR_SHORT[base]}; lasting under 24 h lowers it one step.`
+  return null
+}
+
+const LABEL_W = 184   // location + model columns, px
+
+/** Horizontal timeline: a row per model under each coastal location, with each AR event drawn
+ *  from its start for its duration. Hover (or focus) a bar for the details; click to chart that place. */
+function ArTimeline({ ar, onPick, picked }: {
+  ar: NonNullable<Briefing["ar"]>; onPick: (p: string) => void; picked: string
+}) {
+  const [trackRef, width] = useWidth<HTMLDivElement>()
+  const times = ar.models.flatMap((m) => m.times.map((t) => Date.parse(t)))
+  const t0 = Math.min(...times), t1 = Math.max(...times)
+  const span = t1 - t0 || 1
+  const x = (t: number) => ((t - t0) / span) * 100
+  const days = midnights(t0, t1)
+  const pxPerDay = width ? (width * 24 * H) / span : 60
+  const labelEvery = pxPerDay >= 46 ? 1 : pxPerDay >= 24 ? 2 : 3
+  const events = ar.events.filter((e) => e.rank >= 1)
+  const models = ar.models.map((m) => m.model)
+
+  // bars cover each 6-hourly sample's own slot, so a bar's length is the event's duration
+  const bar = (e: ArEvent) => {
+    const s = Date.parse(e.start), en = Date.parse(e.end)
+    const pad = Math.max(0, (e.hours * H - (en - s)) / 2)
+    const a = Math.max(t0, s - pad), b = Math.min(t1, en + pad)
+    return { left: x(a), width: Math.max(0.6, x(b) - x(a)) }
+  }
+
+  return (
+    <div className="overflow-x-auto">
+      <div className="relative min-w-[600px] text-xs">
+        {/* day shading and midnight lines behind every row */}
+        <div ref={trackRef} className="pointer-events-none absolute inset-y-0 right-0" style={{ left: LABEL_W }}>
+          {days.map((d, i) => (
+            <React.Fragment key={d}>
+              <div className="absolute inset-y-0 border-l border-border/70" style={{ left: `${x(d)}%` }} />
+              {i % 2 === 0 && (
+                <div className="absolute inset-y-0 bg-muted/50"
+                     style={{ left: `${x(d)}%`, width: `${x(Math.min(days[i + 1] ?? t1, t1)) - x(d)}%` }} />
+              )}
+            </React.Fragment>
+          ))}
+        </div>
+
+        {/* day axis */}
+        <div className="relative flex h-7 items-end border-b">
+          <div style={{ width: LABEL_W }} className="shrink-0" />
+          <div className="relative h-full flex-1">
+            {days.map((d, i) => i % labelEvery === 0 && x(d) < 96 && (
+              <span key={d} className="absolute bottom-1.5 whitespace-nowrap pl-1 text-muted-foreground" style={{ left: `${x(d)}%` }}>
+                {tickDay(d)}
+              </span>
+            ))}
+          </div>
+        </div>
+
+        {ar.points.map((p) => (
+          <div key={p} className="relative flex border-b last:border-b-0">
+            <button type="button" onClick={() => onPick(p)}
+                    className={`w-24 shrink-0 py-1.5 pr-2 text-left text-sm font-medium hover:underline ${p === picked ? "underline decoration-2 underline-offset-4" : ""}`}
+                    title={`Chart IVT at ${p}`}>
+              {p}
+            </button>
+            <div className="flex-1">
+              {models.map((m, k) => {
+                const evs = events.filter((e) => e.point === p && e.model === m)
+                return (
+                  <div key={m} className="flex h-7 items-center">
+                    <span className="flex shrink-0 items-center gap-1.5 truncate pr-2 text-muted-foreground" style={{ width: LABEL_W - 96 }}>
+                      <span className="h-0.5 w-2.5 shrink-0 rounded" style={{ background: colorOf(m, k) }} />
+                      <span className="truncate">{m.replace("ECMWF ", "")}</span>
+                    </span>
+                    <div className="relative h-full flex-1">
+                      {evs.map((e) => {
+                        const pos = bar(e)
+                        const px = (pos.width / 100) * width
+                        const label = px >= 84 ? AR_SHORT[e.rank] : px >= 30 ? AR_SHORT[e.rank].split(" ")[0] : ""
+                        const note = rankNote(e, ar.breaks)
+                        return (
+                          <Tooltip key={e.start}>
+                            <TooltipTrigger asChild>
+                              <button type="button" onClick={() => onPick(p)}
+                                      aria-label={`${AR_SHORT[e.rank]} at ${p} in ${m}, ${tipTime(Date.parse(e.start))} for ${e.hours} hours`}
+                                      className="absolute top-1 bottom-1 flex items-center overflow-hidden rounded-[4px] px-1.5 font-medium whitespace-nowrap shadow-[inset_0_0_0_1px_rgb(0_0_0/0.08)] outline-offset-1 hover:brightness-105 focus-visible:outline-2 focus-visible:outline-ring"
+                                      style={{ left: `${pos.left}%`, width: `${pos.width}%`, background: AR_COLORS[e.rank],
+                                               color: e.rank >= 3 ? "#1b1f24" : "#fff" }}>
+                                {label}
+                              </button>
+                            </TooltipTrigger>
+                            <TooltipContent side="top" className="max-w-72 text-left">
+                              <div className="space-y-1 py-0.5">
+                                <p className="font-semibold">{AR_SHORT[e.rank]} · {p}</p>
+                                <p>{m}</p>
+                                <p>{tipTime(Date.parse(e.start))} – {tipTime(Date.parse(e.end))} ({e.hours} h)</p>
+                                <p>Peak IVT {e.peak} {AR_RANGE}{e.peakTime ? `, ${tipTime(Date.parse(e.peakTime))}` : ""}</p>
+                                {note && <p className="opacity-75">{note}</p>}
+                              </div>
+                            </TooltipContent>
+                          </Tooltip>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function ArKey() {
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+      {AR_SHORT.slice(1).map((n, k) => (
+        <span key={n} className="inline-flex items-center gap-1.5">
+          <span className="h-2.5 w-4 rounded-[3px]" style={{ background: AR_COLORS[k + 1] }} />{n}
+        </span>
+      ))}
+    </div>
+  )
 }
 
 export function ArCard({ data }: { data: Briefing }) {
@@ -219,10 +358,7 @@ export function ArCard({ data }: { data: Briefing }) {
   if (!ar) return null
   const series: ModelSeries[] = ar.models.map((m) => ({ model: m.model, tier: m.tier, times: m.times, values: m.ivt[point] ?? [] }))
   const events = ar.events.filter((e) => e.rank >= 1)
-  const rows = ar.points.flatMap((p) => clusters(events.filter((e) => e.point === p)).map((c) => ({ point: p, ...c })))
-    .sort((a, b) => a.start.localeCompare(b.start))
   const peakAt = (p: string) => Math.max(0, ...events.filter((e) => e.point === p).map((e) => e.rank))
-  const day = (iso: string) => new Date(iso).toLocaleDateString("en-CA", { timeZone: PT })
   const arMax = Math.max(0, ...series.flatMap((s) => s.values).filter((v): v is number => v != null))
   const arTop = Math.max(750, Math.ceil((arMax + 50) / 250) * 250)
   return (
@@ -234,55 +370,37 @@ export function ArCard({ data }: { data: Briefing }) {
           CW3E AR scale: peak IVT sets the category, lasting 48 hours or more raises it one step and under 24 hours lowers it one.
         </CardDescription>
       </CardHeader>
-      <CardContent className="space-y-5">
+      <CardContent className="space-y-6">
         <div className="flex flex-wrap gap-x-6 gap-y-2">
           {ar.points.map((p) => (
             <div key={p} className="flex items-center gap-2 text-sm"><span className="font-medium">{p}</span>
               {peakAt(p) ? <ArBadge rank={peakAt(p)} /> : <span className="text-muted-foreground">no AR</span>}</div>
           ))}
         </div>
-        <div className="grid gap-6 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
-          <div className="space-y-2">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="text-sm font-medium">IVT at {point} (kg m⁻¹ s⁻¹)</p>
-              <Tabs value={point} onValueChange={setPoint}>
-                <TabsList>{ar.points.map((p) => <TabsTrigger key={p} value={p}>{p}</TabsTrigger>)}</TabsList>
-              </Tabs>
-            </div>
-            <SeriesChart series={series} unit="kg/m/s" height={240} domain={[0, arTop]} yTicks={ticksOf(0, arTop, 250)}
-                         format={(v) => `${Math.round(v)}`}>
-              {ar.breaks.map((b, k) => (
-                <ReferenceArea key={b} y1={b} y2={ar.breaks[k + 1] ?? 3000} fill={AR_COLORS[Math.min(k + 1, 5)]} fillOpacity={0.09} ifOverflow="hidden" />
-              ))}
-              <ReferenceLine y={250} stroke="#6b7280" strokeDasharray="4 3" label={{ value: "AR threshold 250", position: "insideTopLeft", fontSize: 10, fill: "#6b7280" }} />
-            </SeriesChart>
-            <ModelLegend models={series.map((s) => s.model)} />
+        <div className="space-y-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm font-medium">AR events at the coast</p>
+            <ArKey />
           </div>
-          <div>
-            <p className="mb-2 text-sm font-medium">AR events at the coast</p>
-            {rows.length ? (
-              <Table>
-                <TableHeader><TableRow><TableHead>When</TableHead><TableHead>Where</TableHead><TableHead>By model</TableHead></TableRow></TableHeader>
-                <TableBody>
-                  {rows.map((r, i) => (
-                    <TableRow key={i}>
-                      <TableCell className="whitespace-nowrap">{dateRange(day(r.start), day(r.end))}</TableCell>
-                      <TableCell>{r.point}</TableCell>
-                      <TableCell>
-                        <div className="flex flex-col gap-1">
-                          {Object.values(r.byModel).map((e) => (
-                            <span key={e.model} className="flex flex-wrap items-center gap-1.5 text-xs">
-                              <ArBadge rank={e.rank} /><span className="text-muted-foreground">{e.model}, peak {e.peak}, {e.hours} h</span>
-                            </span>
-                          ))}
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            ) : <p className="text-sm text-muted-foreground">No atmospheric river (IVT of 250 or more) reaches the coastal locations in these runs.</p>}
+          {events.length ? <ArTimeline ar={ar} onPick={setPoint} picked={point} />
+            : <p className="text-sm text-muted-foreground">No atmospheric river (IVT of 250 or more) reaches the coastal locations in these runs.</p>}
+          {events.length > 0 && <p className="text-xs text-muted-foreground">Hover a bar for timing and peak IVT; click a location or bar to chart it below.</p>}
+        </div>
+        <div className="space-y-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm font-medium">IVT at {point} ({AR_RANGE})</p>
+            <Tabs value={point} onValueChange={setPoint}>
+              <TabsList>{ar.points.map((p) => <TabsTrigger key={p} value={p}>{p}</TabsTrigger>)}</TabsList>
+            </Tabs>
           </div>
+          <SeriesChart series={series} unit="kg/m/s" height={240} domain={[0, arTop]} yTicks={ticksOf(0, arTop, 250)}
+                       format={(v) => `${Math.round(v)}`}>
+            {ar.breaks.map((b, k) => (
+              <ReferenceArea key={b} y1={b} y2={ar.breaks[k + 1] ?? 3000} fill={AR_COLORS[Math.min(k + 1, 5)]} fillOpacity={0.09} ifOverflow="hidden" />
+            ))}
+            <ReferenceLine y={250} stroke="#6b7280" strokeDasharray="4 3" label={{ value: "AR threshold 250", position: "insideTopLeft", fontSize: 10, fill: "#6b7280" }} />
+          </SeriesChart>
+          <ModelLegend models={series.map((s) => s.model)} />
         </div>
       </CardContent>
     </Card>
@@ -396,7 +514,8 @@ export function GradientsCard({ data }: { data: Briefing }) {
             const gtop = Math.ceil((lim + 1) / 4) * 4
             return (
               <div key={g.id}>
-                <p className="text-sm font-medium">{g.a} − {g.b}</p>
+                <p className="text-sm font-medium">{g.a} − {g.b}{g.codes?.[0] && g.codes?.[1] && (
+                  <span className="ml-1.5 font-mono text-xs font-normal text-muted-foreground">({g.codes[0]}–{g.codes[1]})</span>)}</p>
                 <p className="mb-2 text-xs text-muted-foreground">{g.meaning}</p>
                 <SeriesChart series={series} unit="hPa" domain={[-gtop, gtop]} yTicks={ticksOf(-gtop, gtop, 4)} format={(v) => v.toFixed(0)}>
                   <ReferenceLine y={0} stroke="#9ca3af" />
