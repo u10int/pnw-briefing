@@ -156,7 +156,10 @@ def _fields(spec, la, lo, lead0, nd):
     for name in dict.fromkeys(names):
         out[name] = {"hours": s_hours, "data": np.stack([state(h)[name] for h in s_hours]).astype("float32")}
     for name in hourly:
-        out[name] = {"hours": h_hours, "data": np.stack([state(h)[name] for h in h_hours]).astype("float32")}
+        if name == "gust" and spec.get("gust", True) is False:
+            continue
+        hrs = sorted(set(out.get(name, {}).get("hours", [])) | set(h_hours))   # hourly merged with stepped
+        out[name] = {"hours": hrs, "data": np.stack([state(h)[name] for h in hrs]).astype("float32")}
     return out
 
 
