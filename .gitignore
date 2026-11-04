@@ -11,3 +11,4 @@ web/public/data/
 .cache/
 previous.json
 web/dist-single/
+.DS_Store

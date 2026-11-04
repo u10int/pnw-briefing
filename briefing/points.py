@@ -14,6 +14,8 @@ import numpy as np
 import pandas as pd
 import requests
 
+from . import report
+
 log = logging.getLogger(__name__)
 
 FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
@@ -88,12 +90,14 @@ def fetch_deterministic(cfg, start):
             rng = int(np.sum(~np.all(np.isnan(arr), axis=0)))   # days with data at any point
             if rng == 0:
                 log.warning("supplement %s: no data over the region", m["label"])
+                report.fail(m["label"], "no data over the region")
                 continue
             out.append({"id": mid, "label": m["label"], "source": "open-meteo", "tier": m.get("tier", "global"),
                         "run": None, "range_days": rng, "dates": dates, "data": data})
             log.info("supplement %s (%s): %d days", m["label"], mid, rng)
         except Exception as e:
             log.warning("supplement %s: skipped (%s)", m["label"], e)
+            report.fail(m["label"], report.short(e))
     return out
 
 
@@ -125,4 +129,5 @@ def fetch_ensembles(cfg, start):
             log.info("supplement ensemble %s: ok", m["label"])
         except Exception as e:
             log.warning("supplement ensemble %s: skipped (%s)", m["label"], e)
+            report.fail(m["label"], report.short(e))
     return out

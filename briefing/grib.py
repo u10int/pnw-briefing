@@ -26,6 +26,8 @@ from zoneinfo import ZoneInfo
 
 import numpy as np
 
+from . import report
+
 log = logging.getLogger(__name__)
 
 ACC_RE = re.compile(r"(\d+)-(\d+) (hour|day) acc")
@@ -95,15 +97,34 @@ def _rows(H, pattern):
     return [s for s in inv["search_this"] if not SKIP_RE.search(s)] if len(inv) else []
 
 
-def _read(H, row, dom):
-    return _crop(_first_var(H.xarray(re.escape(row), remove_grib=True)), dom)
+def water_mm_factor(da, default: float = 1.0) -> float:
+    """Multiplier to millimetres of water for an accumulated-water field, from its own GRIB units.
+
+    ECMWF publishes tp/sf in metres for some models and kg m**-2 (= mm) for others, and that has
+    changed over time, so the file is trusted rather than the model family.
+    """
+    u = (da.attrs.get("GRIB_units") or da.attrs.get("units") or "").lower().replace(" ", "")
+    if not u:
+        return default   # no units in the file: family convention; check_plausible is the backstop
+    if u in ("m", "mofwaterequivalent", "m(waterequivalent)", "mwe"):
+        return 1000.0
+    if u in ("kgm**-2", "kgm-2", "kgm^-2", "kg/m2", "kg/m**2", "mm"):
+        return 1.0
+    raise ValueError(f"unexpected units {u!r} for an accumulated water field")
 
 
-def _read_first(H, patterns, dom):
+def _read(H, row, dom, water=False, default=1.0):
+    """Crop one GRIB message to the domain. With water=True, convert to mm from the message's units."""
+    da = _first_var(H.xarray(re.escape(row), remove_grib=True))
+    lat, lon, v = _crop(da, dom)
+    return (lat, lon, v * water_mm_factor(da, default)) if water else (lat, lon, v)
+
+
+def _read_first(H, patterns, dom, water=False, default=1.0):
     for p in patterns:
         rows = _rows(H, p)
         if rows:
-            return _read(H, rows[0], dom)
+            return _read(H, rows[0], dom, water, default)
     raise LookupError(f"none of {patterns}")
 
 
@@ -132,7 +153,7 @@ def _accum_ncep(spec, run, var, targets, dom):
         return H, out
 
     def take(H, a, s):
-        lat, lon, v = _read(H, s, dom)
+        lat, lon, v = _read(H, s, dom, water=(var == "APCP"))
         grid.update(lat=lat, lon=lon)
         return v if a == 0 else cum[a] + v
 
@@ -165,17 +186,17 @@ def _accum_ncep(spec, run, var, targets, dom):
 
 
 def _accum_ecmwf(spec, run, param, targets, dom):
-    """ECMWF open data: accumulated from init, metres."""
+    """ECMWF open data: accumulated from init; returned in mm of water whatever the file's units."""
     def one(h):
         if h == 0:
             return None
-        return _read_first(_H(spec, run, h), [f":{param}:"], dom)
+        return _read_first(_H(spec, run, h), [f":{param}:"], dom, water=True, default=1000.0)
 
     with ThreadPoolExecutor(WORKERS) as ex:
         res = list(ex.map(one, sorted(targets)))
     ref = next(r for r in res if r is not None)
     lat, lon = ref[0], ref[1]
-    return lat, lon, np.stack([np.zeros_like(ref[2]) if r is None else r[2] for r in res]) * 1000.0
+    return lat, lon, np.stack([np.zeros_like(ref[2]) if r is None else r[2] for r in res])
 
 
 # ---------------------------------------------------------------- instantaneous samples
@@ -217,6 +238,21 @@ def _daily_extreme(samples, lead0, ndays, idx, fn):
     return out
 
 
+# ---------------------------------------------------------------- sanity
+
+MAX_DAILY_IN = 25.0   # far above any PNW 24-hour total; anything bigger is a units or decoding error
+
+
+def check_plausible(label, daily_in):
+    """Reject a model whose daily precipitation can't be real, rather than let it skew the briefing."""
+    a = np.asarray(daily_in, dtype=float)
+    peak = float(np.nanmax(a)) if np.isfinite(a).any() else 0.0
+    low = float(np.nanmin(a)) if np.isfinite(a).any() else 0.0
+    if peak > MAX_DAILY_IN or low < -0.05:
+        raise ValueError(f"implausible daily precipitation for {label} (range {low:.2f} to {peak:.1f} in); "
+                         f"likely a units or accumulation error, so it was left out")
+
+
 # ---------------------------------------------------------------- one deterministic model
 
 FIELDS = {
@@ -234,6 +270,7 @@ def fetch_model(spec, cfg, start, points):
         run, lead0, ndays = _latest_run(spec, start)
         if run is None:
             log.warning("%s: no usable run", spec["label"])
+            report.fail(spec["label"], "no complete run found on any source in the last 48 h")
             return None
         targets = [lead0 + 24 * d for d in range(ndays + 1)]
         log.info("%s: %s run, %d days", spec["label"], run.strftime("%Y-%m-%d %HZ"), ndays)
@@ -263,6 +300,7 @@ def fetch_model(spec, cfg, start, points):
 
         idx = nearest_index(lat, lon, points)
         daily_p = np.diff(np.stack([[c[i, j] for i, j in idx] for c in cum]), axis=0).T / 25.4
+        check_plausible(spec["label"], daily_p)
         daily_s = (np.diff(np.stack([[c[i, j] for i, j in idx] for c in snow]), axis=0).T
                    if snow is not None else np.full_like(daily_p, np.nan))
         tmax = (_daily_extreme(t2m, lead0, ndays, idx, np.nanmax) - 273.15) * 9 / 5 + 32 if t2m else np.full_like(daily_p, np.nan)
@@ -285,8 +323,9 @@ def fetch_model(spec, cfg, start, points):
         return {"id": spec["id"], "label": spec["label"], "source": "grib", "tier": spec.get("tier", "global"),
                 "run": run, "range_days": ndays, "dates": dates, "data": data,
                 "lat": lat, "lon": lon, "precip_mm": cum, "snow_in": snow, "snow_method": snow_method}
-    except Exception:
+    except Exception as e:
         log.exception("%s: GRIB fetch failed", spec["label"])
+        report.fail(spec["label"], report.short(e))
         return None
 
 
@@ -301,6 +340,7 @@ def fetch_ensemble(spec, cfg, start, points):
         run, lead0, ndays = _latest_run(probe, start)
         if run is None:
             log.warning("%s: no usable run", spec["label"])
+            report.fail(spec["label"], "no complete run found on any source in the last 48 h")
             return None
         targets = [lead0 + 24 * d for d in range(ndays + 1)]
 
@@ -313,8 +353,8 @@ def fetch_ensemble(spec, cfg, start, points):
                 for d in ds:
                     da = d[list(d.data_vars)[0]]
                     lat, lon, v = _crop(da, dom)
-                    parts.append(v.reshape(-1, *v.shape[-2:]))
-                return lat, lon, np.concatenate(parts) * 1000.0
+                    parts.append(v.reshape(-1, *v.shape[-2:]) * water_mm_factor(da, 1000.0))
+                return lat, lon, np.concatenate(parts)
             with ThreadPoolExecutor(4) as ex:
                 res = list(ex.map(step, [t for t in targets if t > 0]))
             lat, lon = res[0][0], res[0][1]
@@ -325,6 +365,7 @@ def fetch_ensemble(spec, cfg, start, points):
             # stack[:, :, i, j] is [t, member]; daily totals are the diff along t
             per = {p["name"]: np.diff(stack[:, :, i, j], axis=0).T / 25.4
                    for p, (i, j) in zip(points, idx)}
+            check_plausible(spec["label"], np.stack(list(per.values())))
         else:
             members = spec["members"]
 
@@ -344,13 +385,15 @@ def fetch_ensemble(spec, cfg, start, points):
             for p, (i, j) in zip(points, idx):
                 cum = np.stack([r[2][:, i, j] for r in res])     # [member, t]
                 per[p["name"]] = np.diff(cum, axis=1) / 25.4
+            check_plausible(spec["label"], np.stack(list(per.values())))
         dates = [(start + timedelta(days=d)).replace(tzinfo=timezone.utc).astimezone(tz).date() for d in range(ndays)]
         n = next(iter(per.values())).shape[0]
         log.info("%s: %s run, %d members, %d days", spec["label"], run.strftime("%Y-%m-%d %HZ"), n, ndays)
         return {"id": spec["id"], "label": spec["label"], "source": "grib", "run": run,
                 "dates": dates, "members": per}
-    except Exception:
+    except Exception as e:
         log.exception("%s: ensemble fetch failed", spec["label"])
+        report.fail(spec["label"], report.short(e))
         return None
 
 
