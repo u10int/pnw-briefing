@@ -81,12 +81,15 @@ def _instant_first(rows):
 PREFER = {"u10": ["u10"], "v10": ["v10"]}
 
 
-def _read_var(grib, H, patterns, dom, name=None):
-    """First record that reads and holds the wanted variable; later patterns are fallbacks."""
+def _read_var(grib, H, patterns, dom, name=None, sites=None):
+    """First record that reads and holds the wanted variable; later patterns are fallbacks. With
+    `sites`, returns (values, values at those sites before cropping)."""
     last = None
     for p in patterns:
         for row in _instant_first(grib._rows(H, p)):
             try:
+                if sites:
+                    return grib._read_with_sites(H, row, dom, sites, prefer=PREFER.get(name))
                 return grib._read(H, row, dom, prefer=PREFER.get(name))[2]
             except Exception as e:      # empty byte range, or the wrong variable in this message
                 last = e
@@ -104,8 +107,9 @@ def _wanted(spec):
     return expand(stepped), expand(hourly), int(f.get("hourly_hours", 48))
 
 
-def fetch(spec, run, lead0, last_hour, stepped_hours, samples, dom):
-    """{var: {"hours": [fxx...], "data": ndarray[t, y, x]}} in display units."""
+def fetch(spec, run, lead0, last_hour, stepped_hours, samples, dom, sites=None):
+    """{var: {"hours": [fxx...], "data": ndarray[t, y, x]}} in display units. Sea-level pressure
+    also carries "sites": values at places outside the map area (`sites`), read before cropping."""
     from . import grib
 
     fam = spec["family"]
@@ -147,8 +151,10 @@ def fetch(spec, run, lead0, last_hour, stepped_hours, samples, dom):
             if not pats:
                 continue
             try:
-                v = _read_var(grib, H, pats, dom, name)
-                if v is not None:
+                v = _read_var(grib, H, pats, dom, name, sites if name == "mslp" else None)
+                if v is not None and name == "mslp" and sites:
+                    got[name], got["mslp@sites"] = v
+                elif v is not None:
                     got[name] = v
             except Exception as e:
                 log.debug("%s %s f%03d: %s", spec["label"], name, h, e)
@@ -173,6 +179,15 @@ def fetch(spec, run, lead0, last_hour, stepped_hours, samples, dom):
             out[var] = {"hours": hrs, "data": CONVERT[var](arr)}
         elif var not in out:
             log.info("%s: no %s field", spec["label"], var)
+
+    if sites and "mslp" in out:
+        hrs = out["mslp"]["hours"]
+        sv = [results[h].get("mslp@sites") for h in hrs]
+        if all(x is not None for x in sv):
+            data = CONVERT["mslp"](np.stack(sv))                          # [t, site]
+            out["mslp"]["sites"] = {"names": [p["name"] for p in sites], "data": data}
+            reach = [p["name"] for k, p in enumerate(sites) if np.isfinite(data[:, k]).any()]
+            log.info("%s: pressure outside the map at %s", spec["label"], ", ".join(reach) or "none (grid too small)")
 
     if "ptype" in stepped + hourly:
         if fam == "ncep":

@@ -58,7 +58,7 @@ their commercial tier or swap in Xweather points in `briefing/points.py`.
 - **Impacts.** Heavy rain (24 h and 72 h), snow, hard freeze, possible icy precipitation, strong
   gusts and heat. Each shows *Likely* or *Possible* confidence, the share of models agreeing,
   and the peak value per location, followed by a hazard-by-day agreement grid.
-- **Flood setup.**
+- **Flood and landslide setup.**
   - *How wet it's been:* observed precipitation over the past 7 and 30 days from NOAA's MRMS
     radar-and-gauge analysis (Pass 2, 24-hour totals ending 12Z), with percent of PRISM normal for
     regions and locations, and a map.
@@ -67,6 +67,12 @@ their commercial tier or swap in Xweather points in `briefing/points.py`.
     and ranked on the CW3E AR scale (Ralph et al. 2019): the peak IVT sets the category (250, 500,
     750, 1000, 1250 kg m⁻¹ s⁻¹), 48 hours or longer adds a step, under 24 hours removes one.
     ECMWF IFS open data has no pressure-level fields here, so AIFS stands in for ECMWF.
+  - *Landslide threshold:* the USGS cumulative rainfall threshold for the Seattle area
+    (Chleborad, Baum and Godt, OFR 2006-1064): landslides become likely once the last 3 days' rain
+    reaches 3.5 in − 0.67 × the 15 days before. The index P3 + 0.67·P15 runs from observed MRMS
+    rain into each model's forecast at the locations under `landslide` (Everett, Seattle, Tacoma),
+    with the 3-day rain from today that would reach the threshold, a timeline of days where models
+    reach it (or come within 20%), and a per-model chart.
   - *Ensemble odds:* the share of GEFS and ECMWF ENS members (pooled) reaching each location's
     impact thresholds for 24-hour rain, 72-hour rain and 24-hour snow (ECMWF ENS snowfall at 10:1;
     GEFS has no snowfall field), by day.
@@ -79,8 +85,11 @@ their commercial tier or swap in Xweather points in `briefing/points.py`.
 - **Wind and snow.**
   - *Pressure gradients:* sea-level pressure differences from each model for Olympia − Bellingham
     (Puget Sound south wind), Eugene − Portland (Willamette Valley south wind), The Dalles −
-    Troutdale (Gorge east wind) and Seattle − Yakima (onshore push or offshore flow), with
-    rule-of-thumb thresholds. Pairs and thresholds are in `config.yaml` under `gradients`.
+    Troutdale (Gorge east wind), Seattle − Yakima (onshore push or offshore flow) and Bellingham −
+    Williams Lake (Fraser outflow), with rule-of-thumb thresholds. Pairs, station codes and
+    thresholds are in `config.yaml` under `gradients`. A station outside the map area (Williams
+    Lake) is read from each model's full pressure grid before cropping, so it costs no extra
+    downloads; models whose grid doesn't reach it (HRRR, NAM) are left out of that pair.
   - *Snow level at the passes:* each model's freezing level minus 1,000 ft
     (`snow_level_offset_ft`) at Snoqualmie, Stevens, White Pass and Government Camp, against the
     pass elevation (`elev_ft` on each point).
@@ -89,6 +98,10 @@ their commercial tier or swap in Xweather points in `briefing/points.py`.
     Santiam), against each station's median for the date, with depth and the 7-day change. The
     area percent is total SWE over total median SWE, NRCS style, and stays blank until the median
     reaches `min_median_in`, since early-season medians near zero make percentages meaningless.
+  - *Avalanche danger:* Northwest Avalanche Center ratings for each zone from avalanche.org's
+    public API: danger by elevation band for today and tomorrow, avalanche problems, the bottom
+    line and any warning. Before the forecast season starts, the card shows NWAC's early-season
+    travel advice and when the summary ends.
 - **Interactive map.** MapLibre map with two modes. *Summary* shows every gridded model, the
   multi-model mean, spread and percent of normal for each window, plus highest and lowest
   temperature, strongest wind and strongest gust over each window. *Through time* steps through
@@ -324,6 +337,8 @@ briefing/odds.py            ensemble exceedance odds (locations and maps)
 briefing/observed.py        MRMS observed precipitation, past 7 and 30 days vs normal
 briefing/snowpack.py        SNOTEL snowpack by area (NRCS AWDB)
 briefing/outlooks.py        NWS forecast discussions, WPC excessive rainfall and CPC outlooks
+briefing/landslide.py       USGS Seattle-area landslide threshold from observed + forecast rain
+briefing/avalanche.py       NWAC avalanche danger (avalanche.org API)
 briefing/demo.py            synthetic data for offline tests
 briefing/repage.py          page-only rebuilds: refresh config labels in published data
 web/src/components/ui/      shadcn/ui components

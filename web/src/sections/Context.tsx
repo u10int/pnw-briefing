@@ -8,7 +8,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { dateRange, dayShort, inch } from "@/lib/format"
 import { pctCell } from "@/sections/Totals"
-import type { ArEvent, Briefing, ModelSeries, N, PointOdds } from "@/types"
+import type { ArEvent, Avalanche, AvalancheDanger, Briefing, Landslide, ModelSeries, N, PointOdds, Tier } from "@/types"
 
 // ------------------------------------------------------------------ shared: multi-model time series
 
@@ -182,6 +182,123 @@ export function ObservedCard({ data }: { data: Briefing }) {
             <img src={src} alt="Observed precipitation over the past 7 and 30 days, and percent of normal" className="w-full rounded-md" loading="lazy" />
           </a>
         )}
+      </CardContent>
+    </Card>
+  )
+}
+
+// ------------------------------------------------------------------ landslide threshold (USGS, Seattle area)
+
+const SLIDE_OVER = "#d9342b", SLIDE_NEAR = "#f0a830"
+
+export function LandslideCard({ data }: { data: Briefing }) {
+  const ls = data.landslide
+  const [point, setPoint] = React.useState(ls?.points[0]?.name ?? "")
+  if (!ls || !ls.points.length) return null
+  const thr = ls.threshold, near = 0.8 * thr
+  const day = (k: number) => ls.days[k]
+  const dayName = (k: number) => new Date(Date.parse(day(k).start) + 12 * H).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: PT })
+  const t0 = Date.parse(ls.days[0].start), t1 = Date.parse(ls.days[ls.days.length - 1].end)
+
+  const perDay = (p: Landslide["points"][number]) => ls.days.map((_, k) => {
+    const vals = p.models.map((m) => ({ m, v: m.index[k] })).filter((x): x is { m: typeof x.m; v: number } => x.v != null)
+    return { k, vals, over: vals.filter((x) => x.v >= thr), max: Math.max(0, ...vals.map((x) => x.v)) }
+  })
+
+  const groups: TimelineGroup[] = ls.points.map((p) => ({
+    key: p.name, label: p.name, title: `Chart ${p.name}`, onClick: () => setPoint(p.name), selected: p.name === point,
+    rows: [{
+      key: "models", label: <span className="truncate">Models over</span>,
+      bars: perDay(p).filter((d) => d.vals.length && (d.over.length || d.max >= near)).map((d) => {
+        const share = d.over.length / d.vals.length
+        const color = d.over.length
+          ? `color-mix(in srgb, ${SLIDE_OVER} ${Math.round(35 + 65 * share)}%, transparent)`
+          : `color-mix(in srgb, ${SLIDE_NEAR} 45%, transparent)`
+        return {
+          key: String(d.k), start: Date.parse(day(d.k).start), end: Date.parse(day(d.k).end), color,
+          text: d.over.length && share >= 0.5 ? "#fff" : undefined,
+          label: d.over.length ? `${d.over.length}/${d.vals.length}` : "near", short: d.over.length ? `${d.over.length}` : "",
+          onClick: () => setPoint(p.name),
+          aria: `${p.name}, ${dayName(d.k)}: ${d.over.length} of ${d.vals.length} models at or over the landslide threshold`,
+          tip: <>
+            <p className="font-semibold">{p.name} · {dayName(d.k)}</p>
+            <p>{d.over.length ? `${d.over.length} of ${d.vals.length} models reach the threshold` : `No model reaches it; the highest is ${d.max.toFixed(1)} of ${thr}`}</p>
+            <div className="grid grid-cols-[auto_auto_auto] gap-x-3 pt-1 opacity-85">
+              <span className="opacity-70">Model</span><span className="text-right opacity-70">3-day</span><span className="text-right opacity-70">Index</span>
+              {[...d.vals].sort((a, b) => b.v - a.v).map(({ m, v }) => (
+                <React.Fragment key={m.model}>
+                  <span>{m.model}</span>
+                  <span className="text-right tabular-nums">{inch(m.p3[d.k], 2)}″</span>
+                  <span className={`text-right tabular-nums ${v >= thr ? "font-semibold" : ""}`}>{v.toFixed(2)}</span>
+                </React.Fragment>
+              ))}
+            </div>
+          </>,
+        }
+      }),
+    }],
+  }))
+
+  const cur = ls.points.find((p) => p.name === point) ?? ls.points[0]
+  const series: ModelSeries[] = cur.models.map((m) => ({ model: m.model, tier: m.tier ?? ("global" as Tier), times: ls.days.map((d) => d.end), values: m.index }))
+  const top = Math.max(thr + 1, ...series.flatMap((s) => s.values).filter((v): v is number => v != null)) * 1.05
+  const status = (p: Landslide["points"][number]) => {
+    const days = perDay(p).filter((d) => d.over.length)
+    if (!days.length) return <span className="text-muted-foreground">not reached in any model</span>
+    const most = days.reduce((a, b) => (b.over.length > a.over.length ? b : a))
+    const first = days[0].k, last = days[days.length - 1].k
+    const when = first === last ? dayName(first) : `${dayName(first)} to ${dayName(last)}`
+    return <span>reached <span className="font-medium">{when}</span> in {days.length > 1 ? "up to " : ""}{most.over.length} of {most.vals.length} models</span>
+  }
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Landslide threshold</CardTitle>
+        <CardDescription>
+          The USGS rainfall threshold for the Seattle area: landslides become likely once the last 3 days' rain reaches
+          {" "}{thr}″ minus {ls.p15Factor} × the 15 days before. The index (3-day rain + {ls.p15Factor} × the 15 days before)
+          runs from observed rain into each model's forecast and reaches the threshold at {thr}.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-6">
+        <ul className="space-y-1 text-sm">
+          {ls.points.map((p) => (
+            <li key={p.name}>
+              <span className="font-medium">{p.name}:</span>{" "}
+              {p.observed.p15 != null && <>{inch(p.observed.p15, 2)}″ in the past 15 days, so {inch(p.observed.needed3, 1)}″ over the next 3 days would reach the threshold; </>}
+              {status(p)}.
+            </li>
+          ))}
+        </ul>
+        <div className="space-y-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm font-medium">Days at or over the threshold</p>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+              <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-4 rounded-[3px]" style={{ background: SLIDE_OVER }} />models over (deeper = more of them)</span>
+              <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-4 rounded-[3px]" style={{ background: `color-mix(in srgb, ${SLIDE_NEAR} 45%, transparent)` }} />within 20%</span>
+            </div>
+          </div>
+          <Timeline t0={t0} t1={t1} groups={groups} groupW={96} rowW={88} />
+        </div>
+        <div className="space-y-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm font-medium">Landslide index at {cur.name}</p>
+            <Tabs value={cur.name} onValueChange={setPoint}>
+              <TabsList>{ls.points.map((p) => <TabsTrigger key={p.name} value={p.name}>{p.name}</TabsTrigger>)}</TabsList>
+            </Tabs>
+          </div>
+          <SeriesChart series={series} unit="" height={220} domain={[0, Math.ceil(top)]} yTicks={ticksOf(0, Math.ceil(top), 1)} format={(v) => v.toFixed(1)}>
+            <ReferenceArea y1={thr} y2={Math.ceil(top)} fill={SLIDE_OVER} fillOpacity={0.07} ifOverflow="hidden" />
+            <ReferenceLine y={thr} stroke={SLIDE_OVER} strokeDasharray="5 4" label={{ value: `Threshold ${thr}`, position: "insideTopLeft", fontSize: 10, fill: SLIDE_OVER }} />
+          </SeriesChart>
+          <ModelLegend models={series.map((s) => s.model)} />
+        </div>
+        <p className="text-xs text-muted-foreground">
+          From Chleborad, Baum and Godt (2006),{" "}
+          <a className="underline underline-offset-2 hover:text-foreground" href="https://pubs.usgs.gov/of/2006/1064/" target="_blank" rel="noopener">USGS Open-File Report 2006-1064</a>,
+          calibrated on landslides in Seattle and along the nearby Puget Sound bluffs. The threshold says when landslides become
+          likely across the area, not where. Observed rain is MRMS; days it's missing count as dry.
+        </p>
       </CardContent>
     </Card>
   )
@@ -622,6 +739,91 @@ export function SnowLevelCard({ data }: { data: Briefing }) {
 
 
 // ------------------------------------------------------------------ snowpack (SNOTEL)
+
+// ------------------------------------------------------------------ avalanche danger (NWAC)
+
+/** North American Public Avalanche Danger Scale colours. */
+const AVY = ["#9ca3af", "#50b848", "#fff200", "#f7941e", "#ed1c24", "#231f20"]
+const AVY_LABEL = ["No rating", "Low", "Moderate", "Considerable", "High", "Extreme"]
+const avyText = (l: number) => (l >= 4 ? "#fff" : "#1b1f24")
+
+function AvyCell({ level }: { level: number | null }) {
+  const l = level ?? 0
+  return (
+    <span className="flex h-6 items-center justify-center rounded-[3px] text-[11px] font-medium"
+          style={{ background: l ? AVY[l] : "transparent", color: l ? avyText(l) : "var(--muted-foreground)",
+                   boxShadow: l ? "inset 0 0 0 1px rgb(0 0 0 / 0.08)" : "inset 0 0 0 1px var(--border)" }}>
+      {l ? AVY_LABEL[l] : "–"}
+    </span>
+  )
+}
+
+function AvyBands({ today, tomorrow }: { today?: AvalancheDanger | null; tomorrow?: AvalancheDanger | null }) {
+  const rows: [keyof AvalancheDanger, string][] = [["upper", "Above treeline"], ["middle", "Near treeline"], ["lower", "Below treeline"]]
+  return (
+    <div className="grid grid-cols-[auto_1fr_1fr] items-center gap-x-1.5 gap-y-1 text-xs">
+      <span /><span className="text-center text-muted-foreground">Today</span><span className="text-center text-muted-foreground">Tomorrow</span>
+      {rows.map(([k, label]) => (
+        <React.Fragment key={k}>
+          <span className="pr-1 text-muted-foreground">{label}</span>
+          <AvyCell level={today?.[k] ?? null} />
+          <AvyCell level={tomorrow?.[k] ?? null} />
+        </React.Fragment>
+      ))}
+    </div>
+  )
+}
+
+export function AvalancheCard({ data }: { data: Briefing }) {
+  const av = data.avalanche as Avalanche | null | undefined
+  if (!av || !av.zones.length) return null
+  const advice = [...new Set(av.zones.map((z) => z.travelAdvice).filter(Boolean))] as string[]
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Avalanche danger</CardTitle>
+        <CardDescription>
+          Northwest Avalanche Center forecasts by zone, by elevation band for today and tomorrow. Check the full forecast before heading into avalanche terrain.
+        </CardDescription>
+        <CardAction>
+          <a className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground" href={av.url} target="_blank" rel="noopener">NWAC forecasts</a>
+        </CardAction>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {!av.inSeason ? (
+          <div className="space-y-2 text-sm">
+            <p>
+              NWAC hasn't started daily danger ratings for the season yet
+              {av.until && <> (the early-season summary runs through {dayShort(av.until)})</>}. Until then:
+            </p>
+            {advice.map((a) => <p key={a} className="text-muted-foreground">{a}</p>)}
+            <p className="flex flex-wrap gap-x-3 gap-y-1 text-xs">
+              {av.zones.map((z) => <a key={z.name} className="text-muted-foreground underline underline-offset-2 hover:text-foreground" href={z.link} target="_blank" rel="noopener">{z.name}</a>)}
+            </p>
+          </div>
+        ) : (
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {av.zones.map((z) => (
+              <div key={z.name} className="space-y-2.5 rounded-lg border p-3">
+                <div className="flex items-start justify-between gap-2">
+                  <a className="text-sm font-medium hover:underline" href={z.link} target="_blank" rel="noopener">{z.name}</a>
+                  <span className="shrink-0 rounded-md px-1.5 py-0.5 text-xs font-medium"
+                        style={{ background: AVY[Math.max(0, z.level)], color: avyText(z.level) }}>{z.level >= 1 ? z.label : "No rating"}</span>
+                </div>
+                {z.warning && <p className="rounded-md bg-red-50 px-2 py-1 text-xs font-medium text-red-800 dark:bg-red-950 dark:text-red-200">{z.warning}</p>}
+                {(z.today || z.tomorrow) && <AvyBands today={z.today} tomorrow={z.tomorrow} />}
+                {z.problems && z.problems.length > 0 && (
+                  <p className="text-xs"><span className="text-muted-foreground">Problems:</span> {z.problems.join(", ")}</p>
+                )}
+                {z.bottomLine && <p className="line-clamp-3 text-xs text-muted-foreground" title={z.bottomLine}>{z.bottomLine}</p>}
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
 
 export function SnowpackCard({ data }: { data: Briefing }) {
   const sp = data.snowpack

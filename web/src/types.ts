@@ -140,7 +140,26 @@ export interface Briefing {
   observed?: Observed | null
   snowpack?: Snowpack | null
   outlooks?: Outlooks | null
+  landslide?: Landslide | null
+  avalanche?: Avalanche | null
 }
+
+export interface Landslide {
+  threshold: number; p15Factor: number; source: string
+  days: { start: string; end: string }[]
+  points: { name: string
+            observed: { p3: N; p15: N; index: N; needed3: N }
+            models: { model: string; tier?: Tier; p3: N[]; p15: N[]; index: N[] }[] }[]
+}
+
+export interface AvalancheDanger { lower: number | null; middle: number | null; upper: number | null }
+export interface AvalancheZone {
+  id: number; name: string; state: string; level: number; label: string; color: string; link: string
+  travelAdvice: string | null; start: string | null; end: string | null; offSeason: boolean
+  today?: AvalancheDanger | null; tomorrow?: AvalancheDanger | null
+  bottomLine?: string | null; problems?: string[]; warning?: string | null
+}
+export interface Avalanche { center: string; url: string; zones: AvalancheZone[]; inSeason: boolean; until: string | null }
 
 export interface SnowStation {
   name: string; triplet: string; elev_ft: number | null; lat: number; lon: number; date: string

@@ -6,7 +6,7 @@ import { issuedLabel } from "@/lib/format"
 import { NwsAlerts } from "@/sections/Alerts"
 import { SinceYesterday } from "@/sections/Changes"
 import { AgreementGrid, ImpactsTable } from "@/sections/Impacts"
-import { ArCard, DiscussionsCard, GradientsCard, ObservedCard, OddsCard, OutlooksCard, SnowLevelCard, SnowpackCard } from "@/sections/Context"
+import { ArCard, AvalancheCard, DiscussionsCard, GradientsCard, LandslideCard, ObservedCard, OddsCard, OutlooksCard, SnowLevelCard, SnowpackCard } from "@/sections/Context"
 import { DayByDay, EnsemblePlume, EnsembleTable, LocationPicker, RunningTotal } from "@/sections/Location"
 import { extremeTabs, MapCard } from "@/sections/Maps"
 import { Headline, RunStatus, WindowCard } from "@/sections/Overview"
@@ -91,21 +91,23 @@ export default function App() {
           </Section>
         )}
 
-        {(data.observed || data.ar || data.odds) && (
-          <Section title="Flood setup"
-            description="What has already fallen, whether an atmospheric river is coming, and how many ensemble members reach the heavy-rain and snow thresholds.">
+        {(data.observed || data.ar || data.odds || data.landslide) && (
+          <Section title="Flood and landslide setup"
+            description="What has already fallen, how close that puts the Seattle area to the landslide threshold, whether an atmospheric river is coming, and how many ensemble members reach the heavy-rain and snow thresholds.">
             <ObservedCard data={data} />
+            <LandslideCard data={data} />
             <ArCard data={data} />
             <OddsCard data={data} />
           </Section>
         )}
 
-        {((data.gradients?.length ?? 0) > 0 || data.snowLevel || data.snowpack) && (
+        {((data.gradients?.length ?? 0) > 0 || data.snowLevel || data.snowpack || data.avalanche) && (
           <Section title="Wind and snow"
-            description="Pressure gradients that drive the region's classic wind events, where the snow level sits against the pass elevations, and the snowpack so far.">
+            description="Pressure gradients that drive the region's classic wind events, where the snow level sits against the pass elevations, the snowpack so far, and avalanche danger.">
             <GradientsCard data={data} />
             <SnowLevelCard data={data} />
             <SnowpackCard data={data} />
+            <AvalancheCard data={data} />
           </Section>
         )}
 
@@ -159,7 +161,8 @@ export default function App() {
             <h3 className="mb-1.5 font-medium text-foreground">Sources</h3>
             <p>GRIB2 from NOAA NODD ({meta.sources.ncep.join(", ")}) and ECMWF open data ({meta.sources.ecmwf.join(", ")}), read with Herbie.
               {meta.hasSupplement && " Models marked * come from Open-Meteo."}</p>
-            <p className="mt-2">Observed precipitation from NOAA MRMS; snowpack from USDA NRCS SNOTEL; forecast discussions,
+            <p className="mt-2">Observed precipitation from NOAA MRMS; snowpack from USDA NRCS SNOTEL; avalanche danger from the
+              Northwest Avalanche Center (avalanche.org); landslide threshold from USGS; forecast discussions,
               alerts and outlooks from NWS, WPC and CPC.</p>
           </div>
           <div>
