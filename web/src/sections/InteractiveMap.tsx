@@ -15,10 +15,10 @@ import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { loadCog, renderImage, sample } from "@/lib/cog"
 import {
-  type Coords, cellIndex, contourLines, fieldUrl, loadField, nearestTime, ptypeColor, rampColor, refcColor,
-  renderGrid, windArrows, windFrom,
+  type Coords, bicubicAt, contourLines, fieldUrl, gridPos, loadField, nearestAt, nearestTime, ptypeColor, rampColor,
+  refcColor, refcRgba, renderGrid, renderSmooth, windArrows, windFrom,
 } from "@/lib/fields"
-import { FRZ, GUST, PCT, PRECIP, PTYPE_COLORS, PTYPE_NAMES, type Ramp, REFC, SNOW, SPREAD, TEMP, WIND } from "@/lib/ramps"
+import { colorizer, FRZ, GUST, PCT, PRECIP, PTYPE_COLORS, PTYPE_NAMES, type Ramp, REFC, SNOW, SPREAD, TEMP, WIND } from "@/lib/ramps"
 import type { Briefing, Cog, FieldEntry, FieldsManifest, FieldVar } from "@/types"
 
 // ------------------------------------------------------------------ map plumbing
@@ -105,8 +105,8 @@ function arrowImage(): ImageData {
   return g.getImageData(0, 0, s, s)
 }
 
-function MapPane({ data, spec, opacity, sync }: {
-  data: Briefing; spec: FrameSpec | null; opacity: number; sync: ReturnType<typeof useCameraSync>
+function MapPane({ data, spec, opacity, smooth, sync }: {
+  data: Briefing; spec: FrameSpec | null; opacity: number; smooth: boolean; sync: ReturnType<typeof useCameraSync>
 }) {
   const el = React.useRef<HTMLDivElement>(null)
   const ready = React.useRef<Promise<maplibregl.Map> | null>(null)
@@ -182,6 +182,12 @@ function MapPane({ data, spec, opacity, sync }: {
   React.useEffect(() => {
     ready.current?.then((m) => m.setPaintProperty("grid", "raster-opacity", opacity))
   }, [opacity])
+
+  // Smoothed images are drawn at several pixels per cell; let the GPU blend between those pixels
+  // too. Unsmoothed images keep hard cell edges.
+  React.useEffect(() => {
+    ready.current?.then((m) => m.setPaintProperty("grid", "raster-resampling", smooth ? "linear" : "nearest"))
+  }, [smooth])
 
   return (
     <div className="relative overflow-hidden rounded-lg border">
@@ -264,18 +270,25 @@ const TOT_VARS: { id: TotVar; label: string; ramp: Ramp }[] = [
 ]
 const MEAN = "Model mean"
 
-function totalsSpec(c: Cog | undefined, ramp: Ramp, windowLabel: string): FrameSpec | null {
+function totalsSpec(c: Cog | undefined, ramp: Ramp, windowLabel: string, smooth: boolean): FrameSpec | null {
   if (!c) return null
   return {
-    key: `tot|${c.path.slice(0, 120)}|${ramp.label}`,
+    key: `tot|${c.path.slice(0, 120)}|${ramp.label}|${smooth ? "s" : "n"}`,
     title: `${c.model}, ${windowLabel}`,
     sub: c.run ? `${c.run} run` : c.members ? `${c.members.length} models` : undefined,
     load: async () => {
       const r = await loadCog(cogUrl(c))
+      const color = colorizer(ramp)
+      const value = (lon: number, lat: number) => {
+        if (!smooth) return sample(r, lon, lat)
+        const p = gridPos(r, lon, lat)
+        const v = p ? bicubicAt(r, r.data, p[0], p[1]) : NaN
+        return Number.isFinite(v) ? v : null
+      }
       return {
-        image: renderImage(r, ramp),
+        image: smooth ? renderSmooth(r, (fx, fy) => color(bicubicAt(r, r.data, fx, fy))) : renderImage(r, ramp),
         sample: (lon, lat) => {
-          const v = sample(r, lon, lat)
+          const v = value(lon, lat)
           return v == null ? null : ramp.units === "%" ? `${Math.round(v)}% of normal` : `${v.toFixed(2)} ${ramp.units}`
         },
       }
@@ -298,7 +311,8 @@ const ISOBARS = Array.from({ length: 31 }, (_, i) => 940 + 4 * i)
 const timeLabel = (iso: string) =>
   new Date(iso).toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", timeZone: "America/Los_Angeles", timeZoneName: "short" })
 
-function hourlySpec(model: string, entries: Record<string, FieldEntry>, layer: HLayer, time: string, isobars: boolean): FrameSpec | null {
+function hourlySpec(model: string, entries: Record<string, FieldEntry>, layer: HLayer, time: string, isobars: boolean,
+                    smooth: boolean): FrameSpec | null {
   const def = HLAYERS.find((l) => l.id === layer)!
   const prim = def.primary(entries)
   if (!prim) return null
@@ -307,7 +321,7 @@ function hourlySpec(model: string, entries: Record<string, FieldEntry>, layer: H
   const lead = valid ? Math.round((Date.parse(valid) - Date.parse(prim.init)) / 3600e3) : null
   const iso = isobars && entries.mslp
   return {
-    key: `hr|${model}|${layer}|${valid ?? "none:" + time}|${iso ? 1 : 0}`,
+    key: `hr|${model}|${layer}|${valid ?? "none:" + time}|${iso ? 1 : 0}|${smooth ? "s" : "n"}`,
     title: `${model}, ${def.label.toLowerCase()}`,
     sub: valid ? `${timeLabel(valid)} (hour ${lead} of the ${prim.run} run)` : undefined,
     load: async () => {
@@ -349,35 +363,51 @@ function hourlySpec(model: string, entries: Record<string, FieldEntry>, layer: H
           isobarLines = contourLines(pfile, pressure, ISOBARS, pfile.width > 120 ? 3 : 1)
         }
       }
-      const describe = (i: number): string | null => {
-        const v = band[i]
+      // Precipitation type alone is categorical, so it's never interpolated.
+      const doSmooth = smooth && !(layer === "radar" && prim.var === "ptype")
+      // the continuous field drawn for this layer (wind: speed)
+      const scalar = layer === "wind" ? extra2! : band
+      const val = (d: Float32Array, fx: number, fy: number) => (doSmooth ? bicubicAt(f, d, fx, fy) : nearestAt(f, d, fx, fy))
+      const describe = (fx: number, fy: number): string | null => {
         if (layer === "radar") {
           if (prim.var === "refc") {
+            const v = val(band, fx, fy)
             if (!(v >= 5)) return "No precipitation"
-            const t = extra ? PTYPE_NAMES[extra[i]] : null
+            const t = extra ? PTYPE_NAMES[nearestAt(f, extra, fx, fy)] : null
             return `${t && t !== "none" ? t[0].toUpperCase() + t.slice(1) + ", " : ""}${Math.round(v)} dBZ`
           }
-          const t = PTYPE_NAMES[v] ?? "none"
+          const t = PTYPE_NAMES[nearestAt(f, band, fx, fy)] ?? "none"
           return t === "none" ? "No precipitation" : t[0].toUpperCase() + t.slice(1)
         }
+        const v = val(scalar, fx, fy)
         if (!Number.isFinite(v)) return null
         if (layer === "t2m") return `${Math.round(v)}°F`
         if (layer === "gust") return `Gusts ${Math.round(v)} mph`
-        if (layer === "wind") return `${windFrom(v, extra![i])} ${Math.round(extra2![i])} mph`
+        if (layer === "wind") return `${windFrom(val(band, fx, fy), val(extra!, fx, fy))} ${Math.round(v)} mph`
         return `Freezing level ${(Math.round(v / 100) * 100).toLocaleString("en-US")} ft`
       }
+      let image: Frame["image"]
+      if (!doSmooth) image = renderGrid(f, color)
+      else if (layer === "radar") {
+        const rgba = refcRgba()
+        image = renderSmooth(f, (fx, fy) => rgba(bicubicAt(f, band, fx, fy), extra ? nearestAt(f, extra, fx, fy) : 1))
+      } else {
+        const c = colorizer(layer === "t2m" ? TEMP : layer === "gust" ? GUST : layer === "wind" ? WIND : FRZ)
+        image = renderSmooth(f, (fx, fy) => c(bicubicAt(f, scalar, fx, fy)))
+      }
       return {
-        image: renderGrid(f, color),
+        image,
         isobars: isobarLines, freezing, arrows,
         sample: (lon, lat) => {
-          const i = cellIndex(f, lon, lat)
-          const main = i >= 0 ? describe(i) : null
-          let p: string | null = null
+          const p = gridPos(f, lon, lat)
+          const main = p ? describe(p[0], p[1]) : null
+          let pr: string | null = null
           if (pressure && pfile) {
-            const k = cellIndex(pfile, lon, lat)
-            if (k >= 0 && Number.isFinite(pressure[k])) p = `${pressure[k].toFixed(0)} hPa`
+            const q = gridPos(pfile, lon, lat)
+            const v = q ? (doSmooth ? bicubicAt(pfile, pressure, q[0], q[1]) : nearestAt(pfile, pressure, q[0], q[1])) : NaN
+            if (Number.isFinite(v)) pr = `${v.toFixed(0)} hPa`
           }
-          return [main, p].filter(Boolean).join(", ") || null
+          return [main, pr].filter(Boolean).join(", ") || null
         },
       }
     },
@@ -434,6 +464,13 @@ export function InteractiveMap({ data }: { data: Briefing }) {
   const fields = useFields(data)
   const [mode, setMode] = React.useState<"totals" | "hourly">("totals")
   const [opacity, setOpacity] = React.useState(0.85)
+  const [smooth, setSmoothState] = React.useState(() => {
+    try { return localStorage.getItem("pnw-briefing.map.smooth") === "1" } catch { return false }
+  })
+  const setSmooth = (v: boolean) => {
+    setSmoothState(v)
+    try { localStorage.setItem("pnw-briefing.map.smooth", v ? "1" : "0") } catch { /* storage unavailable */ }
+  }
   const [compare, setCompare] = React.useState(false)
 
   // totals state
@@ -486,22 +523,22 @@ export function InteractiveMap({ data }: { data: Briefing }) {
   }, [playing, times])
 
   const specA = mode === "totals"
-    ? totalsSpec(pick(model), totRamp, winLabel(d))
-    : hA && curTime ? hourlySpec(hA, byModel.get(hA)!.entries, layer, curTime, isobars) : null
+    ? totalsSpec(pick(model), totRamp, winLabel(d), smooth)
+    : hA && curTime ? hourlySpec(hA, byModel.get(hA)!.entries, layer, curTime, isobars, smooth) : null
   const showB = compare && (mode === "hourly" || perModel)
   const specB = !showB ? null : mode === "totals"
-    ? totalsSpec(pick(other), totRamp, winLabel(d))
-    : hB && curTime ? hourlySpec(hB, byModel.get(hB)!.entries, layer, curTime, isobars) : null
+    ? totalsSpec(pick(other), totRamp, winLabel(d), smooth)
+    : hB && curTime ? hourlySpec(hB, byModel.get(hB)!.entries, layer, curTime, isobars, smooth) : null
 
   // warm the cache for the next frames so playback stays smooth
   React.useEffect(() => {
     if (mode !== "hourly" || !hA || !times.length) return
     for (const k of [1, 2]) {
       const t = times[(tIdx + k) % times.length]
-      const s = hourlySpec(hA, byModel.get(hA)!.entries, layer, t, isobars)
+      const s = hourlySpec(hA, byModel.get(hA)!.entries, layer, t, isobars, smooth)
       if (s) getFrame(s).catch(() => {})
     }
-  }, [mode, hA, layer, tIdx, isobars])
+  }, [mode, hA, layer, tIdx, isobars, smooth])
 
   if (!cogs.length && !fields.length) return null
   const hasHourly = fields.length > 0
@@ -555,9 +592,12 @@ export function InteractiveMap({ data }: { data: Briefing }) {
               {entriesA.mslp && <Toggle id="isobars" label="Isobars" checked={isobars} onChange={setIsobars} />}
             </>
           )}
-          <div className="ml-auto flex w-[180px] items-center gap-3">
+          <div className="ml-auto flex items-center gap-5">
+          <Toggle id="smooth" label="Smooth" checked={smooth} onChange={setSmooth} />
+          <div className="flex w-[180px] items-center gap-3">
             <Label className="text-xs text-muted-foreground">Opacity</Label>
             <Slider value={[opacity]} min={0.2} max={1} step={0.05} onValueChange={([v]) => setOpacity(v)} aria-label="Grid opacity" />
+          </div>
           </div>
         </div>
 
@@ -575,13 +615,15 @@ export function InteractiveMap({ data }: { data: Briefing }) {
         )}
 
         <div className={`grid gap-3 ${showB ? "lg:grid-cols-2" : ""}`}>
-          <MapPane data={data} spec={specA} opacity={opacity} sync={sync} />
-          {showB && <MapPane data={data} spec={specB} opacity={opacity} sync={sync} />}
+          <MapPane data={data} spec={specA} opacity={opacity} smooth={smooth} sync={sync} />
+          {showB && <MapPane data={data} spec={specB} opacity={opacity} smooth={smooth} sync={sync} />}
         </div>
 
         {mode === "totals" ? <RampLegend ramp={totRamp} /> : (
           <div className="space-y-2">
             {layer === "radar" && <RadarLegend withRefc={!!entriesA.refc} />}
+            {smooth && layer === "radar" && !entriesA.refc && <p className="text-xs text-muted-foreground">Precipitation type is a category, so it isn't smoothed.</p>}
+            {smooth && layer === "radar" && entriesA.refc && entriesA.ptype && <p className="text-xs text-muted-foreground">Reflectivity is smoothed; precipitation type keeps each model cell's category.</p>}
             {layer === "t2m" && <RampLegend ramp={TEMP} every={2} note="The dashed blue line marks 32°F." />}
             {layer === "gust" && <RampLegend ramp={GUST} />}
             {layer === "wind" && <RampLegend ramp={WIND} note="Arrows point the way the wind is blowing; longer arrows are stronger winds." />}
