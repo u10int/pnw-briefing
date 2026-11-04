@@ -57,12 +57,16 @@ def _read(zip_path: Path, dom):
     import zipfile
 
     import rasterio
-    from rasterio.windows import from_bounds
+    from rasterio.windows import Window, from_bounds
 
     names = zipfile.ZipFile(zip_path).namelist()
     grid_name = next(n for n in names if n.lower().endswith((".bil", ".tif", ".tiff")))
     with rasterio.open(f"/vsizip/{zip_path}/{grid_name}") as src:
         win = from_bounds(dom["lon_min"], dom["lat_min"], dom["lon_max"], dom["lat_max"], src.transform).round_offsets().round_lengths()
+        # The domain can extend past the grid (PRISM starts at -125.02°). Clip the window to the grid
+        # first: reading an out-of-range window returns clipped data, and labelling it from the
+        # unclipped window shifts every cell.
+        win = win.intersection(Window(0, 0, src.width, src.height))
         a = src.read(1, window=win, masked=True).astype("float32").filled(np.nan)
         t = src.window_transform(win)
     lon = t.c + t.a * (np.arange(a.shape[1]) + 0.5)

@@ -51,8 +51,12 @@ def make_fake(style, grid):
             return pd.DataFrame({"search_this": [r for r in self._rows() if "APCP" in search]})
 
         def xarray(self, search, remove_grib=True):
-            s = search.replace("\\", "")
-            assert "prob" not in s and "std" not in s, "statistic record was read"
+            # Like Herbie: every inventory row matching the regex is downloaded; with several matches
+            # cfgrib hands back a list, statistic records first (as NBM's files are ordered).
+            hits = [r for r in self._rows() if re.search(search, r)]
+            assert hits, f"nothing matched {search!r}"
+            s = sorted(hits, key=lambda r: "prob" not in r and "std" not in r)[0]
+            assert "prob" not in s and "std" not in s, f"statistic record was read: {s}"
             m = re.search(r"(\d+)-(\d+) (hour|day)", s)
             a, b = int(m[1]), int(m[2])
             if m[3] == "day":

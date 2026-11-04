@@ -132,7 +132,10 @@ def water_mm_factor(da, default: float = 1.0) -> float:
 
 def _read(H, row, dom, water=False, default=1.0):
     """Crop one GRIB message to the domain. With water=True, convert to mm from the message's units."""
-    da = _first_var(_retry(H.xarray, re.escape(row), remove_grib=True))
+    # Anchor to the whole record: Herbie matches by regex, and NBM's probability records begin with
+    # the plain record's text (":APCP:surface:0-6 hour acc fcst:" vs "...fcst:prob >0.254:..."),
+    # so an unanchored search downloads both and the probability (0-100 %) can come back first.
+    da = _first_var(_retry(H.xarray, f"^{re.escape(row)}$", remove_grib=True))
     lat, lon, v = _crop(da, dom)
     return (lat, lon, v * water_mm_factor(da, default)) if water else (lat, lon, v)
 
