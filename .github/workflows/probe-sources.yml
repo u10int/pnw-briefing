@@ -32,8 +32,8 @@ jobs:
           await card.scrollIntoViewIfNeeded()
           await pg.waitForTimeout(5000)
           await card.screenshot({ path: "/tmp/shots/summary_terrain.png" })
-          await pg.getByRole("tab", { name: "Through time" }).click()
-          await pg.getByRole("tab", { name: "Wind" }).click()
+          await pg.getByRole("tab", { name: "Through time", exact: true }).click()
+          await pg.getByRole("tab", { name: "Wind", exact: true }).click()
           const iso = pg.getByLabel("Isobars")
           if (!(await iso.isChecked())) await iso.click()
           await pg.waitForTimeout(7000)
@@ -42,5 +42,6 @@ jobs:
           await b.close()
           JS
           mkdir -p /tmp/shots && node shot.mjs
-      - uses: actions/upload-artifact@v4
+      - if: always()
+        uses: actions/upload-artifact@v4
         with: {name: shots, path: /tmp/shots}
