@@ -225,6 +225,19 @@ function arrowImage(): ImageData {
   return g.getImageData(0, 0, s, s)
 }
 
+/** A chevron pointing along +x, for arrows laid along a line. */
+function chevronImage(): ImageData {
+  const s = 24, c = document.createElement("canvas")
+  c.width = c.height = s
+  const g = c.getContext("2d")!
+  g.fillStyle = "#000"
+  g.beginPath()
+  g.moveTo(6, 3); g.lineTo(20, 12); g.lineTo(6, 21); g.lineTo(9.5, 12)
+  g.closePath()
+  g.fill()
+  return g.getImageData(0, 0, s, s)
+}
+
 type Status = { kind: "loading" | "ready" | "error" | "empty"; note?: string }
 
 function MapPane({ data, view, clock, opacity, smooth, particles, particleColor, sync, terrain }: {
@@ -270,6 +283,7 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
       // first label layer of the basemap (none on the fallback, so data goes on top)
       const labels = m.getStyle().layers.find((l) => l.type === "symbol")?.id
       m.addImage("arrow", arrowImage(), { sdf: true })
+      m.addImage("chevron", chevronImage(), { sdf: true })
       m.addLayer(grid, labels)
       // terrain shading over the weather colours (shadows only darken, so the colours still read)
       m.addSource("dem", { type: "raster-dem", tiles: [DEM_TILES], tileSize: 256, maxzoom: 12, encoding: "terrarium",
@@ -287,6 +301,12 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
         layout: { "line-cap": "round" },
         paint: { "line-color": ["get", "color"], "line-width": ["match", ["get", "level"], 2, 5, 1, 4, 2.5],
                  "line-opacity": ["match", ["get", "level"], 0, 0.7, 0.95] } }, labels)
+      // arrowheads along each pair, pointing from high to low pressure (the way gap flow blows)
+      m.addLayer({ id: "pair-arrows", type: "symbol", source: "pairs", filter: ["all", ["==", ["geometry-type"], "LineString"], ["==", ["get", "flow"], 1]],
+        layout: { "symbol-placement": "line", "symbol-spacing": 34, "icon-image": "chevron", "icon-rotation-alignment": "map",
+                  "icon-allow-overlap": true, "icon-ignore-placement": true,
+                  "icon-size": ["match", ["get", "level"], 2, 0.85, 1, 0.75, 0.6] },
+        paint: { "icon-color": ["match", ["get", "level"], 0, "#6b7280", ["get", "color"]], "icon-halo-color": "rgba(255,255,255,0.95)", "icon-halo-width": 1.2 } }, labels)
       m.addLayer({ id: "pair-ends", type: "circle", source: "pairs", filter: ["==", ["geometry-type"], "Point"],
         paint: { "circle-radius": 4, "circle-color": "#fff", "circle-stroke-color": ["get", "color"], "circle-stroke-width": 2.5 } }, labels)
       // labels need the basemap's glyphs; the plain fallback style has none
@@ -615,8 +635,10 @@ function pairOverlay(pairs: Gradient[], model: string, time: number): FC {
     const { level, label } = gradLevel(g, v)
     const r = Math.round(v)
     const text = `${pairName(g)} ${r > 0 ? "+" : r < 0 ? "−" : ""}${Math.abs(r)}`
-    features.push({ type: "Feature", properties: { level, color: GRAD_COLORS[level], text, what: label ?? "" },
-                    geometry: { type: "LineString", coordinates: g.locs } })
+    // ordered from the higher-pressure station to the lower, so the arrowheads show the flow
+    const coords = v >= 0 ? g.locs : [...g.locs].reverse()
+    features.push({ type: "Feature", properties: { level, color: GRAD_COLORS[level], text, what: label ?? "", flow: Math.abs(v) >= 1 ? 1 : 0 },
+                    geometry: { type: "LineString", coordinates: coords } })
     for (const [k, loc] of g.locs.entries()) {
       features.push({ type: "Feature", properties: { end: 1, color: GRAD_COLORS[level], code: g.codes?.[k] ?? "" },
                       geometry: { type: "Point", coordinates: loc } })
@@ -1058,7 +1080,7 @@ export function InteractiveMap({ data }: { data: Briefing }) {
             {layer === "wind" && <RampLegend ramp={WIND} note={showParticles ? "Particles trace the 10 m wind; faster particles mean stronger wind." : "Arrows point the way the wind is blowing; longer arrows are stronger winds."} />}
             {layer === "frz" && <RampLegend ramp={FRZ} every={2} note="Snow usually reaches the ground about 1,000 ft below the freezing level." />}
             {layer === "pgrad" && <RampLegend ramp={PGRAD} note="How fast sea-level pressure changes with distance, from the smoothed field: 1–2 is a typical synoptic gradient, 3 and up is windstorm-class, and gap flows (Gorge, Fraser, Strait) pack tighter. Terrain above 900 m (about 3,000 ft) is left blank: sea-level pressure there is an extrapolation, and its gradient would mostly trace the mountains." />}
-            {showPairs && pairList.length > 0 && <p className="text-xs text-muted-foreground">Lines join each gradient station pair, labelled with this model's pressure difference (hPa, first station minus second); amber and red mark the pair's first and second thresholds, as on the pressure gradient card.</p>}
+            {showPairs && pairList.length > 0 && <p className="text-xs text-muted-foreground">Lines join each gradient station pair, labelled with this model's pressure difference (hPa, first station minus second); arrowheads point from high to low pressure, the way the gap flow blows; amber and red mark the pair's first and second thresholds, as on the pressure gradient card.</p>}
             {layer === "ivt" && <RampLegend ramp={IVT} note={`Vertically integrated water vapor transport (GFS and ECMWF AIFS), the measure behind the atmospheric-river scale: 250 and up is AR conditions${showParticles ? "; particles follow the moisture flow" : ""}.`} />}
             {showParticles && layer !== "wind" && layer !== "ivt" && <p className="text-xs text-muted-foreground">Moving particles trace the 10 m wind.</p>}
             {isobars && entriesA.mslp && <p className="text-xs text-muted-foreground">Gray lines are sea-level pressure every 2 hPa; heavier, labelled lines every 4 hPa. H and L mark pressure centres.</p>}
