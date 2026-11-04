@@ -215,7 +215,14 @@ grids to object storage such as Cloudflare R2; only the publish step changes.
 4. After the first run creates the `gh-pages` branch, go to **Settings → Pages** and choose
    **Deploy from a branch → `gh-pages` / root**. The page is then at `https://<you>.github.io/pnw-briefing/`.
 
-It runs daily at 15:17 UTC (7:17 AM PST, 8:17 AM PDT), after the 12Z regional runs finish.
+It runs daily at 15:13 UTC (7:13 AM PST, 8:13 AM PDT), after the 12Z regional runs finish.
+
+To pick up page changes (a merged front-end PR, or a label or threshold tweak in `config.yaml`)
+without downloading everything again, run the workflow with **page only** ticked. It takes the
+data already published on `gh-pages`, re-applies the labels that come straight from
+`config.yaml` (pressure-gradient names, codes, meanings and thresholds), rebuilds the page and
+republishes it, both at the root and in that day's archive, in a few minutes. Anything computed
+from model data (new fields, a changed domain or new locations) still needs a full run.
 GitHub pauses scheduled workflows in repos with no activity for 60 days and emails you; one
 click re-enables it.
 
@@ -318,6 +325,7 @@ briefing/observed.py        MRMS observed precipitation, past 7 and 30 days vs n
 briefing/snowpack.py        SNOTEL snowpack by area (NRCS AWDB)
 briefing/outlooks.py        NWS forecast discussions, WPC excessive rainfall and CPC outlooks
 briefing/demo.py            synthetic data for offline tests
+briefing/repage.py          page-only rebuilds: refresh config labels in published data
 web/src/components/ui/      shadcn/ui components
 web/src/sections/           page sections (overview, changes, alerts, impacts, flood setup and
                             wind/snow signals, interactive map, maps, totals, location detail)
