@@ -58,8 +58,9 @@ their commercial tier or swap in Xweather points in `briefing/points.py`.
 - **Impacts.** Heavy rain (24 h and 72 h), snow, hard freeze, possible icy precipitation, strong
   gusts and heat. Each shows *Likely* or *Possible* confidence, the share of models agreeing,
   and the peak value per location, followed by a hazard-by-day agreement grid.
-- **Interactive map.** MapLibre map with two modes. *Totals* shows every gridded model, the
-  multi-model mean, spread and percent of normal for each window. *Through time* steps through
+- **Interactive map.** MapLibre map with two modes. *Summary* shows every gridded model, the
+  multi-model mean, spread and percent of normal for each window, plus highest and lowest
+  temperature, strongest wind and strongest gust over each window. *Through time* steps through
   the forecast with a time slider and play button: simulated radar coloured by precipitation type
   (rain, snow, mix, freezing rain, sleet), 2 m temperature with the 32°F line, gusts, wind, and
   freezing level, with optional isobars and animated wind particles. Both modes hover for values,
@@ -73,10 +74,12 @@ their commercial tier or swap in Xweather points in `briefing/points.py`.
   time-blended 10 m wind with fading trails. Isobars, the 32°F line and wind arrows are contoured
   on the CPU as vector layers. Needs WebGL2; particles also need `EXT_color_buffer_float`.
 - **Next 48 hours.** Small-multiple maps from every model (regional, blend and global), the
-  mean and spread, and snowfall.
+  mean and spread, snowfall, and the window's highest and lowest temperature, strongest wind
+  and strongest gust.
 - **Totals by model.** Region totals for each window, a model × location table with window and
   inches / % of normal switches and a since-yesterday row, and GRIB area means over every grid cell inside each region.
-- **Through day 14.** Full-range maps, 7-day snowfall, and the running total at each location.
+- **Through day 14.** Full-range maps of precipitation and the same four extremes, 7-day
+  snowfall, and the running total at each location.
 - **Ensembles.** GEFS and ECMWF ENS (plus GEPS from the supplement) medians and 10–90% plumes.
 - **Day by day.** Precipitation, high and low, and gust per location, with the model range.
 
@@ -90,6 +93,14 @@ Every run publishes its grids under `data/cogs/` next to the page:
 | `<model>_snow_<N>d.tif` | Snowfall where the model has a snow field, inches |
 | `mean_precip_<N>d.tif`, `spread_precip_<N>d.tif` | Multi-model mean and max − min, inches |
 | `pctnormal_precip_<N>d.tif` | Model mean as percent of the 1991–2020 normal |
+| `<model>_tmax_<N>d.tif`, `<model>_tmin_<N>d.tif` | Highest and lowest 2 m temperature over the window, °F |
+| `<model>_wind_<N>d.tif`, `<model>_gust_<N>d.tif` | Strongest sustained 10 m wind and strongest gust over the window, mph |
+| `mean_<tmax\|tmin\|wind\|gust>_<N>d.tif` | Multi-model mean of those extremes |
+
+Extremes are taken from each model's time-stepped output (every 3 h for HRRR, RRFS and NAM,
+every 6 h otherwise), so a peak or low between output times can be missed by a degree or two.
+ECMWF's gust is the maximum since the previous step; NCEP gusts are at the output time. AIFS has
+no gust field. NBM's wind comes from its 10 m wind speed field.
 
 All are single-band float32, EPSG:4326, DEFLATE-compressed with tiled overviews, and NaN where
 there is no data. Global models keep their native 0.25° grid; HRRR, RRFS, NAM and NBM are

@@ -99,7 +99,7 @@ def grib(cfg):
         run = start - timedelta(hours=0 if spec.get("tier") != "global" else 12)
         lead0 = int((start - run).total_seconds() // 3600)
         out.append({"id": spec["id"], "label": spec["label"], "source": "grib", "tier": spec.get("tier", "global"),
-                    "run": run, "range_days": nd, "dates": dates, "data": data,
+                    "run": run, "lead0": lead0, "range_days": nd, "dates": dates, "data": data,
                     "lat": lat, "lon": lon, "precip_mm": cum, "snow_in": snow,
                     "snow_method": "model snowfall (ASNOW)" if spec["family"] == "ncep" else "snowfall water equivalent at 10:1",
                     "fields": _fields(spec, la, lo, lead0, nd)})

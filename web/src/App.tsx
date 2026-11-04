@@ -7,7 +7,7 @@ import { NwsAlerts } from "@/sections/Alerts"
 import { SinceYesterday } from "@/sections/Changes"
 import { AgreementGrid, ImpactsTable } from "@/sections/Impacts"
 import { DayByDay, EnsemblePlume, EnsembleTable, LocationPicker, RunningTotal } from "@/sections/Location"
-import { MapCard } from "@/sections/Maps"
+import { extremeTabs, MapCard } from "@/sections/Maps"
 import { Headline, RunStatus, WindowCard } from "@/sections/Overview"
 import { ByLocation, GribAreaMeans, RegionTotals } from "@/sections/Totals"
 import type { Briefing } from "@/types"
@@ -91,10 +91,11 @@ export default function App() {
 
         <Section title="Next 48 hours"
           description="Regional convection-allowing models next to the blend and the global models, summed over the same two 12Z–12Z days. Dashed outlines mark the comparison regions, west of the Cascade crest.">
-          <MapCard title="Gridded totals" description="Each model on its own grid, then the mean and spread on a common grid."
+          <MapCard title="Gridded maps" description="Each model on its own grid, then the mean (and spread, for precipitation) on a common grid."
             tabs={[
               { id: "p", label: "Precipitation", src: data.maps.short, alt: "48-hour precipitation by model, with mean and spread", note: "Liquid equivalent. Spread is the highest minus the lowest model at each grid cell." },
               { id: "s", label: "Snowfall", src: data.maps.snow_short, alt: "48-hour snowfall by model", note: "From each model's own snow field; models without one are left out." },
+              ...extremeTabs(data, "short", "the next 48 hours"),
             ]} />
         </Section>
 
@@ -107,10 +108,11 @@ export default function App() {
 
         <Section title={`Through day ${meta.days}`}
           description="The longer-range models over their full runs. Mean and spread use only the days every one of them covers.">
-          <MapCard title="Gridded totals" description="Liquid equivalent over each model's full range."
+          <MapCard title="Gridded maps" description="Totals and extremes over each model's full range."
             tabs={[
               { id: "p", label: "Precipitation", src: data.maps.long, alt: "Full-range precipitation by model", note: "Each panel is labeled with the number of days the model covers." },
               { id: "s", label: "Snowfall, 7 days", src: data.maps.snow_long, alt: "7-day snowfall by model", note: "Models with their own snow field." },
+              ...extremeTabs(data, "long", "each model's full range"),
             ]} />
         </Section>
 
