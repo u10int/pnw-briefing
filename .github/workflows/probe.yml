@@ -1,0 +1,30 @@
+name: Temporary data probe
+on:
+  push:
+    branches: [probe/data-check]
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mamba-org/setup-micromamba@v2
+        with: {environment-file: environment.yml, cache-environment: true}
+      - name: Full pipeline with forecast context (not published)
+        shell: micromamba-shell {0}
+        env: {PYTHONUNBUFFERED: "1"}
+        run: |
+          START=$(date +%s)
+          python -m briefing.main --out /tmp/out > /tmp/log.txt 2>&1 || true
+          echo "ELAPSED $(( $(date +%s) - START ))s"
+          grep -E "field files|ivt|IVT|Traceback|Error" /tmp/log.txt | head -20
+          python - <<'PY'
+          import json, rasterio, numpy as np
+          d = json.load(open("/tmp/out/fields.json"))
+          for e in d["fields"]:
+              if e["var"].startswith("ivt"):
+                  with rasterio.open("/tmp/out/" + e["path"]) as r:
+                      a = r.read(10, masked=True) * e["scale"]
+                      print("IVT", e["model"], e["var"], len(e["times"]), r.shape, r.bounds, "band10 min/max", float(a.min()), float(a.max()))
+          PY
+          du -sh /tmp/out /tmp/out/cogs /tmp/out/fields
