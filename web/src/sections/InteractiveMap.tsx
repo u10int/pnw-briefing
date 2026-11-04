@@ -30,8 +30,31 @@ const EMPTY: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: 
 // variable to send one (CARTO's raster tiles already require it).
 const CARTO_KEY = (import.meta.env.VITE_CARTO_KEY as string | undefined) || ""
 const STYLE_URL = "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json"
-/** Public AWS Terrain Tiles (Terrarium-encoded elevation), no key needed. */
-const DEM_TILES = "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"
+/** Public AWS Terrain Tiles (Terrarium-encoded elevation), no key needed, read through a protocol
+ *  that flattens everything below sea level: the tiles include bathymetry, and sea-floor relief
+ *  under the ocean grids would read as weather structure. */
+const DEM_TILES = "dem-land://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"
+let demProtocol = false
+function addDemProtocol() {
+  if (demProtocol) return
+  demProtocol = true
+  maplibregl.addProtocol("dem-land", async (params, abort) => {
+    const r = await fetch(params.url.replace("dem-land://", "https://"), { signal: abort.signal })
+    if (!r.ok) throw new Error(`terrain tile ${r.status}`)
+    const img = await createImageBitmap(await r.blob())
+    const c = new OffscreenCanvas(img.width, img.height)
+    const ctx = c.getContext("2d", { willReadFrequently: true })!
+    ctx.drawImage(img, 0, 0)
+    const px = ctx.getImageData(0, 0, img.width, img.height)
+    const d = px.data
+    for (let i = 0; i < d.length; i += 4) {
+      // Terrarium: elevation = R * 256 + G + B / 256 - 32768 (m); R < 128 means below sea level
+      if (d[i] < 128) { d[i] = 128; d[i + 1] = 0; d[i + 2] = 0 }
+    }
+    ctx.putImageData(px, 0, 0)
+    return { data: await (await c.convertToBlob({ type: "image/png" })).arrayBuffer() }
+  })
+}
 const withKey = (url: string) =>
   CARTO_KEY && url.includes("cartocdn.com") && !/[?&]key=/.test(url)
     ? { url: `${url}${url.includes("?") ? "&" : "?"}key=${encodeURIComponent(CARTO_KEY)}` }
@@ -227,6 +250,7 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
   React.useEffect(() => {
     // open on the whole grid crop, not just the comparison regions, so the surroundings show too
     const d = data.domain
+    addDemProtocol()
     const m = new maplibregl.Map({
       container: el.current!, style: STYLE_URL, transformRequest: withKey, attributionControl: { compact: true },
       bounds: [[d.lon_min, d.lat_min], [d.lon_max, d.lat_max]],
