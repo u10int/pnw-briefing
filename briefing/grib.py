@@ -419,6 +419,61 @@ def extreme_series(spec, run, lead0, last, dom, t2m, gust, model_fields):
     return out
 
 
+# ---------------------------------------------------------------- water vapour transport
+
+IVT_LEVELS = [1000, 925, 850, 700, 500, 300]     # hPa; trapezoid integral, the usual 6-level approximation
+IVT_PATTERNS = {"ncep": r":(SPFH|UGRD|VGRD):(1000|925|850|700|500|300) mb:",
+                "ecmwf": r":(q|u|v):(1000|925|850|700|500|300):pl:"}
+G = 9.80665
+
+
+def ivt_from_levels(q, u, v, levels_hpa):
+    """Integrated vapour transport components (kg m-1 s-1) from q (kg/kg), u, v (m/s) on pressure
+    levels [lev, ...]: IVT = (1/g) * integral of q*V dp over the levels given."""
+    order = np.argsort(levels_hpa)[::-1]                       # surface (high p) to top
+    p = np.asarray(levels_hpa, dtype="float64")[order] * 100.0
+    q, u, v = q[order], u[order], v[order]
+    dp = -np.diff(p)                                           # positive Pa per layer
+    qu, qv = q * u, q * v
+    iu = np.tensordot(dp, 0.5 * (qu[:-1] + qu[1:]), axes=(0, 0)) / G
+    iv = np.tensordot(dp, 0.5 * (qv[:-1] + qv[1:]), axes=(0, 0)) / G
+    return iu.astype("float32"), iv.astype("float32")
+
+
+def fetch_ivt(spec, run, lead0, last, dom, step=6):
+    """{"hours", "u", "v"} IVT components [t, y, x] every `step` hours, or None."""
+    pattern = IVT_PATTERNS[spec["family"]]
+    hours = [h for h in range(lead0, last + 1, step) if h > 0]
+
+    def one(h):
+        try:
+            ds = _retry(_H(spec, run, h).xarray, pattern, remove_grib=True)
+            ds = ds if isinstance(ds, list) else [ds]
+            got = {}
+            for d in ds:
+                for name in d.data_vars:
+                    if name in ("q", "u", "v") and "isobaricInhPa" in d[name].dims:
+                        da = d[name].sortby("isobaricInhPa")
+                        lat, lon, vals = _crop(da, dom)
+                        got[name] = (da["isobaricInhPa"].values, vals, lat, lon)
+            if len(got) < 3 or not (list(got["q"][0]) == list(got["u"][0]) == list(got["v"][0])):
+                return h, None
+            levs, lat, lon = got["q"][0], got["q"][2], got["q"][3]
+            iu, iv = ivt_from_levels(got["q"][1], got["u"][1], got["v"][1], levs)
+            return h, (lat, lon, iu, iv)
+        except Exception as e:
+            log.debug("%s IVT f%03d: %s", spec["label"], h, e)
+            return h, None
+    with ThreadPoolExecutor(4) as ex:
+        res = [(h, r) for h, r in ex.map(one, hours) if r is not None]
+    if not res:
+        return None
+    lat, lon = res[0][1][0], res[0][1][1]
+    log.info("%s IVT: %d steps", spec["label"], len(res))
+    return {"hours": [h for h, _ in res], "lat": lat, "lon": lon,
+            "u": np.stack([r[2] for _, r in res]), "v": np.stack([r[3] for _, r in res])}
+
+
 def _by_hour(entry, factor=1.0):
     """Map-field entry {"hours", "data"} back to {hour: raw field}."""
     if not entry:
@@ -534,6 +589,13 @@ def fetch_model(spec, cfg, start, points):
         except Exception as e:
             log.warning("%s: interval extremes skipped (%s)", spec["label"], report.short(e))
             ext_series = {}
+        # water vapour transport for the atmospheric-river view (optional)
+        ivt = None
+        if spec.get("ivt"):
+            try:
+                ivt = fetch_ivt(spec, run, lead0, targets[-1], dom)
+            except Exception as e:
+                log.warning("%s: IVT skipped (%s)", spec["label"], report.short(e))
         daily_s = (np.diff(np.stack([[c[i, j] for i, j in idx] for c in snow]), axis=0).T
                    if snow is not None else np.full_like(daily_p, np.nan))
         def at_points(var, fallback):
@@ -562,7 +624,7 @@ def fetch_model(spec, cfg, start, points):
         return {"id": spec["id"], "label": spec["label"], "source": "grib", "tier": spec.get("tier", "global"),
                 "run": run, "lead0": lead0, "range_days": ndays, "dates": dates, "data": data,
                 "lat": lat, "lon": lon, "precip_mm": cum, "snow_in": snow, "snow_method": snow_method,
-                "fields": model_fields, "ext_series": ext_series}
+                "fields": model_fields, "ext_series": ext_series, "ivt": ivt}
     except Exception as e:
         log.exception("%s: GRIB fetch failed", spec["label"])
         report.fail(spec["label"], report.short(e))
@@ -606,6 +668,8 @@ def fetch_ensemble(spec, cfg, start, points):
             per = {p["name"]: np.diff(stack[:, :, i, j], axis=0).T / 25.4
                    for p, (i, j) in zip(points, idx)}
             check_plausible(spec["label"], np.stack(list(per.values())))
+            daily_grid = np.moveaxis(np.diff(stack, axis=0), 0, 1) / 25.4    # [member, day, y, x]
+            snow_grid = _ens_snow(spec, run, targets, dom) if spec.get("snow") else None
         else:
             members = spec["members"]
 
@@ -627,14 +691,43 @@ def fetch_ensemble(spec, cfg, start, points):
                 cum = np.stack([r[2][:, i, j] for r in res])     # [member, t]
                 per[p["name"]] = np.diff(cum, axis=1) / 25.4
             check_plausible(spec["label"], np.stack(list(per.values())))
+            daily_grid = np.diff(np.stack([r[2] for r in res]), axis=1) / 25.4   # [member, day, y, x]
+            snow_grid = None
         dates = [(start + timedelta(days=d)).replace(tzinfo=timezone.utc).astimezone(tz).date() for d in range(ndays)]
         n = next(iter(per.values())).shape[0]
         log.info("%s: %s run, %d members, %d days", spec["label"], run.strftime("%Y-%m-%d %HZ"), n, ndays)
+        # full grids too, for exceedance odds at every location and on the map
         return {"id": spec["id"], "label": spec["label"], "source": "grib", "run": run,
-                "dates": dates, "members": per}
+                "dates": dates, "members": per,
+                "grid": {"lat": lat, "lon": lon, "precip_in": daily_grid.astype("float32"),
+                         "snow_in": None if snow_grid is None else snow_grid.astype("float32")}}
     except Exception as e:
         log.exception("%s: ensemble fetch failed", spec["label"])
         report.fail(spec["label"], report.short(e))
+        return None
+
+
+def _ens_snow(spec, run, targets, dom):
+    """ECMWF ENS daily snowfall per member [member, day, y, x] in inches (water equivalent at 10:1).
+    Optional: any failure leaves the ensemble without snow odds."""
+    try:
+        def step(h):
+            ds = _retry(_H(spec, run, h).xarray, ":sf:", remove_grib=True)
+            ds = ds if isinstance(ds, list) else [ds]
+            parts = []
+            for d in ds:
+                da = d[list(d.data_vars)[0]]
+                _, _, v = _crop(da, dom)
+                parts.append(v.reshape(-1, *v.shape[-2:]) * water_mm_factor(da, 1000.0))
+            return np.concatenate(parts)
+        with ThreadPoolExecutor(4) as ex:
+            res = list(ex.map(step, [t for t in targets if t > 0]))
+        stack = np.stack(res)
+        if targets[0] == 0:
+            stack = np.concatenate([np.zeros_like(stack[:1]), stack])
+        return np.clip(np.moveaxis(np.diff(stack, axis=0), 0, 1), 0, None) / 25.4 * 10
+    except Exception as e:
+        log.info("%s: no ensemble snowfall (%s)", spec["label"], report.short(e))
         return None
 
 

@@ -230,7 +230,7 @@ export function ByLocation({ data }: { data: Briefing }) {
 /** Diverging cell colour for percent of normal: brown below, neutral near 100%, teal above. */
 const BRBG = ["#8c510a", "#bf812d", "#dfc27d", "#f6e8c3", "#f5f5f5", "#c7eae5", "#80cdc1", "#35978f", "#01665e", "#003c30"]
 const BRBG_EDGES = [25, 50, 70, 90, 110, 130, 160, 200, 300]
-function pctCell(v: N) {
+export function pctCell(v: N) {
   if (v == null) return { background: "transparent", color: "var(--muted-foreground)" }
   const i = BRBG_EDGES.findIndex((e) => v < e)
   const k = i === -1 ? BRBG.length - 1 : i

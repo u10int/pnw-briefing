@@ -18,7 +18,7 @@ import { bicubicAt, contourLines, fieldUrl, gridPos, loadField, nearestAt, neare
 import { GridLayer, type GridDraw } from "@/lib/gl/grid-layer"
 import { ParticleLayer, type WindDraw } from "@/lib/gl/particle-layer"
 import { type Grid, sameGrid } from "@/lib/gl/util"
-import { FRZ, GUST, PCT, PRECIP, PTYPE_COLORS, PTYPE_NAMES, type Ramp, REFC, SNOW, SPREAD, TEMP, WIND } from "@/lib/ramps"
+import { FRZ, GUST, PCT, PRECIP, PROB, PTYPE_COLORS, PTYPE_NAMES, type Ramp, REFC, SNOW, SPREAD, TEMP, WIND } from "@/lib/ramps"
 import type { Briefing, Cog, ExtremeVar, FieldEntry, FieldsManifest, FieldVar } from "@/types"
 
 // ------------------------------------------------------------------ map plumbing
@@ -421,9 +421,13 @@ const categoryAt = (g: Grid, a: Float32Array, b: Float32Array | null, t: number,
 
 // ------------------------------------------------------------------ totals mode
 
-type TotVar = "precip" | "snow" | "spread" | "pct" | ExtremeVar
-/** Window products: precipitation totals, and extremes over the window. `digits` for hover values. */
-const TOT_VARS: { id: TotVar; label: string; group: "Totals" | "Extremes"; ramp: Ramp; perModel: boolean; digits: number }[] = [
+type TotVar = "precip" | "snow" | "spread" | "pct" | ExtremeVar | "p24" | "p72" | "obs" | "obspct"
+type TotGroup = "Totals" | "Extremes" | "Odds" | "Observed"
+const GROUP_LABEL: Record<TotGroup, string> = {
+  Totals: "Totals", Extremes: "Extremes over the window", Odds: "Ensemble odds", Observed: "Already fallen (MRMS)",
+}
+/** Window products: precipitation totals, extremes, ensemble odds and observed rainfall. `digits` for hover. */
+const TOT_VARS: { id: TotVar; label: string; group: TotGroup; ramp: Ramp; perModel: boolean; digits: number; suffix?: string }[] = [
   { id: "precip", label: "Precipitation", group: "Totals", ramp: PRECIP, perModel: true, digits: 2 },
   { id: "snow", label: "Snowfall", group: "Totals", ramp: SNOW, perModel: true, digits: 1 },
   { id: "spread", label: "Model spread", group: "Totals", ramp: SPREAD, perModel: false, digits: 2 },
@@ -432,15 +436,21 @@ const TOT_VARS: { id: TotVar; label: string; group: "Totals" | "Extremes"; ramp:
   { id: "tmin", label: "Lowest temperature", group: "Extremes", ramp: { ...TEMP, label: "Lowest temperature at 2 m" }, perModel: true, digits: 0 },
   { id: "wind", label: "Strongest wind", group: "Extremes", ramp: { ...WIND, label: "Strongest sustained wind at 10 m" }, perModel: true, digits: 0 },
   { id: "gust", label: "Strongest gust", group: "Extremes", ramp: { ...GUST, label: "Strongest gust" }, perModel: true, digits: 0 },
+  { id: "p24", label: "Chance of 1\" in a day", group: "Odds", ramp: { ...PROB, label: "Chance of 1\" or more in 24 hours, pooled ensembles" }, perModel: false, digits: 0, suffix: "% of members" },
+  { id: "p72", label: "Chance of 3\" in 3 days", group: "Odds", ramp: { ...PROB, label: "Chance of 3\" or more in 72 hours, pooled ensembles" }, perModel: false, digits: 0, suffix: "% of members" },
+  { id: "obs", label: "Observed precipitation", group: "Observed", ramp: { ...PRECIP, label: "Observed precipitation (MRMS)" }, perModel: false, digits: 2 },
+  { id: "obspct", label: "Observed, % of normal", group: "Observed", ramp: { ...PCT, label: "Observed precipitation, percent of 1991–2020 normal" }, perModel: false, digits: 0, suffix: "% of normal" },
 ]
 const MEAN = "Model mean"
 
-function totalsView(c: Cog | undefined, ramp: Ramp, windowLabel: string, digits = 2): View | null {
+function totalsView(c: Cog | undefined, ramp: Ramp, windowLabel: string, digits = 2, suffix?: string): View | null {
   if (!c) return null
   return {
     key: `tot|${c.path.slice(0, 120)}|${ramp.label}`,
     title: `${c.model}, ${windowLabel}`,
-    sub: () => (c.run ? `${c.run} run` : c.members ? `${c.members.length} models` : undefined),
+    sub: () => (c.run ? `${c.run} run`
+      : c.members ? (c.members.length <= 3 ? c.members.join(" + ") : `${c.members.length} models`)
+      : c.tier === "observed" ? "NOAA MRMS radar + gauges" : undefined),
     grid: () => ({
       key: "total", t: 0,
       load: async () => {
@@ -450,6 +460,7 @@ function totalsView(c: Cog | undefined, ramp: Ramp, windowLabel: string, digits 
           sample: (lon, lat, _t, smooth) => {
             const v = valueAt(r, r.data, lon, lat, smooth)
             if (!Number.isFinite(v)) return null
+            if (suffix) return `${Math.round(v)}${suffix}`
             if (ramp.units === "%") return `${Math.round(v)}% of normal`
             return `${v.toFixed(digits)}${ramp.units === "°F" ? "°F" : ` ${ramp.units}`}`
           },
@@ -778,7 +789,8 @@ export function InteractiveMap({ data }: { data: Briefing }) {
   }
   const totDef = TOT_VARS.find((v) => v.id === variable)!
   const totRamp = totDef.ramp
-  const winLabel = (n: number) => data.windows.find((w) => w.days === n)?.label.toLowerCase() ?? `${n} days`
+  const winLabel = (n: number) => variable === "obs" || variable === "obspct" ? `past ${n} days`
+    : data.windows.find((w) => w.days === n)?.label.toLowerCase() ?? `${n} days`
   const perModel = totDef.perModel
 
   // ---- hourly
@@ -818,11 +830,11 @@ export function InteractiveMap({ data }: { data: Briefing }) {
   }, [playing, times, mode])
 
   const viewA = mode === "totals"
-    ? totalsView(pick(model), totRamp, winLabel(d), totDef.digits)
+    ? totalsView(pick(model), totRamp, winLabel(d), totDef.digits, totDef.suffix)
     : hA ? hourlyView(hA, byModel.get(hA)!.entries, layer, isobars) : null
   const showB = compare && (mode === "hourly" || perModel)
   const viewB = !showB ? null : mode === "totals"
-    ? totalsView(pickOther(other), totRamp, winLabel(d), totDef.digits)
+    ? totalsView(pickOther(other), totRamp, winLabel(d), totDef.digits, totDef.suffix)
     : hB ? hourlyView(hB, byModel.get(hB)!.entries, layer, isobars) : null
 
   if (!cogs.length && !fields.length) return null
@@ -838,7 +850,7 @@ export function InteractiveMap({ data }: { data: Briefing }) {
         <CardTitle>Explore the grids</CardTitle>
         <CardDescription>
           {mode === "totals"
-            ? "Totals and extremes for each window, from each model's own grid. Model spread and percent of normal use the multi-model mean; extremes come from each model's 3- or 6-hourly output."
+            ? "Totals, extremes, ensemble odds and observed rainfall for each window, from each model's own grid. Model spread and percent of normal use the multi-model mean; ensemble odds pool GEFS and ECMWF ENS members."
             : "Forecast maps through time. HRRR, RRFS and NAM step hourly for the first 48 hours (RRFS every 3 hours after that); NBM and the global models every 6 hours. Playback blends smoothly between forecast steps."}
           {" "}Hover for values; drag and zoom to look closer.
         </CardDescription>
@@ -858,16 +870,16 @@ export function InteractiveMap({ data }: { data: Briefing }) {
               <Select value={variable} onValueChange={(v) => setVariable(v as TotVar)}>
                 <SelectTrigger className="w-[190px]" aria-label="Variable"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {(["Totals", "Extremes"] as const).map((g) => [g, totAvail.filter((v) => v.group === g)] as const).filter(([, vs]) => vs.length).map(([g, vs]) => (
+                  {(["Totals", "Extremes", "Odds", "Observed"] as const).map((g) => [g, totAvail.filter((v) => v.group === g)] as const).filter(([, vs]) => vs.length).map(([g, vs]) => (
                     <SelectGroup key={g}>
-                      <SelectLabel>{g === "Totals" ? "Totals" : "Extremes over the window"}</SelectLabel>
+                      <SelectLabel>{GROUP_LABEL[g]}</SelectLabel>
                       {vs.map((v) => <SelectItem key={v.id} value={v.id}>{v.label}</SelectItem>)}
                     </SelectGroup>
                   ))}
                 </SelectContent>
               </Select>
               <Tabs value={String(d)} onValueChange={(v) => setDays(Number(v))}>
-                <TabsList>{windows.map((w) => <TabsTrigger key={w} value={String(w)}>{winLabel(w).replace("next ", "")}</TabsTrigger>)}</TabsList>
+                <TabsList>{windows.map((w) => <TabsTrigger key={w} value={String(w)}>{winLabel(w).replace("next ", "").replace("past ", "")}</TabsTrigger>)}</TabsList>
               </Tabs>
               {perModel && <ModelSelect options={options} value={pick(model)?.model ?? ""} onChange={setModel} label="Model" />}
               {perModel && <Toggle id="compare-t" label="Compare" checked={compare} onChange={setCompare} />}

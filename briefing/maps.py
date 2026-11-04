@@ -245,3 +245,33 @@ def full_range_extreme(grib_models, cfg, var, min_days, out_path):
             panels.append((glat, glon, np.nanmean(stack, 0), "Mean", f"First {common} days, {len(ms)} models"))
     levels, colors = EXTREME_RAMPS[var]
     return _figure(panels, cfg, out_path, levels, colors, _ext_label(var, None), clamp=True)
+
+
+# ---------------------------------------------------------------- observed (MRMS)
+
+PCT_LEVELS = [0, 25, 50, 70, 90, 110, 130, 160, 200, 300]
+PCT_COLORS = ["#8c510a", "#bf812d", "#dfc27d", "#f6e8c3", "#f5f5f5", "#c7eae5", "#80cdc1", "#35978f", "#01665e", "#003c30"]
+
+
+def observed(grids, cfg, out_path):
+    """Past 7 and 30 days observed (MRMS), and the 30 days as percent of normal: three panels,
+    each with its own legend."""
+    if not grids or grids.get("obs7") is None:
+        return None
+    panels = [(grids["obs7"], "Past 7 days", "Observed precipitation (in)", PRECIP_LEVELS, PRECIP_COLORS, False),
+              (grids["obs30"], "Past 30 days", "Observed precipitation (in)", PRECIP_LEVELS, PRECIP_COLORS, False)]
+    if grids.get("pct30") is not None:
+        panels.append((grids["pct30"], "Past 30 days", "Percent of 1991–2020 normal", PCT_LEVELS, PCT_COLORS, True))
+    n = len(panels)
+    PW, PH, LEG = 2.45, 3.5, 0.8
+    fig = plt.figure(figsize=(PW * n, PH + LEG), facecolor=PAPER, dpi=160)
+    gs = fig.add_gridspec(1, n, left=0.01, right=0.99, top=1 - 0.32 / (PH + LEG), bottom=LEG / (PH + LEG), wspace=0.07)
+    axes, tr = _axes(fig, gs, n, cfg["domain"])
+    for k, (ax, (f, title, label, levels, colors, clamp)) in enumerate(zip(axes, panels)):
+        cm, nm = _cmap(levels, colors, clamp)
+        _draw(ax, tr, grids["lat"], grids["lon"], f, cm, nm, title, "MRMS multi-sensor QPE", cfg)
+        w = 0.98 / n
+        _legend(fig, [0.01 + k * w + 0.01, 0.2 / (PH + LEG), w - 0.03, 0.11 / (PH + LEG)], levels, colors, label, clamp)
+    fig.savefig(out_path, facecolor=PAPER, bbox_inches="tight", pad_inches=0.08)
+    plt.close(fig)
+    return out_path

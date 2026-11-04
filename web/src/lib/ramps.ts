@@ -21,6 +21,12 @@ export const SPREAD: Ramp = {
   levels: [0.25, 0.5, 1, 2, 3, 4, 6, 8, 12],
   colors: ["#e6e6e6", "#d2d2d2", "#bcbcbc", "#a3a3a3", "#898989", "#6e6e6e", "#545454", "#383838", "#1c1c1c"],
 }
+/** Probability (% of ensemble members); below 5% is left clear. */
+export const PROB: Ramp = {
+  label: "Chance", units: "%",
+  levels: [5, 15, 30, 45, 60, 75, 90],
+  colors: ["#e2daf5", "#c9b9ec", "#a993df", "#8a6fd0", "#6b4fbc", "#4f3799", "#35226f"],
+}
 export const PCT: Ramp = {
   label: "Model mean, percent of 1991–2020 normal", units: "%",
   levels: [0, 25, 50, 70, 90, 110, 130, 160, 200, 300],
