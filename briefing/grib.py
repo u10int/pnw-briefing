@@ -103,10 +103,18 @@ def _crop(da, dom):
     return lat[sl], lon[sl], vals[(..., *sl)]
 
 
-def _first_var(ds):
-    if isinstance(ds, list):
-        ds = ds[0]
-    return ds[list(ds.data_vars)[0]]
+def _first_var(ds, prefer=None):
+    """The data variable to use. With `prefer` (cfgrib names), pick that variable by name: some
+    files pack several fields in one GRIB message (NAM's 10 m u and v share one), so position
+    can't be trusted. Raises if a preferred name is given but absent."""
+    dss = ds if isinstance(ds, list) else [ds]
+    if prefer:
+        for d in dss:
+            for name in prefer:
+                if name in d.data_vars:
+                    return d[name]
+        raise LookupError(f"none of {prefer} in {[list(d.data_vars) for d in dss]}")
+    return dss[0][list(dss[0].data_vars)[0]]
 
 
 def _rows(H, pattern):
@@ -130,12 +138,12 @@ def water_mm_factor(da, default: float = 1.0) -> float:
     raise ValueError(f"unexpected units {u!r} for an accumulated water field")
 
 
-def _read(H, row, dom, water=False, default=1.0):
+def _read(H, row, dom, water=False, default=1.0, prefer=None):
     """Crop one GRIB message to the domain. With water=True, convert to mm from the message's units."""
     # Anchor to the whole record: Herbie matches by regex, and NBM's probability records begin with
     # the plain record's text (":APCP:surface:0-6 hour acc fcst:" vs "...fcst:prob >0.254:..."),
     # so an unanchored search downloads both and the probability (0-100 %) can come back first.
-    da = _first_var(_retry(H.xarray, f"^{re.escape(row)}$", remove_grib=True))
+    da = _first_var(_retry(H.xarray, f"^{re.escape(row)}$", remove_grib=True), prefer)
     lat, lon, v = _crop(da, dom)
     return (lat, lon, v * water_mm_factor(da, default)) if water else (lat, lon, v)
 
@@ -321,6 +329,14 @@ def fetch_model(spec, cfg, start, points):
         idx = nearest_index(lat, lon, points)
         daily_p = np.diff(np.stack([[c[i, j] for i, j in idx] for c in cum]), axis=0).T / 25.4
         check_plausible(spec["label"], daily_p)
+
+        # time-stepped fields for the interactive map; optional, never fails the model
+        try:
+            from . import fields
+            model_fields = fields.fetch(spec, run, lead0, targets[-1], hours, {"t2m": t2m, "gust": gust}, dom)
+        except Exception as e:
+            log.warning("%s: hourly fields skipped (%s)", spec["label"], report.short(e))
+            model_fields = {}
         daily_s = (np.diff(np.stack([[c[i, j] for i, j in idx] for c in snow]), axis=0).T
                    if snow is not None else np.full_like(daily_p, np.nan))
         tmax = (_daily_extreme(t2m, lead0, ndays, idx, np.nanmax) - 273.15) * 9 / 5 + 32 if t2m else np.full_like(daily_p, np.nan)
@@ -342,7 +358,8 @@ def fetch_model(spec, cfg, start, points):
         dates = [(start + timedelta(days=d)).replace(tzinfo=timezone.utc).astimezone(tz).date() for d in range(n)]
         return {"id": spec["id"], "label": spec["label"], "source": "grib", "tier": spec.get("tier", "global"),
                 "run": run, "range_days": ndays, "dates": dates, "data": data,
-                "lat": lat, "lon": lon, "precip_mm": cum, "snow_in": snow, "snow_method": snow_method}
+                "lat": lat, "lon": lon, "precip_mm": cum, "snow_in": snow, "snow_method": snow_method,
+                "fields": model_fields}
     except Exception as e:
         log.exception("%s: GRIB fetch failed", spec["label"])
         report.fail(spec["label"], report.short(e))

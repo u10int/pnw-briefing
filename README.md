@@ -58,9 +58,12 @@ their commercial tier or swap in Xweather points in `briefing/points.py`.
 - **Impacts.** Heavy rain (24 h and 72 h), snow, hard freeze, possible icy precipitation, strong
   gusts and heat. Each shows *Likely* or *Possible* confidence, the share of models agreeing,
   and the peak value per location, followed by a hazard-by-day agreement grid.
-- **Interactive map.** MapLibre map of every gridded model, the multi-model mean, spread and
-  percent of normal for each window. Hover for values, compare two models side by side, adjust
-  opacity, download the GeoTIFF.
+- **Interactive map.** MapLibre map with two modes. *Totals* shows every gridded model, the
+  multi-model mean, spread and percent of normal for each window. *Through time* steps through
+  the forecast with a time slider and play button: simulated radar coloured by precipitation type
+  (rain, snow, mix, freezing rain, sleet), 2 m temperature with the 32°F line, gusts, wind with
+  arrows, and freezing level, with optional isobars. Both modes hover for values, compare two
+  models side by side, and link each grid for download.
 - **Next 48 hours.** Small-multiple maps from every model (regional, blend and global), the
   mean and spread, and snowfall.
 - **Totals by model.** Region totals for each window, a model × location table with window and
@@ -86,6 +89,36 @@ resampled by nearest neighbour from their projected grids to 0.03°. The `cogs` 
 `briefing.json` describes each file (model, tier, run, window, units). They load directly in
 QGIS, rio-tiler or TiTiler, geotiff.js, or a custom Mapbox GL / WebGL layer. The archive keeps
 GeoTIFFs for the last 14 days.
+
+### Time-stepped fields
+
+The latest briefing also publishes `data/fields/<model>_<var>.tif`, one multi-band COG per model
+and variable, with one band per forecast time (band descriptions are the valid times, UTC).
+Values are int16 with a scale factor recorded in the file, so GIS tools read physical units;
+`data/fields.json` lists each file with its times, units, scale and nodata.
+
+| Variable | Units | Models | Step |
+|---|---|---|---|
+| `refc` simulated composite reflectivity | dBZ | HRRR, RRFS, NAM | hourly, 48 h |
+| `ptype` precipitation type (0 none, 1 rain, 2 snow, 3 freezing rain, 4 sleet, 5 mix) | | HRRR, RRFS, NAM hourly; GFS, ECMWF every 6 h | |
+| `t2m` temperature at 2 m | °F | all GRIB models | 3 h regional, 6 h others |
+| `gust`, `u10`, `v10` | mph | all but AIFS (no gust field) | same |
+| `mslp` sea-level pressure | hPa | all but NBM | same |
+| `frz` freezing level above sea level | ft | HRRR, RRFS, NAM, GFS | same |
+
+Temperature and gusts reuse downloads the briefing already makes; the rest add a few hundred
+GRIB messages per regional model, fetched in parallel. Which fields each model provides is set
+under `fields` in `config.yaml`. Hourly fields are kept only for the latest briefing, not the
+archive.
+
+## Publishing and storage
+
+Each run rebuilds the site from the current `gh-pages` contents and publishes it as a single fresh
+commit (`scripts/assemble_site.sh`, `scripts/publish_site.sh`), so the branch never accumulates
+daily binary files in its history. The site holds the latest briefing, 60 days of archived pages,
+GeoTIFFs for the last 14 of them, and hourly fields for the latest only. That keeps it well under
+GitHub Pages' 1 GB limit. To keep hourly fields in the archive or add many more layers, move the
+grids to object storage such as Cloudflare R2; only the publish step changes.
 
 ## Normals, alerts and yesterday's briefing
 
@@ -218,5 +251,7 @@ web/src/sections/           page sections (overview, changes, alerts, impacts, i
                             maps, totals, location detail)
 web/src/lib/cog.ts          COG reading (geotiff.js) and Web Mercator rendering for MapLibre
 web/src/types.ts            the briefing.json contract
+briefing/fields.py          time-stepped fields: fetch, precipitation type, multi-band export
+scripts/                    site assembly (archive, pruning) and single-commit publishing
 .github/workflows/          daily schedule: Python data step, Node build, gh-pages publish, archive
 ```
