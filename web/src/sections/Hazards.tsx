@@ -138,12 +138,12 @@ function temp(d: Briefing): Summary {
   return { tab: "temp", title: "Temperature", icon: Thermometer, items: lines, tone: m >= 8 ? "alert" : m >= 4 ? "watch" : "quiet" }
 }
 
-/** Severity, shown twice at the top of each card: in the tint of the hazard's icon tile and as a
- *  badge with its own icon. Colours match the impacts table's "Likely" and "Possible" badges. */
-const TONE: Record<Tone, { label: string; icon: LucideIcon; badge: "secondary" | "possible" | "likely"; tile: string }> = {
-  quiet: { label: "Quiet", icon: CircleCheck, badge: "secondary", tile: "bg-muted text-muted-foreground" },
-  watch: { label: "Worth watching", icon: TriangleAlert, badge: "possible", tile: "bg-[var(--possible-bg)] text-[var(--possible)]" },
-  alert: { label: "Significant", icon: OctagonAlert, badge: "likely", tile: "bg-[var(--likely-bg)] text-[var(--likely)]" },
+/** Severity lives only in the badge (icon + label), in the impacts table's Likely and Possible
+ *  colours; the hazard icon itself stays neutral. */
+const TONE: Record<Tone, { label: string; icon: LucideIcon; badge: "secondary" | "possible" | "likely" }> = {
+  quiet: { label: "Quiet", icon: CircleCheck, badge: "secondary" },
+  watch: { label: "Worth watching", icon: TriangleAlert, badge: "possible" },
+  alert: { label: "Significant", icon: OctagonAlert, badge: "likely" },
 }
 
 /** One summary per hazard tab; each opens its tab. */
@@ -157,16 +157,12 @@ export function HazardStrip({ data, onOpen }: { data: Briefing; onOpen: (tab: Ha
         return (
           <button key={h.tab} type="button" onClick={() => onOpen(h.tab)} aria-label={`${h.title}: ${tone.label}. Open the ${h.title} tab`}
                   className="group flex flex-col rounded-xl border bg-card p-4 text-left shadow-xs transition-[background-color,box-shadow] hover:bg-muted/30 hover:shadow-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
-            <div className="flex items-start gap-3">
-              <span className={`flex size-9 shrink-0 items-center justify-center rounded-lg ${tone.tile}`}>
-                <Icon className="size-[18px]" strokeWidth={2} />
-              </span>
-              <div className="min-w-0 flex-1 space-y-1">
-                <div className="font-medium leading-tight">{h.title}</div>
-                <Badge variant={tone.badge} className="gap-1"><ToneIcon />{tone.label}</Badge>
-              </div>
-              <ChevronRight className="mt-1 size-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-foreground" />
+            <div className="flex items-center gap-2">
+              <Icon className="size-[18px] shrink-0 text-foreground" strokeWidth={1.75} />
+              <span className="min-w-0 flex-1 font-medium leading-tight">{h.title}</span>
+              <ChevronRight className="size-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-foreground" />
             </div>
+            <Badge variant={tone.badge} className="mt-2.5 gap-1"><ToneIcon />{tone.label}</Badge>
             <ul className="mt-3.5 space-y-2 border-t pt-3 text-sm">
               {h.items.map((it, k) => {
                 const ItIcon = it.icon
