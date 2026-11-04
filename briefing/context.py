@@ -31,9 +31,19 @@ def _at(m, var, sites):
     shape = lat.shape if lat.ndim == 2 else (lat.size, lon.size)
     if f["data"].shape[-2:] != shape:
         return None
-    idx = nearest_index(lat, lon, sites)
-    vals = np.stack([f["data"][:, i, j] for i, j in idx], axis=1)          # [t, site]
-    return {"times": _valid_times(m, f["hours"]), "values": vals}
+    cols = []
+    for s in sites:
+        if lat.min() <= s["lat"] <= lat.max() and lon.min() <= s["lon"] <= lon.max():
+            (i, j), = nearest_index(lat, lon, [s])
+            cols.append(f["data"][:, i, j])
+            continue
+        # outside the map area: values read from the full grid before cropping, if this model reaches
+        out = f.get("sites") or {}
+        k = out.get("names", []).index(s["name"]) if s["name"] in out.get("names", []) else None
+        if k is None or not np.isfinite(out["data"][:, k]).any():
+            return None
+        cols.append(out["data"][:, k])
+    return {"times": _valid_times(m, f["hours"]), "values": np.stack(cols, axis=1)}          # [t, site]
 
 
 def _r(x, nd=1):

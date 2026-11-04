@@ -16,7 +16,8 @@ from zoneinfo import ZoneInfo
 import numpy as np
 import yaml
 
-from . import alerts, analysis, change, cogs, context, extremes, fields, impacts, maps, normals, observed, odds, outlooks, report, snowpack
+from . import (alerts, analysis, avalanche, change, cogs, context, extremes, fields, impacts, landslide, maps, normals,
+               observed, odds, outlooks, report, snowpack)
 from .grib import day0
 
 ROOT = Path(__file__).resolve().parent
@@ -115,6 +116,7 @@ def collect(cfg: dict, out: Path, demo: bool = False, products: bool = True) -> 
     ens_odds = safe("ensemble odds", lambda: odds.point_odds(ensembles, cfg))
     obs, obs_grids = (safe("observed precipitation", lambda: observed.summarize(cfg, start, norm_cache, demo), (None, None))
                       if products else (None, None))
+    slide = safe("landslide index", lambda: landslide.compute(models, obs, cfg, start)) if obs else None
 
     # ---- maps and COGs
     img = {} if not products else {
@@ -204,6 +206,8 @@ def collect(cfg: dict, out: Path, demo: bool = False, products: bool = True) -> 
         "snowLevel": snow_lvl,
         "odds": ens_odds,
         "observed": obs,
+        "landslide": slide,
+        "avalanche": safe("avalanche danger", lambda: avalanche.fetch(cfg, demo)) if products else None,
         "snowpack": safe("snowpack", lambda: snowpack.fetch(cfg, demo)) if products else None,
         "outlooks": safe("NWS discussions and outlooks", lambda: outlooks.fetch(cfg, demo)) if products else None,
     }

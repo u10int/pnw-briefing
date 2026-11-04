@@ -166,6 +166,57 @@ def _read(H, row, dom, water=False, default=1.0, prefer=None):
     return (lat, lon, v * water_mm_factor(da, default)) if water else (lat, lon, v)
 
 
+_SITE_TREES: dict = {}
+
+
+def _sample_sites(da, sites, max_deg=0.3):
+    """Values at `sites` from the full (uncropped) field, for places outside the map area such as
+    a pressure-gradient station; NaN where the model's grid doesn't reach a site."""
+    lat_name = "latitude" if "latitude" in da.coords else "lat"
+    lon_name = "longitude" if "longitude" in da.coords else "lon"
+    lat, lon = da[lat_name].values, ((da[lon_name].values + 180) % 360) - 180
+    vals = np.asarray(da.values, dtype="float32")
+    out = np.full(len(sites), np.nan, dtype="float32")
+    if lat.ndim == 1:
+        for k, p in enumerate(sites):
+            i, j = int(np.abs(lat - p["lat"]).argmin()), int(np.abs(lon - p["lon"]).argmin())
+            step = max(abs(float(lat[1] - lat[0])), abs(float(lon[1] - lon[0]))) if lat.size > 1 and lon.size > 1 else max_deg
+            if abs(lat[i] - p["lat"]) <= step and abs(lon[j] - p["lon"]) <= step:
+                out[k] = vals[..., i, j]
+        return out
+    from scipy.spatial import cKDTree
+    key = (lat.shape, float(lat.flat[0]), float(lon.flat[0]))
+    tree = _SITE_TREES.get(key)
+    if tree is None:
+        k0 = np.cos(np.deg2rad(46))
+        tree = _SITE_TREES[key] = (cKDTree(np.column_stack([lat.ravel(), lon.ravel() * k0])), k0)
+    t, k0 = tree
+    dist, idx = t.query([[p["lat"], p["lon"] * k0] for p in sites])
+    for k, (dd, j) in enumerate(zip(dist, idx)):
+        if dd <= max_deg:
+            out[k] = vals[(..., *np.unravel_index(j, lat.shape))]
+    return out
+
+
+def _read_with_sites(H, row, dom, sites, prefer=None):
+    """Like _read, plus the values at `sites` taken before cropping: (cropped values, site values)."""
+    da = _first_var(_retry(H.xarray, f"^{re.escape(row)}$", remove_grib=True), prefer)
+    return _crop(da, dom)[2], _sample_sites(da, sites)
+
+
+def outside_sites(cfg):
+    """Pressure-gradient stations outside the map area (read from the full grids)."""
+    dom = cfg["domain"]
+    seen, out = set(), []
+    for g in cfg.get("gradients", []):
+        for st in (g["a"], g["b"]):
+            if not (dom["lat_min"] <= st["lat"] <= dom["lat_max"] and dom["lon_min"] <= st["lon"] <= dom["lon_max"]) \
+                    and st["name"] not in seen:
+                seen.add(st["name"])
+                out.append({"name": st["name"], "lat": st["lat"], "lon": st["lon"]})
+    return out
+
+
 def _read_first(H, patterns, dom, water=False, default=1.0):
     for p in patterns:
         rows = _rows(H, p)
@@ -574,7 +625,8 @@ def fetch_model(spec, cfg, start, points):
         # time-stepped fields for the interactive map; optional, never fails the model
         try:
             from . import fields
-            model_fields = fields.fetch(spec, run, lead0, targets[-1], hours, {"t2m": t2m, "gust": gust}, dom)
+            model_fields = fields.fetch(spec, run, lead0, targets[-1], hours, {"t2m": t2m, "gust": gust}, dom,
+                                        sites=outside_sites(cfg))
         except Exception as e:
             log.warning("%s: hourly fields skipped (%s)", spec["label"], report.short(e))
             model_fields = {}

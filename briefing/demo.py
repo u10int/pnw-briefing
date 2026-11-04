@@ -102,7 +102,7 @@ def grib(cfg):
                     "run": run, "lead0": lead0, "range_days": nd, "dates": dates, "data": data,
                     "lat": lat, "lon": lon, "precip_mm": cum, "snow_in": snow,
                     "snow_method": "model snowfall (ASNOW)" if spec["family"] == "ncep" else "snowfall water equivalent at 10:1",
-                    "fields": _fields(spec, la, lo, lead0, nd),
+                    "fields": _fields(spec, la, lo, lead0, nd, _outside(cfg, spec)),
                     "ivt": _ivt(spec, lat, lon, lead0, nd) if spec.get("ivt") else None})
     return out
 
@@ -146,7 +146,13 @@ def _elev_ft(la, lo):
             + 5000 * np.exp(-(((lo + 123.6) / 0.3) ** 2 + ((la - 47.8) / 0.3) ** 2)))
 
 
-def _fields(spec, la, lo, lead0, nd):
+def _outside(cfg, spec):
+    """Gradient stations north of the map; the regional models' grids don't reach them."""
+    from .grib import outside_sites
+    return [] if spec.get("tier") == "regional" else outside_sites(cfg)
+
+
+def _fields(spec, la, lo, lead0, nd, sites=()):
     """Synthetic time-stepped fields in display units: a Pacific low tracking inland with a trailing
     cold front, snow in the Cascades behind it, and a pocket of freezing rain in the Columbia Gorge."""
     from .fields import _wanted
@@ -194,6 +200,13 @@ def _fields(spec, la, lo, lead0, nd):
             continue
         hrs = sorted(set(out.get(name, {}).get("hours", [])) | set(h_hours))   # hourly merged with stepped
         out[name] = {"hours": hrs, "data": np.stack([state(h)[name] for h in hrs]).astype("float32")}
+    if sites and "mslp" in out:
+        # an arctic high building over the B.C. interior around days 8-11 (Fraser outflow)
+        hrs = out["mslp"]["hours"]
+        d = (np.array(hrs) - lead0) / 24
+        hi = 1018 + 2 * np.sin(d) + 17 * np.exp(-((d - 9.5) / 1.6) ** 2)
+        out["mslp"]["sites"] = {"names": [p["name"] for p in sites],
+                                "data": np.stack([hi for _ in sites], axis=1).astype("float32")}
     return out
 
 
@@ -312,3 +325,24 @@ def outlooks(cfg):
         {"period": "8-14", "var": "precipitation", "start": s2, "end": e2, "points": {n: {"cat": "Below", "prob": 40.0} for n in pts}},
     ]}
     return {"discussions": disc, "ero": ero, "cpc": cpc}
+
+
+def avalanche(cfg):
+    """Synthetic NWAC zones mid-season: higher danger on the west slopes after a storm."""
+    from .avalanche import LABELS, ORDER
+    zones = []
+    for k, name in enumerate(ORDER):
+        west = name.startswith("West") or name in ("Olympics", "Stevens Pass", "Snoqualmie Pass", "Mt Hood")
+        up = 3 if west else 2
+        today = {"upper": up, "middle": max(1, up - (0 if k % 3 else 1)), "lower": max(1, up - 1)}
+        tomorrow = {b: max(1, v - 1) for b, v in today.items()}
+        slug = name.lower().replace(" ", "-")
+        zones.append({"id": 3020 + k, "name": name, "state": "OR" if name == "Mt Hood" else "WA", "level": up,
+                      "label": LABELS[up], "color": None, "link": f"https://nwac.us/forecasts/avalanche/{slug}",
+                      "travelAdvice": None, "offSeason": False, "start": None, "end": None,
+                      "warning": "Avalanche warning in effect" if name == "West Slopes Central" else None,
+                      "today": today, "tomorrow": tomorrow,
+                      "problems": ["Storm Slab", "Wind Slab"] if west else ["Wind Slab"],
+                      "bottomLine": "Fresh snow and strong winds have built reactive slabs near and above treeline. "
+                                    "Avoid steep, wind-loaded slopes and give cornices a wide berth."})
+    return {"center": "NWAC", "url": "https://nwac.us/avalanche-forecast/", "zones": zones, "inSeason": True, "until": None}

@@ -195,6 +195,11 @@ gradients:
   - {id: sea_ykm, a: {name: Seattle, code: SEA, lat: 47.45, lon: -122.31}, b: {name: Yakima, code: YKM, lat: 46.57, lon: -120.54},
      meaning: "Onshore push (west winds through the passes) when positive; offshore, east winds when negative",
      thresholds: [{value: 8, label: "Strong onshore push"}, {value: -8, label: "Strong offshore flow"}]}
+  # Williams Lake is north of the map area: its pressure is read from each model's full grid
+  # before cropping, so models whose grid stops short of 52°N (HRRR, NAM) leave this one out.
+  - {id: bli_ywl, a: {name: Bellingham, code: BLI, lat: 48.79, lon: -122.54}, b: {name: Williams Lake, code: YWL, lat: 52.18, lon: -122.05},
+     meaning: "Fraser outflow (northeast winds in Whatcom County and the San Juans) when negative",
+     thresholds: [{value: -10, label: "Outflow winds likely"}, {value: -16, label: "Strong outflow"}]}
 
 # Snow level at the passes: each model's freezing level minus this offset (snow usually reaches
 # the ground about 1,000 ft below the freezing level). Pass elevations are `elev_ft` on the points.
@@ -203,6 +208,18 @@ snow_level_offset_ft: 1000
 # Ensemble odds maps (interactive map, Summary mode): fixed amounts, since a map can't switch
 # thresholds by place. Location odds use the impacts thresholds above.
 odds_map: {rain24_in: 1.0, rain72_in: 3.0}
+
+# Landslide risk: the USGS cumulative rainfall threshold for the Seattle area (OFR 2006-1064),
+# P3 >= 3.5 - 0.67 * P15 inches, run from observed rain into each model's forecast. It was
+# calibrated for Seattle and the nearby Puget Sound bluffs, so keep the list to that area.
+landslide:
+  points: [Everett, Seattle, Tacoma]
+  threshold_in: 3.5
+  p15_factor: 0.67
+
+# Avalanche danger from the Northwest Avalanche Center, via avalanche.org's public API.
+avalanche:
+  center: NWAC
 
 # Snowpack: SNOTEL stations within `radius_km` of each area's centre. Percent of median is shown
 # once the area's median SWE reaches `min_median_in` (early-season medians are near zero).
