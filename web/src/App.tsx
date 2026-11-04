@@ -1,8 +1,13 @@
 import * as React from "react"
 
+import { MapIcon } from "lucide-react"
+
 import { Separator } from "@/components/ui/separator"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { issuedLabel } from "@/lib/format"
+import { type MapRequest, onOpenMap, openOnMap } from "@/lib/maplink"
+import { HazardStrip } from "@/sections/Hazards"
 import { NwsAlerts } from "@/sections/Alerts"
 import { SinceYesterday } from "@/sections/Changes"
 import { AgreementGrid, ImpactsTable } from "@/sections/Impacts"
@@ -15,14 +20,43 @@ import { RainByDayCard } from "@/sections/RainByDay"
 import { TempDepartureCard } from "@/sections/TempDeparture"
 import type { Briefing } from "@/types"
 
-// MapLibre is large; load it only when the map section renders.
+// MapLibre is large; load it only when the Map tab is first opened.
 const InteractiveMap = React.lazy(() => import("@/sections/InteractiveMap").then((m) => ({ default: m.InteractiveMap })))
 
-function Section({ title, description, action, children }: {
-  title: string; description: string; action?: React.ReactNode; children: React.ReactNode
+const TABS = [
+  { id: "rain", label: "Rain & flooding" },
+  { id: "wind", label: "Wind" },
+  { id: "snow", label: "Snow & mountains" },
+  { id: "temp", label: "Temperature" },
+  { id: "map", label: "Map" },
+  { id: "locations", label: "Locations" },
+] as const
+type Tab = (typeof TABS)[number]["id"]
+const tabFromHash = (): Tab | null => {
+  const h = location.hash.replace("#", "")
+  return TABS.some((t) => t.id === h) ? (h as Tab) : null
+}
+
+/** Small link that opens the Map tab with a given mode and layer. */
+function MapLink({ req, label }: { req: MapRequest; label: string }) {
+  return (
+    <button type="button" onClick={() => openOnMap(req)}
+            className="inline-flex items-center gap-1.5 rounded-md border bg-card px-2.5 py-1.5 text-sm font-medium shadow-xs hover:bg-muted">
+      <MapIcon className="size-4" />{label}
+    </button>
+  )
+}
+
+/** Extreme-value map tabs for the given variables, labelled with their window. */
+function pickExtremes(data: Briefing, horizon: "short" | "long", over: string, vars: string[], suffix: string) {
+  return extremeTabs(data, horizon, over).filter((t) => vars.includes(t.id)).map((t) => ({ ...t, id: `${t.id}-${horizon}`, label: t.label + suffix }))
+}
+
+function Section({ title, description, action, children, first }: {
+  title: string; description: string; action?: React.ReactNode; children: React.ReactNode; first?: boolean
 }) {
   return (
-    <section className="mt-12 space-y-4">
+    <section className={`${first ? "mt-8" : "mt-12"} space-y-4`}>
       <div className="flex flex-wrap items-end justify-between gap-x-8 gap-y-3">
         <div className="max-w-3xl space-y-1">
           <h2 className="text-2xl font-semibold tracking-tight">{title}</h2>
@@ -39,6 +73,24 @@ export default function App() {
   const [data, setData] = React.useState<Briefing | null>(null)
   const [error, setError] = React.useState<string | null>(null)
   const [point, setPoint] = React.useState("Seattle")
+  const [tab, setTab] = React.useState<Tab>(() => tabFromHash() ?? "rain")
+  const [mapSeen, setMapSeen] = React.useState(tab === "map")
+  const [mapReq, setMapReq] = React.useState<(MapRequest & { nonce: number }) | null>(null)
+  const tabsTop = React.useRef<HTMLDivElement>(null)
+
+  /** Switch tabs (kept in the URL so a link opens the same tab); optionally scroll to the tab bar. */
+  const openTab = React.useCallback((t: Tab, scroll = true) => {
+    setTab(t)
+    if (t === "map") setMapSeen(true)
+    history.replaceState(null, "", `#${t}`)
+    if (scroll) requestAnimationFrame(() => tabsTop.current?.scrollIntoView({ behavior: "smooth", block: "start" }))
+  }, [])
+  React.useEffect(() => {
+    const onHash = () => { const t = tabFromHash(); if (t) { setTab(t); if (t === "map") setMapSeen(true) } }
+    window.addEventListener("hashchange", onHash)
+    const off = onOpenMap((req) => { setMapReq({ ...req, nonce: Date.now() }); openTab("map") })
+    return () => { window.removeEventListener("hashchange", onHash); off() }
+  }, [openTab])
 
   React.useEffect(() => {
     // A self-contained copy carries its data inline; the site fetches it from data/.
@@ -81,6 +133,7 @@ export default function App() {
         <Section title="Impacts to watch"
           description={`Listed when at least ${Math.round(meta.minAgreement * 100)}% of models cross a threshold at a forecast location. Thresholds differ for lowland, coast and pass locations; regional models count for the days they cover.`}>
           <NwsAlerts data={data} />
+          <HazardStrip data={data} onOpen={(t) => openTab(t)} />
           <ImpactsTable data={data} />
           <AgreementGrid data={data} />
         </Section>
@@ -93,75 +146,96 @@ export default function App() {
           </Section>
         )}
 
-        {(data.observed || data.ar || data.odds || data.landslide) && (
-          <Section title="Flood and landslide setup"
-            description="What has already fallen, how close that puts the Seattle area to the landslide threshold, whether an atmospheric river is coming, and how many ensemble members reach the heavy-rain and snow thresholds.">
-            <ObservedCard data={data} />
-            <LandslideCard data={data} />
-            <ArCard data={data} />
-            <OddsCard data={data} />
-          </Section>
-        )}
-
-        {((data.gradients?.length ?? 0) > 0 || data.snowLevel || data.snowpack || data.avalanche) && (
-          <Section title="Wind and snow"
-            description="Pressure gradients that drive the region's classic wind events, where the snow level sits against the pass elevations, the snowpack so far, and avalanche danger.">
-            <GradientsCard data={data} />
-            <SnowLevelCard data={data} />
-            <SnowpackCard data={data} />
-            <AvalancheCard data={data} />
-          </Section>
-        )}
-
-        <Section title="Interactive map"
-          description="Every gridded model and the multi-model products for each window, drawn from the same GeoTIFFs this briefing publishes.">
-          <React.Suspense fallback={<p className="text-sm text-muted-foreground">Loading the map…</p>}>
-            <InteractiveMap data={data} />
-          </React.Suspense>
-        </Section>
-
-        <Section title="Next 48 hours"
-          description="Regional convection-allowing models next to the blend and the global models, summed over the same two 12Z–12Z days. Dashed outlines mark the comparison regions, west of the Cascade crest.">
-          <MapCard title="Gridded maps" description="Each model on its own grid, then the mean (and spread, for precipitation) on a common grid."
-            tabs={[
-              { id: "p", label: "Precipitation", src: data.maps.short, alt: "48-hour precipitation by model, with mean and spread", note: "Liquid equivalent. Spread is the highest minus the lowest model at each grid cell." },
-              { id: "s", label: "Snowfall", src: data.maps.snow_short, alt: "48-hour snowfall by model", note: "From each model's own snow field; models without one are left out." },
-              ...extremeTabs(data, "short", "the next 48 hours"),
-            ]} />
-        </Section>
-
-        <Section title="Totals by model"
-          description="Every model side by side. Short-range models only appear in the windows they fully cover, so they are never compared with 14-day totals.">
-          <RegionTotals data={data} />
-          <ByLocation data={data} />
-          <GribAreaMeans data={data} />
-        </Section>
-
-        <Section title="Day by day"
-          description="Rain and temperature for each location and day at a glance: the multi-model median rain, and how far the forecast highs and lows sit from normal.">
-          <RainByDayCard data={data} />
-          <TempDepartureCard data={data} />
-        </Section>
-
-        <Section title={`Through day ${meta.days}`}
-          description="The longer-range models over their full runs. Mean and spread use only the days every one of them covers.">
-          <MapCard title="Gridded maps" description="Totals and extremes over each model's full range."
-            tabs={[
-              { id: "p", label: "Precipitation", src: data.maps.long, alt: "Full-range precipitation by model", note: "Each panel is labeled with the number of days the model covers." },
-              { id: "s", label: "Snowfall, 7 days", src: data.maps.snow_long, alt: "7-day snowfall by model", note: "Models with their own snow field." },
-              ...extremeTabs(data, "long", "each model's full range"),
-            ]} />
-        </Section>
-
-        <Section title={`At ${point}`} description="Running total, ensemble spread and daily detail for one forecast location."
-          action={<LocationPicker data={data} value={point} onChange={setPoint} />}>
-          <div className="grid gap-4 lg:grid-cols-2">
-            <RunningTotal data={data} point={point} />
-            <EnsemblePlume data={data} point={point} />
+        <Tabs value={tab} onValueChange={(v) => openTab(v as Tab, false)} className="mt-14 gap-0">
+          <div ref={tabsTop} className="sticky top-0 z-30 -mx-8 border-b bg-background/95 px-8 py-2.5 backdrop-blur max-sm:-mx-4 max-sm:px-4">
+            <div className="overflow-x-auto">
+              <TabsList className="h-10">
+                {TABS.map((t) => <TabsTrigger key={t.id} value={t.id} className="px-3.5">{t.label}</TabsTrigger>)}
+              </TabsList>
+            </div>
           </div>
-          <DayByDay data={data} point={point} />
-          <EnsembleTable data={data} />
-        </Section>
+
+          <TabsContent value="rain">
+            <Section title="Rain and flooding" first
+              description="How much, when and where, how wet it has already been, and the signals behind flooding and landslides: atmospheric rivers, ensemble odds and model agreement."
+              action={<MapLink req={{ mode: "totals", variable: "precip", days: 7 }} label="Rain totals on the map" />}>
+              <RainByDayCard data={data} />
+              <RegionTotals data={data} />
+              <ByLocation data={data} />
+              <ObservedCard data={data} />
+              <LandslideCard data={data} />
+              <ArCard data={data} />
+              <div className="flex justify-end"><MapLink req={{ mode: "hourly", layer: "ivt", isobars: true }} label="Moisture transport (IVT) on the map" /></div>
+              <OddsCard data={data} />
+              <MapCard title="Precipitation maps" description="Each model on its own grid, then the mean and spread on a common grid."
+                tabs={[
+                  { id: "p48", label: "Next 48 hours", src: data.maps.short, alt: "48-hour precipitation by model, with mean and spread", note: "Liquid equivalent. Spread is the highest minus the lowest model at each grid cell. Regional models next to the blend and the global models, over the same two 12Z–12Z days." },
+                  { id: "pl", label: `Through day ${meta.days}`, src: data.maps.long, alt: "Full-range precipitation by model", note: "Each panel is labeled with the number of days the model covers; mean and spread use only the days every model covers." },
+                ]} />
+              <GribAreaMeans data={data} />
+            </Section>
+          </TabsContent>
+
+          <TabsContent value="wind">
+            <Section title="Wind" first
+              description="Pressure gradients behind the region's classic wind events (south wind, Gorge and Fraser outflow, onshore pushes), and the strongest winds and gusts in each model."
+              action={<MapLink req={{ mode: "hourly", layer: "pgrad", isobars: true, pairs: true }} label="Pressure gradients on the map" />}>
+              <GradientsCard data={data} />
+              <MapCard title="Wind and gust maps" description="The strongest sustained wind and gust in each model."
+                tabs={[...pickExtremes(data, "short", "the next 48 hours", ["gust", "wind"], " (48 h)"),
+                       ...pickExtremes(data, "long", "each model's full range", ["gust", "wind"], ` (to day ${meta.days})`)]} />
+            </Section>
+          </TabsContent>
+
+          <TabsContent value="snow">
+            <Section title="Snow and mountains" first
+              description="Where the snow level sits against the passes, how much snow the models put down, the snowpack so far, and avalanche danger."
+              action={<MapLink req={{ mode: "hourly", layer: "frz" }} label="Freezing level on the map" />}>
+              <SnowLevelCard data={data} />
+              <MapCard title="Snowfall maps" description="From each model's own snow field; models without one are left out."
+                tabs={[
+                  { id: "s48", label: "Next 48 hours", src: data.maps.snow_short, alt: "48-hour snowfall by model", note: "Model snowfall over the next two 12Z–12Z days." },
+                  { id: "s7", label: "7 days", src: data.maps.snow_long, alt: "7-day snowfall by model", note: "Models with their own snow field." },
+                ]} />
+              <SnowpackCard data={data} />
+              <AvalancheCard data={data} />
+            </Section>
+          </TabsContent>
+
+          <TabsContent value="temp">
+            <Section title="Temperature" first
+              description="Daily highs and lows against normal for each location, and the warmest and coldest each model gets."
+              action={<MapLink req={{ mode: "totals", variable: "tmaxdep", days: 7 }} label="Departures on the map" />}>
+              <TempDepartureCard data={data} />
+              <MapCard title="High and low temperature maps" description="The highest and lowest 2 m temperature in each model."
+                tabs={[...pickExtremes(data, "short", "the next 48 hours", ["tmax", "tmin"], " (48 h)"),
+                       ...pickExtremes(data, "long", "each model's full range", ["tmax", "tmin"], ` (to day ${meta.days})`)]} />
+            </Section>
+          </TabsContent>
+
+          <TabsContent value="map" forceMount className={tab === "map" ? "" : "hidden"}>
+            {mapSeen && (
+              <Section title="Map" first
+                description="Every gridded model and the multi-model products for each window, and the forecast through time, drawn from the same GeoTIFFs this briefing publishes.">
+                <React.Suspense fallback={<p className="text-sm text-muted-foreground">Loading the map…</p>}>
+                  <InteractiveMap data={data} request={mapReq} active={tab === "map"} />
+                </React.Suspense>
+              </Section>
+            )}
+          </TabsContent>
+
+          <TabsContent value="locations">
+            <Section title={`At ${point}`} first description="Running total, ensemble spread and daily detail for one forecast location."
+              action={<LocationPicker data={data} value={point} onChange={setPoint} />}>
+              <div className="grid gap-4 lg:grid-cols-2">
+                <RunningTotal data={data} point={point} />
+                <EnsemblePlume data={data} point={point} />
+              </div>
+              <DayByDay data={data} point={point} />
+              <EnsembleTable data={data} />
+            </Section>
+          </TabsContent>
+        </Tabs>
 
         <Separator className="mt-14 mb-6" />
         <footer className="grid gap-6 text-sm text-muted-foreground md:grid-cols-3">

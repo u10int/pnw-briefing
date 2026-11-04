@@ -16,6 +16,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { loadCog } from "@/lib/cog"
 import { bicubicAt, contourLines, fieldUrl, gridPos, loadField, nearestAt, nearestTime, type Elevation, elevationFor, pressureCenters, pressureGradient, windArrows, windFrom } from "@/lib/fields"
 import { GRAD_COLORS, gradLevel, pairName, seriesAt } from "@/lib/gradients"
+import type { MapRequest } from "@/lib/maplink"
 import { GridLayer, type GridDraw } from "@/lib/gl/grid-layer"
 import { ParticleLayer, type WindDraw } from "@/lib/gl/particle-layer"
 import { type Grid, sameGrid } from "@/lib/gl/util"
@@ -900,7 +901,7 @@ const WIND_INK: [number, number, number, number] = [24, 28, 34, 0.5]
 
 // ------------------------------------------------------------------ the card
 
-export function InteractiveMap({ data }: { data: Briefing }) {
+export function InteractiveMap({ data, request, active = true }: { data: Briefing; request?: (MapRequest & { nonce: number }) | null; active?: boolean }) {
   const sync = useCameraSync()
   const cogs = data.cogs ?? []
   const fields = useFields(data)
@@ -934,6 +935,24 @@ export function InteractiveMap({ data }: { data: Briefing }) {
   const [hOther, setHOther] = React.useState("GFS")
   const [isobars, setIsobars] = React.useState(true)
   const [playing, setPlaying] = React.useState(false)
+
+  React.useEffect(() => { if (!active) setPlaying(false) }, [active])
+
+  // an "Open on map" link from another tab sets the mode and layer
+  React.useEffect(() => {
+    if (!request) return
+    setMode(request.mode)
+    if (request.mode === "hourly") {
+      if (request.layer) setLayer(request.layer as HLayer)
+      if (request.model) setHModel(request.model)
+    } else {
+      if (request.variable) setVariable(request.variable as TotVar)
+      if (request.days) setDays(request.days)
+      if (request.model) setModel(request.model)
+    }
+    if (request.isobars != null) setIsobars(request.isobars)
+    if (request.pairs != null) setShowPairs(request.pairs)
+  }, [request?.nonce])
 
   // ---- totals
   const varOf = (c: Cog): TotVar => c.var as TotVar
@@ -1002,7 +1021,7 @@ export function InteractiveMap({ data }: { data: Briefing }) {
   const hasHourly = fields.length > 0
   const entriesA = hA ? byModel.get(hA)!.entries : {}
   const hasWind = mode === "hourly" && [hA, showB ? hB : undefined].some((m) => m && flowOf(layer, byModel.get(m)!.entries))
-  const showParticles = particles && hasWind
+  const showParticles = particles && hasWind && active      // no animation while the Map tab is hidden
   const ink = layer === "wind" ? WIND_INK : DARK_INK
 
   return (
