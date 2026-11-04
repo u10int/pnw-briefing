@@ -1,0 +1,46 @@
+name: Temporary page probe
+on:
+  push:
+    branches: [probe/sources]
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: 22, cache: npm, cache-dependency-path: web/package-lock.json}
+      - name: Build the page with the published data
+        run: |
+          git fetch --depth=1 origin gh-pages
+          rm -rf web/public/data && mkdir -p web/public
+          git archive FETCH_HEAD data | tar -x -C web/public
+          cd web && npm ci && npm run build
+      - name: Screenshots with the real basemap and terrain
+        run: |
+          cd web && npm i --no-save playwright@1.49.1 && npx playwright install --with-deps chromium
+          (cd dist && python3 -m http.server 8080 >/dev/null 2>&1 &)
+          sleep 2
+          cat > shot.mjs <<'JS'
+          import { chromium } from "playwright"
+          const b = await chromium.launch({ args: ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader"] })
+          const pg = await b.newPage({ viewport: { width: 1320, height: 1000 } })
+          const errs = []; pg.on("pageerror", (e) => errs.push(String(e)))
+          const fails = []; pg.on("requestfailed", (r) => fails.push(r.url().slice(0, 90)))
+          await pg.goto("http://localhost:8080/", { waitUntil: "networkidle" })
+          const card = pg.locator("[data-slot=card]", { has: pg.locator("[data-slot=card-title]", { hasText: "Explore the grids" }) }).first()
+          await card.scrollIntoViewIfNeeded()
+          await pg.waitForTimeout(5000)
+          await card.screenshot({ path: "/tmp/shots/summary_terrain.png" })
+          await pg.getByRole("tab", { name: "Through time" }).click()
+          await pg.getByRole("tab", { name: "Wind" }).click()
+          const iso = pg.getByLabel("Isobars")
+          if (!(await iso.isChecked())) await iso.click()
+          await pg.waitForTimeout(7000)
+          await card.screenshot({ path: "/tmp/shots/isobars.png" })
+          console.log("errors", JSON.stringify(errs), "failed requests", JSON.stringify(fails.slice(0, 10)))
+          await b.close()
+          JS
+          mkdir -p /tmp/shots && node shot.mjs
+      - uses: actions/upload-artifact@v4
+        with: {name: shots, path: /tmp/shots}
