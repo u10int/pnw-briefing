@@ -11,6 +11,7 @@ import { DayByDay, EnsemblePlume, EnsembleTable, LocationPicker, RunningTotal } 
 import { extremeTabs, MapCard } from "@/sections/Maps"
 import { Headline, RunStatus, WindowCard } from "@/sections/Overview"
 import { ByLocation, GribAreaMeans, RegionTotals } from "@/sections/Totals"
+import { RainByDayCard } from "@/sections/RainByDay"
 import { TempDepartureCard } from "@/sections/TempDeparture"
 import type { Briefing } from "@/types"
 
@@ -136,12 +137,11 @@ export default function App() {
           <GribAreaMeans data={data} />
         </Section>
 
-        {data.tempDeparture && (
-          <Section title="Temperature departures"
-            description="How far the forecast daily highs and lows sit from normal, by location and day.">
-            <TempDepartureCard data={data} />
-          </Section>
-        )}
+        <Section title="Day by day"
+          description="Rain and temperature for each location and day at a glance: the multi-model median rain, and how far the forecast highs and lows sit from normal.">
+          <RainByDayCard data={data} />
+          <TempDepartureCard data={data} />
+        </Section>
 
         <Section title={`Through day ${meta.days}`}
           description="The longer-range models over their full runs. Mean and spread use only the days every one of them covers.">

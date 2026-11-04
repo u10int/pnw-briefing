@@ -35,6 +35,9 @@ VARS = {
     "mslp":  {"label": "Sea-level pressure",        "units": "hPa", "scale": 0.1},
     "frz":   {"label": "Freezing level",            "units": "ft",  "scale": 1.0},
     "refc":  {"label": "Composite reflectivity",    "units": "dBZ", "scale": 0.1},
+    # water vapour transport (from the AR computation), kg m-1 s-1; the magnitude is drawn from these
+    "ivtu":  {"label": "Water vapor transport (east component)",  "units": "kg/m/s", "scale": 0.1},
+    "ivtv":  {"label": "Water vapor transport (north component)", "units": "kg/m/s", "scale": 0.1},
     "ptype": {"label": "Precipitation type",        "units": "",    "scale": 1.0,
               "categories": {0: "none", 1: "rain", 2: "snow", 3: "freezing rain", 4: "sleet", 5: "mix"}},
 }
@@ -222,11 +225,34 @@ def fetch(spec, run, lead0, last_hour, stepped_hours, samples, dom, sites=None):
     return out
 
 
+def _export_ivt(m, out_dir: Path, manifest: list):
+    """IVT components as time-stepped fields, on the IVT grid (regular lat/lon)."""
+    ivt = m.get("ivt")
+    if not ivt or not len(ivt.get("hours", [])):
+        return
+    lat, lon = np.asarray(ivt["lat"]), np.asarray(ivt["lon"])
+    if lat.ndim != 1:
+        return
+    times = [(m["run"] + timedelta(hours=int(h))).replace(tzinfo=timezone.utc).isoformat() for h in ivt["hours"]]
+    oi = np.argsort(lat)
+    for var, key in (("ivtu", "u"), ("ivtv", "v")):
+        meta = VARS[var]
+        data = np.asarray(ivt[key], dtype="float32")[:, oi, :]
+        rel = f"{m['id']}_{var}.tif"
+        cogs.write_cog(out_dir / rel, lat[oi], lon, data, meta["units"], f"{m['label']} {meta['label'].lower()}",
+                       dtype="int16", nodata=-32768, scale=meta["scale"], band_names=times)
+        manifest.append({"path": f"fields/{rel}", "model": m["label"], "tier": m.get("tier", "global"), "var": var,
+                         "units": meta["units"], "scale": meta["scale"], "nodata": -32768, "times": times,
+                         "run": m["run"].strftime("%HZ %-d %b"),
+                         "init": m["run"].replace(tzinfo=timezone.utc).isoformat()})
+
+
 def export(grib_models, cfg, out_dir: Path):
     """Write one multi-band COG per model and variable; return the manifest."""
     out_dir.mkdir(parents=True, exist_ok=True)
     manifest = []
     for m in grib_models:
+        _export_ivt(m, out_dir, manifest)
         fl = m.get("fields") or {}
         if not fl:
             continue
