@@ -61,9 +61,17 @@ their commercial tier or swap in Xweather points in `briefing/points.py`.
 - **Interactive map.** MapLibre map with two modes. *Totals* shows every gridded model, the
   multi-model mean, spread and percent of normal for each window. *Through time* steps through
   the forecast with a time slider and play button: simulated radar coloured by precipitation type
-  (rain, snow, mix, freezing rain, sleet), 2 m temperature with the 32°F line, gusts, wind with
-  arrows, and freezing level, with optional isobars. Both modes hover for values, compare two
-  models side by side, and link each grid for download.
+  (rain, snow, mix, freezing rain, sleet), 2 m temperature with the 32°F line, gusts, wind, and
+  freezing level, with optional isobars and animated wind particles. Both modes hover for values,
+  compare two models side by side, and link each grid for download.
+
+  Grids are drawn by custom WebGL layers from their raw values: each band is uploaded as a float
+  texture, and the fragment shader finds every screen pixel's exact lat/lon (inverse Web
+  Mercator), samples the grid (nearest cell, or clamped Catmull-Rom bicubic with *Smooth*), blends
+  two forecast steps during playback, and colours the result through the ramp. Precipitation type
+  is a category, so it's never interpolated. Wind particles are advected on the GPU through the
+  time-blended 10 m wind with fading trails. Isobars, the 32°F line and wind arrows are contoured
+  on the CPU as vector layers. Needs WebGL2; particles also need `EXT_color_buffer_float`.
 - **Next 48 hours.** Small-multiple maps from every model (regional, blend and global), the
   mean and spread, and snowfall.
 - **Totals by model.** Region totals for each window, a model × location table with window and
@@ -249,7 +257,8 @@ briefing/demo.py            synthetic data for offline tests
 web/src/components/ui/      shadcn/ui components
 web/src/sections/           page sections (overview, changes, alerts, impacts, interactive map,
                             maps, totals, location detail)
-web/src/lib/cog.ts          COG reading (geotiff.js) and Web Mercator rendering for MapLibre
+web/src/lib/cog.ts          COG reading (geotiff.js)
+web/src/lib/gl/             WebGL grid and wind-particle layers for MapLibre
 web/src/types.ts            the briefing.json contract
 briefing/fields.py          time-stepped fields: fetch, precipitation type, multi-band export
 scripts/                    site assembly (archive, pruning) and single-commit publishing
