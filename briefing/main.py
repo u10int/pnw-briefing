@@ -17,7 +17,7 @@ import numpy as np
 import yaml
 
 from . import (alerts, analysis, avalanche, change, cogs, context, extremes, fields, impacts, landslide, maps, normals,
-               observed, odds, outlooks, report, snowpack)
+               observed, odds, outlooks, report, snowpack, tempdep)
 from .grib import day0
 
 ROOT = Path(__file__).resolve().parent
@@ -73,6 +73,8 @@ def collect(cfg: dict, out: Path, demo: bool = False, products: bool = True) -> 
         m.setdefault("family", next((s["family"] for s in cfg["grib_models"] if s["id"] == m["id"]), "ncep"))
         # highest/lowest temperature, strongest wind and gust over each window, on the model's grid
         m["extremes"] = safe(f"{m['label']} extremes", lambda m=m: extremes.compute(m), {})
+        # daily highs and lows for the departure maps (before the map export frees the fields)
+        m["daily_temps"] = safe(f"{m['label']} daily temperatures", lambda m=m: extremes.daily_temps(m), {})
     models = model_order(grib_models + sup)
     ensembles = grib_ens + sup_ens
     if not models:
@@ -107,6 +109,7 @@ def collect(cfg: dict, out: Path, demo: bool = False, products: bool = True) -> 
     # ---- normals and departure from normal
     norm_cache = Path(cfg.get("cache_dir", ".cache")) / "prism"
     norm, norm_grid = safe("normals", lambda: normals.summarize(models, cfg, norm_cache, demo), (None, None))
+    tdep, tnorm_grid = safe("temperature departures", lambda: tempdep.summarize(models, cfg, norm_cache, demo), (None, None))
 
     # ---- forecast context: AR strength, pressure gradients, pass snow level, ensemble odds, and
     # how much has already fallen (observed). Each is optional; a failure leaves it out.
@@ -140,6 +143,8 @@ def collect(cfg: dict, out: Path, demo: bool = False, products: bool = True) -> 
         cog_manifest += safe("ensemble odds maps", lambda: odds.grids(ensembles, cfg, out / "cogs"), [])
         if obs_grids:
             cog_manifest += safe("observed GeoTIFFs", lambda: observed.export(obs_grids, out / "cogs"), [])
+        if tnorm_grid and grib_models:
+            cog_manifest += safe("temperature departure maps", lambda: tempdep.grids(grib_models, cfg, tnorm_grid, out / "cogs"), [])
 
     # ---- per-window totals by model (regions and points)
     totals = []
@@ -200,6 +205,7 @@ def collect(cfg: dict, out: Path, demo: bool = False, products: bool = True) -> 
         "cogs": cog_manifest,
         "domain": cfg["domain"],
         "normals": norm,
+        "tempDeparture": tdep,
         "alerts": safe("NWS alerts", lambda: alerts.fetch(cfg, demo)) if products else None,
         "ar": ar,
         "gradients": grads,

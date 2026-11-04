@@ -1,4 +1,4 @@
-"""1991–2020 precipitation normals from PRISM, for departure-from-normal.
+"""1991–2020 precipitation and temperature normals from PRISM, for departure-from-normal.
 
 PRISM publishes monthly normals as one grid per month (4 km here). Monthly totals are
 spread into daily normals by interpolating between mid-month daily rates, so a window
@@ -24,21 +24,22 @@ log = logging.getLogger(__name__)
 # Since October 2025 PRISM serves normals from data.prism.oregonstate.edu ("25m" is its code for 4 km).
 # The old web-service URL is kept as a fallback.
 PRISM_URLS = [
-    "https://data.prism.oregonstate.edu/normals/us/4km/ppt/monthly/prism_ppt_us_25m_2020{month:02d}_avg_30y.zip",
-    "https://services.nacse.org/prism/data/public/normals/4km/ppt/{month:02d}",
+    "https://data.prism.oregonstate.edu/normals/us/4km/{var}/monthly/prism_{var}_us_25m_2020{month:02d}_avg_30y.zip",
+    "https://services.nacse.org/prism/data/public/normals/4km/{var}/{month:02d}",
 ]
 MM_TO_IN = 1 / 25.4
 
 
-def _download(month: int, cache: Path) -> Path:
-    """Fetch one month's normal as a zip, trying each known URL; only a real zip is cached."""
-    path = cache / f"prism_ppt_normal_4km_{month:02d}.zip"
+def _download(month: int, cache: Path, var: str = "ppt") -> Path:
+    """Fetch one month's normal (ppt, tmax or tmin) as a zip, trying each known URL; only a real
+    zip is cached."""
+    path = cache / f"prism_{var}_normal_4km_{month:02d}.zip"
     if path.exists() and path.read_bytes()[:2] == b"PK":
         return path
     cache.mkdir(parents=True, exist_ok=True)
     problems = []
     for url in PRISM_URLS:
-        u = url.format(month=month)
+        u = url.format(month=month, var=var)
         try:
             r = requests.get(u, timeout=180, headers={"User-Agent": "pnw-briefing/1.0"})
             time.sleep(2)  # PRISM asks for a pause between requests
@@ -103,6 +104,46 @@ def daily_normals(dates: list[date], cfg, cache: Path, demo: bool = False):
         else:
             lat, lon, months[m] = _read(_download(m, cache), dom)
     return lat, lon, np.stack([_daily_rate(months, d) for d in dates]) * MM_TO_IN
+
+
+def _mid_month(months: dict[int, np.ndarray], d: date) -> np.ndarray:
+    """Daily value for date d, interpolated linearly between mid-month normals (temperatures)."""
+    mid = date(d.year, d.month, 15)
+    if d >= mid:
+        nxt = (d.replace(day=1) + timedelta(days=32)).replace(day=15)
+        a, b, t = months[d.month], months[nxt.month], (d - mid).days / (nxt - mid).days
+    else:
+        prv = (d.replace(day=1) - timedelta(days=1)).replace(day=15)
+        a, b, t = months[prv.month], months[d.month], (d - prv).days / (mid - prv).days
+    return a + (b - a) * t
+
+
+def daily_temp_normals(dates: list[date], cfg, cache: Path, demo: bool = False):
+    """(lat, lon, {"tmax": [day, y, x], "tmin": [day, y, x]}) normal daily high and low in °F."""
+    dom = cfg["domain"]
+    need = set()
+    for d in dates:
+        need |= {d.month, ((d.month - 2) % 12) + 1, (d.month % 12) + 1}
+    out, lat, lon = {}, None, None
+    for var in ("tmax", "tmin"):
+        months = {}
+        for m in sorted(need):
+            if demo:
+                lat, lon, months[m] = _demo_temp_month(m, dom, var)
+            else:
+                lat, lon, months[m] = _read(_download(m, cache, var), dom)
+        out[var] = np.stack([_mid_month(months, d) for d in dates]) * 9 / 5 + 32
+    return lat, lon, out
+
+
+def _demo_temp_month(month, dom, var):
+    from .demo import _elev_ft
+    lat = np.arange(dom["lat_min"], dom["lat_max"], 0.04)
+    lon = np.arange(dom["lon_min"], dom["lon_max"], 0.04)
+    la, lo = np.meshgrid(lat, lon, indexing="ij")
+    season = 11 * np.cos((month - 7.5) / 12 * 2 * np.pi)                # warmest late July
+    base = (16 if var == "tmax" else 6) + season - 0.4 * (la - 46)        # °C
+    return lat, lon, (base - 2.0 * _elev_ft(la, lo) / 1000).astype("float32")
 
 
 def _demo_month(month, dom):

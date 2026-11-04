@@ -11,6 +11,7 @@ import { DayByDay, EnsemblePlume, EnsembleTable, LocationPicker, RunningTotal } 
 import { extremeTabs, MapCard } from "@/sections/Maps"
 import { Headline, RunStatus, WindowCard } from "@/sections/Overview"
 import { ByLocation, GribAreaMeans, RegionTotals } from "@/sections/Totals"
+import { TempDepartureCard } from "@/sections/TempDeparture"
 import type { Briefing } from "@/types"
 
 // MapLibre is large; load it only when the map section renders.
@@ -134,6 +135,13 @@ export default function App() {
           <ByLocation data={data} />
           <GribAreaMeans data={data} />
         </Section>
+
+        {data.tempDeparture && (
+          <Section title="Temperature departures"
+            description="How far the forecast daily highs and lows sit from normal, by location and day.">
+            <TempDepartureCard data={data} />
+          </Section>
+        )}
 
         <Section title={`Through day ${meta.days}`}
           description="The longer-range models over their full runs. Mean and spread use only the days every one of them covers.">
