@@ -16,7 +16,7 @@ from zoneinfo import ZoneInfo
 import numpy as np
 import yaml
 
-from . import alerts, analysis, change, cogs, extremes, fields, impacts, maps, normals, report
+from . import alerts, analysis, change, cogs, context, extremes, fields, impacts, maps, normals, observed, odds, outlooks, report, snowpack
 from .grib import day0
 
 ROOT = Path(__file__).resolve().parent
@@ -107,8 +107,18 @@ def collect(cfg: dict, out: Path, demo: bool = False, products: bool = True) -> 
     norm_cache = Path(cfg.get("cache_dir", ".cache")) / "prism"
     norm, norm_grid = safe("normals", lambda: normals.summarize(models, cfg, norm_cache, demo), (None, None))
 
+    # ---- forecast context: AR strength, pressure gradients, pass snow level, ensemble odds, and
+    # how much has already fallen (observed). Each is optional; a failure leaves it out.
+    ar = safe("atmospheric rivers", lambda: context.atmospheric_rivers(grib_models, cfg))
+    grads = safe("pressure gradients", lambda: context.gradients(grib_models, cfg), [])
+    snow_lvl = safe("pass snow level", lambda: context.snow_levels(grib_models, cfg))
+    ens_odds = safe("ensemble odds", lambda: odds.point_odds(ensembles, cfg))
+    obs, obs_grids = (safe("observed precipitation", lambda: observed.summarize(cfg, start, norm_cache, demo), (None, None))
+                      if products else (None, None))
+
     # ---- maps and COGs
     img = {} if not products else {
+        "observed": safe("observed maps", lambda: maps.observed(obs_grids, cfg, out / "observed.png")) if obs_grids else None,
         "short": safe("48-hour maps", lambda: maps.window_precip(grib_models, cfg, wins[0]["days"], out / "precip_48h.png")),
         "snow_short": safe("48-hour snow maps", lambda: maps.snow(grib_models, cfg, wins[0]["days"], out / "snow_48h.png")),
         "long": safe("long-range maps", lambda: maps.full_range_precip(grib_models, cfg, 7, out / "precip_long.png")),
@@ -124,6 +134,10 @@ def collect(cfg: dict, out: Path, demo: bool = False, products: bool = True) -> 
         (out / "fields.json").write_text(json.dumps(clean({"fields": field_manifest})), encoding="utf-8")
     cog_manifest = safe("GeoTIFF export", lambda: cogs.export(grib_models, cfg, out / "cogs", norm_grid), []) \
         if products and grib_models else []
+    if products:
+        cog_manifest += safe("ensemble odds maps", lambda: odds.grids(ensembles, cfg, out / "cogs"), [])
+        if obs_grids:
+            cog_manifest += safe("observed GeoTIFFs", lambda: observed.export(obs_grids, out / "cogs"), [])
 
     # ---- per-window totals by model (regions and points)
     totals = []
@@ -178,12 +192,20 @@ def collect(cfg: dict, out: Path, demo: bool = False, products: bool = True) -> 
                     "days": analysis.coverage(m), "data": m["data"]} for m in models],
         "ensembles": ens_out,
         "maps": {k: (v.name if v else None)
-                 for k in ("short", "snow_short", "long", "snow_long", *(f"{x}_{h}" for x in extremes.VARS for h in ("short", "long")))
+                 for k in ("short", "snow_short", "long", "snow_long", "observed",
+                           *(f"{x}_{h}" for x in extremes.VARS for h in ("short", "long")))
                  for v in [img.get(k)]},
         "cogs": cog_manifest,
         "domain": cfg["domain"],
         "normals": norm,
         "alerts": safe("NWS alerts", lambda: alerts.fetch(cfg, demo)) if products else None,
+        "ar": ar,
+        "gradients": grads,
+        "snowLevel": snow_lvl,
+        "odds": ens_odds,
+        "observed": obs,
+        "snowpack": safe("snowpack", lambda: snowpack.fetch(cfg, demo)) if products else None,
+        "outlooks": safe("NWS discussions and outlooks", lambda: outlooks.fetch(cfg, demo)) if products else None,
     }
     return clean(data)
 

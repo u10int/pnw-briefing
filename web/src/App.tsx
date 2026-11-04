@@ -6,6 +6,7 @@ import { issuedLabel } from "@/lib/format"
 import { NwsAlerts } from "@/sections/Alerts"
 import { SinceYesterday } from "@/sections/Changes"
 import { AgreementGrid, ImpactsTable } from "@/sections/Impacts"
+import { ArCard, DiscussionsCard, GradientsCard, ObservedCard, OddsCard, OutlooksCard, SnowLevelCard, SnowpackCard } from "@/sections/Context"
 import { DayByDay, EnsemblePlume, EnsembleTable, LocationPicker, RunningTotal } from "@/sections/Location"
 import { extremeTabs, MapCard } from "@/sections/Maps"
 import { Headline, RunStatus, WindowCard } from "@/sections/Overview"
@@ -82,6 +83,32 @@ export default function App() {
           <AgreementGrid data={data} />
         </Section>
 
+        {data.outlooks && (
+          <Section title="What NWS forecasters say"
+            description="The latest discussions from the Seattle and Portland offices, and the national rainfall and extended outlooks.">
+            <DiscussionsCard data={data} />
+            <OutlooksCard data={data} />
+          </Section>
+        )}
+
+        {(data.observed || data.ar || data.odds) && (
+          <Section title="Flood setup"
+            description="What has already fallen, whether an atmospheric river is coming, and how many ensemble members reach the heavy-rain and snow thresholds.">
+            <ObservedCard data={data} />
+            <ArCard data={data} />
+            <OddsCard data={data} />
+          </Section>
+        )}
+
+        {((data.gradients?.length ?? 0) > 0 || data.snowLevel || data.snowpack) && (
+          <Section title="Wind and snow"
+            description="Pressure gradients that drive the region's classic wind events, where the snow level sits against the pass elevations, and the snowpack so far.">
+            <GradientsCard data={data} />
+            <SnowLevelCard data={data} />
+            <SnowpackCard data={data} />
+          </Section>
+        )}
+
         <Section title="Interactive map"
           description="Every gridded model and the multi-model products for each window, drawn from the same GeoTIFFs this briefing publishes.">
           <React.Suspense fallback={<p className="text-sm text-muted-foreground">Loading the map…</p>}>
@@ -132,10 +159,12 @@ export default function App() {
             <h3 className="mb-1.5 font-medium text-foreground">Sources</h3>
             <p>GRIB2 from NOAA NODD ({meta.sources.ncep.join(", ")}) and ECMWF open data ({meta.sources.ecmwf.join(", ")}), read with Herbie.
               {meta.hasSupplement && " Models marked * come from Open-Meteo."}</p>
+            <p className="mt-2">Observed precipitation from NOAA MRMS; snowpack from USDA NRCS SNOTEL; forecast discussions,
+              alerts and outlooks from NWS, WPC and CPC.</p>
           </div>
           <div>
             <h3 className="mb-1.5 font-medium text-foreground">Definitions</h3>
-            <p>Days run 12Z to 12Z, 4 AM to 4 AM Pacific Standard Time. Precipitation is liquid equivalent. Daily highs and lows come from 3- or 6-hourly samples, so true extremes may be a degree or two beyond them.</p>
+            <p>Days run 12Z to 12Z, 4 AM to 4 AM Pacific Standard Time. Precipitation is liquid equivalent. Daily highs, lows and peak gusts use each model's max/min-since-last-output fields where it publishes them, otherwise its output at each step.</p>
             {data.normals && <p className="mt-2">Normals: {data.normals.source}, spread into daily values. Changes since yesterday compare the same days in both briefings.</p>}
           </div>
           <div>

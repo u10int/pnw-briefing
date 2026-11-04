@@ -68,8 +68,40 @@ export interface Alerts { fetched: string; areas: string[]; zones: Record<string
 export type ExtremeVar = "tmax" | "tmin" | "wind" | "gust"
 
 export interface Cog {
-  path: string; model: string; tier: string; var: "precip" | "snow" | "mean" | "spread" | "pct" | ExtremeVar
-  days: number; units: string; run?: string | null; members?: string[]
+  path: string; model: string; tier: string
+  var: "precip" | "snow" | "mean" | "spread" | "pct" | ExtremeVar | "p24" | "p72" | "obs" | "obspct"
+  days: number; units: string; run?: string | null; members?: string[]; threshold?: number
+}
+
+/** A value per time from one model. */
+export interface ModelSeries { model: string; tier: Tier; times: string[]; values: N[] }
+
+export interface ArEvent {
+  model: string; point: string; rank: number; name: string; peak: number; hours: number
+  start: string; end: string; peakTime: string
+}
+export interface AtmosphericRivers {
+  points: string[]; breaks: number[]
+  models: { model: string; tier: Tier; times: string[]; ivt: Record<string, N[]> }[]
+  events: ArEvent[]
+}
+export interface Gradient {
+  id: string; a: string; b: string; meaning: string
+  thresholds: { value: number; label: string }[]
+  series: ModelSeries[]
+}
+export interface SnowLevel { offset_ft: number; passes: { name: string; elev_ft: number; series: ModelSeries[] }[] }
+export interface PointOdds {
+  thresholds: { rain24: N; rain72: N; snow24: N }
+  rain24?: N[]; rain72?: N[]; snow24?: N[]; rain24N?: number[]; rain72N?: number[]; snow24N?: number[]
+}
+export interface Odds { dates: string[]; ensembles: { label: string; members: number; snow: boolean }[]; points: Record<string, PointOdds> }
+export interface ObservedStat { obs: N; normal: N; pct: N }
+export interface Observed {
+  source: string; dates: string[]
+  windows: { days: number; label: string; from: string; to: string; missingDays: string[];
+             regions: Record<string, ObservedStat>; points: Record<string, ObservedStat> }[]
+  daily: Record<string, N[]>
 }
 
 export interface Briefing {
@@ -92,7 +124,7 @@ export interface Briefing {
   dates: string[]
   models: Model[]
   ensembles: Ensemble[]
-  maps: { short: string | null; snow_short: string | null; long: string | null; snow_long: string | null }
+  maps: { short: string | null; snow_short: string | null; long: string | null; snow_long: string | null; observed?: string | null }
     & Partial<Record<`${ExtremeVar}_${"short" | "long"}`, string | null>>
   cogs: Cog[]
   domain: { lat_min: number; lat_max: number; lon_min: number; lon_max: number }
@@ -100,6 +132,32 @@ export interface Briefing {
   normals: Normals | null
   alerts: Alerts | null
   change: Change | null
+  ar?: AtmosphericRivers | null
+  gradients?: Gradient[]
+  snowLevel?: SnowLevel | null
+  odds?: Odds | null
+  observed?: Observed | null
+  snowpack?: Snowpack | null
+  outlooks?: Outlooks | null
+}
+
+export interface SnowStation {
+  name: string; triplet: string; elev_ft: number | null; lat: number; lon: number; date: string
+  swe: number; median: N; pct: N; change7: N; depth: N
+}
+export interface Snowpack {
+  asOf: string | null; minMedian: number; source: string
+  areas: { name: string; stations: SnowStation[]; swe: N; median: N; pct: N; change7: N }[]
+}
+export interface Discussion {
+  office: string; name: string; issued: string | null; url: string
+  synopsis: string[] | null; keyMessages: string[] | null; hydrology: string[] | null
+}
+export interface Outlooks {
+  discussions: Discussion[]
+  ero?: { names: Record<string, string>; url: string; days: ({ day: number; points: Record<string, number> } | null)[] }
+  cpc?: { url: string; outlooks: { period: string; var: "temperature" | "precipitation"; start: string | null; end: string | null
+                                   points: Record<string, { cat: string | null; prob: number | null } | null> }[] }
 }
 
 /** data/fields.json: time-stepped grids for the interactive map (latest briefing only). */

@@ -74,16 +74,16 @@ points:
   - {name: Olympia,          lat: 47.04, lon: -122.90, kind: lowland, region: wwa}
   - {name: Forks,            lat: 47.95, lon: -124.39, kind: coast,   region: wwa}
   - {name: Aberdeen,         lat: 46.98, lon: -123.82, kind: coast,   region: wwa}
-  - {name: Stevens Pass,     lat: 47.75, lon: -121.09, kind: pass,    region: wwa}
-  - {name: Snoqualmie Pass,  lat: 47.42, lon: -121.41, kind: pass,    region: wwa, plume: true}
-  - {name: White Pass,       lat: 46.64, lon: -121.38, kind: pass,    region: wwa}
+  - {name: Stevens Pass,     lat: 47.75, lon: -121.09, kind: pass,    region: wwa, elev_ft: 4061}
+  - {name: Snoqualmie Pass,  lat: 47.42, lon: -121.41, kind: pass,    region: wwa, plume: true, elev_ft: 3022}
+  - {name: White Pass,       lat: 46.64, lon: -121.38, kind: pass,    region: wwa, elev_ft: 4500}
   - {name: Vancouver WA,     lat: 45.64, lon: -122.66, kind: lowland, region: wwa}
   - {name: Astoria,          lat: 46.19, lon: -123.83, kind: coast,   region: nwor}
   - {name: Tillamook,        lat: 45.46, lon: -123.84, kind: coast,   region: nwor}
   - {name: Portland,         lat: 45.52, lon: -122.68, kind: lowland, region: nwor, plume: true}
   - {name: Salem,            lat: 44.94, lon: -123.04, kind: lowland, region: nwor}
   - {name: Corvallis,        lat: 44.56, lon: -123.26, kind: lowland, region: nwor}
-  - {name: Government Camp,  lat: 45.30, lon: -121.75, kind: pass,    region: nwor, plume: true}
+  - {name: Government Camp,  lat: 45.30, lon: -121.75, kind: pass,    region: nwor, plume: true, elev_ft: 3980}
   # outside the comparison regions (no PRISM normals or NWS alerts in Canada)
   - {name: Vancouver BC,     lat: 49.28, lon: -123.12, kind: lowland}
 
@@ -129,6 +129,7 @@ grib_models:
   - {id: gfs, label: GFS, tier: global, family: ncep, herbie: {model: gfs, product: pgrb2.0p25},
      cycles: [0, 6, 12, 18], max_hours: 384, range_days: 14, sample_hours: 6,
      extremes: {step: 3, temp: maxmin},                       # 6-h (3-h after day 5) max/min
+     ivt: true,                                               # water vapour transport (AR scale)
      fields: {stepped: [wind, mslp, frz, ptype]}}
   - {id: ifs, label: ECMWF IFS, tier: global, family: ecmwf, herbie: {model: ifs, product: oper},
      cycles: [0, 12], max_hours: 240, range_days: 14, sample_hours: 6,
@@ -136,6 +137,7 @@ grib_models:
      fields: {stepped: [wind, mslp, ptype]}}
   - {id: aifs, label: ECMWF AIFS, tier: global, family: ecmwf, herbie: {model: aifs, product: oper},
      cycles: [0, 12], max_hours: 360, range_days: 14, sample_hours: 6, gust: false,
+     ivt: true,
      fields: {stepped: [wind, mslp, ptype]}}
 
 grib_ensembles:
@@ -144,7 +146,7 @@ grib_ensembles:
      members: [c00, p01, p02, p03, p04, p05, p06, p07, p08, p09, p10, p11, p12, p13, p14, p15,
                p16, p17, p18, p19, p20, p21, p22, p23, p24, p25, p26, p27, p28, p29, p30]}
   - {id: ens, label: ECMWF ENS, family: ecmwf, herbie: {model: ifs, product: enfo},
-     cycles: [0, 12], max_hours: 360, range_days: 14}
+     cycles: [0, 12], max_hours: 360, range_days: 14, snow: true}   # snowfall for pass-snow odds
 
 # ----------------------------------------------------------------------------
 # Optional supplement: models with no public GRIB feed, from Open-Meteo
@@ -174,6 +176,51 @@ impacts:
   freezing_precip_f: 32      # min temp <= this AND precip >= 0.05" -> frozen/icing precip possible
   wind_gust_mph:    {lowland: 45,   coast: 60,  pass: 60}
   heat_f:           {lowland: 90,   coast: 85,  pass: null}
+
+# ----------------------------------------------------------------------------
+# Forecast context
+#
+# Pressure gradients: station A minus station B in hPa, from each model's sea-level pressure.
+# The thresholds are rules of thumb for where impacts usually start; adjust to taste.
+gradients:
+  - {id: olm_bli, a: {name: Olympia, lat: 46.97, lon: -122.90}, b: {name: Bellingham, lat: 48.79, lon: -122.54},
+     meaning: "South wind through Puget Sound when positive",
+     thresholds: [{value: 8, label: "Gusty south winds"}, {value: 12, label: "Windstorm range"}]}
+  - {id: eug_pdx, a: {name: Eugene, lat: 44.12, lon: -123.21}, b: {name: Portland, lat: 45.59, lon: -122.60},
+     meaning: "South wind in the Willamette Valley when positive",
+     thresholds: [{value: 6, label: "Gusty south winds"}, {value: 10, label: "Windstorm range"}]}
+  - {id: dls_ttd, a: {name: The Dalles, lat: 45.62, lon: -121.17}, b: {name: Troutdale, lat: 45.55, lon: -122.40},
+     meaning: "East wind through the Columbia Gorge when positive",
+     thresholds: [{value: 8, label: "Strong Gorge east wind"}, {value: 12, label: "Damaging Gorge winds"}]}
+  - {id: sea_ykm, a: {name: Seattle, lat: 47.45, lon: -122.31}, b: {name: Yakima, lat: 46.57, lon: -120.54},
+     meaning: "Onshore push (west winds through the passes) when positive; offshore, east winds when negative",
+     thresholds: [{value: 8, label: "Strong onshore push"}, {value: -8, label: "Strong offshore flow"}]}
+
+# Snow level at the passes: each model's freezing level minus this offset (snow usually reaches
+# the ground about 1,000 ft below the freezing level). Pass elevations are `elev_ft` on the points.
+snow_level_offset_ft: 1000
+
+# Ensemble odds maps (interactive map, Summary mode): fixed amounts, since a map can't switch
+# thresholds by place. Location odds use the impacts thresholds above.
+odds_map: {rain24_in: 1.0, rain72_in: 3.0}
+
+# Snowpack: SNOTEL stations within `radius_km` of each area's centre. Percent of median is shown
+# once the area's median SWE reaches `min_median_in` (early-season medians are near zero).
+snowpack:
+  radius_km: 30
+  min_median_in: 1.0
+  states: [WA, OR]
+  areas:
+    - {name: Mt Baker,          lat: 48.85, lon: -121.68}
+    - {name: Olympics,          lat: 47.85, lon: -123.45}
+    - {name: Stevens Pass,      lat: 47.75, lon: -121.09}
+    - {name: Snoqualmie Pass,   lat: 47.42, lon: -121.41}
+    - {name: Rainier and White Pass, lat: 46.75, lon: -121.55}
+    - {name: Mt Hood,           lat: 45.33, lon: -121.71}
+    - {name: Santiam Pass,      lat: 44.42, lon: -121.87}
+
+# NWS offices whose Area Forecast Discussions are summarised (synopsis, key messages, hydrology)
+nws_offices: [SEW, PQR]
 
 # ----------------------------------------------------------------------------
 # NWS alerts and normals

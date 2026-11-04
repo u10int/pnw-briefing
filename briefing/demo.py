@@ -102,8 +102,42 @@ def grib(cfg):
                     "run": run, "lead0": lead0, "range_days": nd, "dates": dates, "data": data,
                     "lat": lat, "lon": lon, "precip_mm": cum, "snow_in": snow,
                     "snow_method": "model snowfall (ASNOW)" if spec["family"] == "ncep" else "snowfall water equivalent at 10:1",
-                    "fields": _fields(spec, la, lo, lead0, nd)})
+                    "fields": _fields(spec, la, lo, lead0, nd),
+                    "ivt": _ivt(spec, lat, lon, lead0, nd) if spec.get("ivt") else None})
     return out
+
+
+def _ivt(spec, lat, lon, lead0, nd):
+    """A plume of water vapour transport aimed at the coast around day 4, peaking near 800 kg/m/s."""
+    la, lo = np.meshgrid(lat, lon, indexing="ij") if lat.ndim == 1 else (lat, lon)
+    hours = list(range(lead0 + 6, lead0 + 24 * nd + 1, 6))
+    peak = 820 if spec["id"] == "gfs" else 700
+    u, v = [], []
+    for h in hours:
+        d = (h - lead0) / 24
+        amp = 180 + peak * np.exp(-((d - 4.2 - DAY_OFFSET) / 0.9) ** 2) + 380 * np.exp(-((d - 9.5) / 0.7) ** 2)
+        band = np.exp(-((la - (46.5 + 0.4 * np.sin(d))) / 1.4) ** 2)
+        mag = amp * band * np.clip(1 - (lo + 121) / 4, 0.2, 1)
+        u.append(mag * 0.8)
+        v.append(mag * 0.6)
+    return {"hours": hours, "lat": lat, "lon": lon, "u": np.stack(u).astype("float32"), "v": np.stack(v).astype("float32")}
+
+
+def observed_days(cfg, ndays):
+    """Synthetic past daily precipitation (inches) on a 0.03° grid: a wet spell a week ago."""
+    dom = cfg["domain"]
+    lat = np.arange(dom["lat_min"], dom["lat_max"], 0.03)
+    lon = np.arange(dom["lon_min"], dom["lon_max"], 0.03)
+    la, lo = np.meshgrid(lat, lon, indexing="ij")
+    terr = _terrain(la, lo)
+    rng = np.random.default_rng(11)
+    days = []
+    for k in range(ndays):
+        wet = 0.15 + 0.9 * np.exp(-((k - (ndays - 9)) / 2.0) ** 2) + 0.3 * rng.random()
+        days.append((terr * wet * 0.6 * rng.uniform(0.6, 1.4)).astype("float32"))
+    out = np.stack(days)
+    out[ndays - 13] = np.nan                                      # one missing day, as MRMS sometimes has
+    return lat, lon, out
 
 
 def _elev_ft(la, lo):
@@ -200,6 +234,81 @@ def ensembles(cfg):
         mem = {p["name"]: np.vstack([_shape(n, RNG.normal(0, 1.2), RNG.uniform(0.5, 1.6)) * oro[p["kind"]]
                                      for _ in range(k)])
                for p in cfg["points"] if p.get("plume")}
-        out.append({"id": label, "label": label, "dates": dates, "members": mem,
-                    "run": None if label == "Canadian GEPS" else start - timedelta(hours=12)})
+        rec = {"id": label, "label": label, "dates": dates, "members": mem,
+               "run": None if label == "Canadian GEPS" else start - timedelta(hours=12)}
+        if label != "Canadian GEPS":
+            rec["grid"] = _ens_grid(cfg, k, n, snow="ENS" in label)
+        out.append(rec)
     return out
+
+
+def _ens_grid(cfg, k, n, snow):
+    """Per-member daily precipitation [member, day, y, x] on a 0.25° grid, terrain-shaped."""
+    dom = cfg["domain"]
+    lat = np.arange(dom["lat_min"], dom["lat_max"] + 1e-6, 0.25)
+    lon = np.arange(dom["lon_min"], dom["lon_max"] + 1e-6, 0.25)
+    la, lo = np.meshgrid(lat, lon, indexing="ij")
+    terr = _terrain(la, lo)
+    rng = np.random.default_rng(5 + k)
+    pr = np.stack([_shape(n, rng.normal(0, 1.2), rng.uniform(0.5, 1.6))[:, None, None] * terr[None] * 1.4
+                   for _ in range(k)]).astype("float32")
+    sn = None
+    if snow:
+        cold = np.clip(np.exp(-((lo + 121.45) / 0.3) ** 2) * 1.2 - 0.2, 0, None)
+        sn = (pr * 10 * cold[None, None] * np.linspace(0.3, 1.0, n)[None, :, None, None]).astype("float32")
+    return {"lat": lat, "lon": lon, "precip_in": pr, "snow_in": sn}
+
+
+def snowpack(cfg):
+    """Synthetic early-season snowpack: a little SWE at the high stations, near the median."""
+    rng = np.random.default_rng(21)
+    today = (_start(cfg)).date()
+    areas = []
+    for a in cfg["snowpack"]["areas"]:
+        sts = []
+        for k in range(3):
+            elev = 3200 + 900 * k + rng.integers(0, 300)
+            med = round(max(0.0, (elev - 3300) / 600 * rng.uniform(0.6, 1.2)), 1)
+            swe = round(max(0.0, med * rng.uniform(0.5, 1.6)), 1)
+            sts.append({"name": f"{a['name']} {['Lower', 'Mid', 'Upper'][k]}", "triplet": f"demo{k}", "elev_ft": int(elev),
+                        "lat": a["lat"], "lon": a["lon"], "date": today.isoformat(), "swe": swe, "median": med,
+                        "pct": round(100 * swe / med) if med >= 1 else None, "change7": round(rng.uniform(-0.3, 1.5), 1),
+                        "depth": round(swe * 3.5)})
+        sts.sort(key=lambda x: -x["elev_ft"])
+        tot, totm = sum(x["swe"] for x in sts), sum(x["median"] for x in sts)
+        areas.append({"name": a["name"], "stations": sts, "swe": round(tot / 3, 1), "median": round(totm / 3, 1),
+                      "pct": round(100 * tot / totm) if totm / 3 >= 1 else None,
+                      "change7": round(sum(x["change7"] for x in sts) / 3, 1)})
+    return {"asOf": today.isoformat(), "minMedian": 1.0, "areas": areas,
+            "source": "Synthetic snowpack (demo)"}
+
+
+def outlooks(cfg):
+    """Synthetic NWS discussions and outlooks for layout tests."""
+    start = _start(cfg)
+    iso = (start - timedelta(hours=2)).replace(tzinfo=timezone.utc).isoformat()
+    disc = [
+        {"office": "SEW", "name": "NWS Seattle", "issued": iso, "url": "https://forecast.weather.gov/product.php?site=SEW&issuedby=SEW&product=AFD",
+         "synopsis": ["A series of Pacific systems brings periods of rain, high mountain snow and breezy winds through the "
+                      "weekend. A stronger atmospheric river may arrive early next week (demo)."],
+         "keyMessages": ["Rain heaviest Saturday into Sunday on the coast and in the Olympics (demo).",
+                         "Snow levels fall to pass level by Monday (demo)."],
+         "hydrology": ["Rivers stay below flood stage through Sunday; rises are possible next week (demo)."]},
+        {"office": "PQR", "name": "NWS Portland", "issued": iso, "url": "https://forecast.weather.gov/product.php?site=PQR&issuedby=PQR&product=AFD",
+         "synopsis": ["Light rain spreads inland this evening; an active pattern continues into next week (demo)."],
+         "keyMessages": None, "hydrology": None},
+    ]
+    pts = [p["name"] for p in cfg["points"]]
+    coast = {p["name"] for p in cfg["points"] if p["kind"] in ("coast", "pass")}
+    ero = {"names": {1: "Marginal", 2: "Slight", 3: "Moderate", 4: "High"},
+           "url": "https://www.wpc.ncep.noaa.gov/qpf/excessive_rainfall_outlook_ero.php",
+           "days": [{"day": d, "points": {n: (1 if (d in (3, 4) and n in coast) else 0) for n in pts}} for d in range(1, 6)]}
+    s1, e1 = (start + timedelta(days=6)).date().isoformat(), (start + timedelta(days=10)).date().isoformat()
+    s2, e2 = (start + timedelta(days=8)).date().isoformat(), (start + timedelta(days=14)).date().isoformat()
+    cpc = {"url": "https://www.cpc.ncep.noaa.gov/products/predictions/610day/", "outlooks": [
+        {"period": "6-10", "var": "temperature", "start": s1, "end": e1, "points": {n: {"cat": "Above", "prob": 50.0} for n in pts}},
+        {"period": "6-10", "var": "precipitation", "start": s1, "end": e1, "points": {n: {"cat": "Above", "prob": 60.0} for n in pts}},
+        {"period": "8-14", "var": "temperature", "start": s2, "end": e2, "points": {n: {"cat": "Normal", "prob": 33.0} for n in pts}},
+        {"period": "8-14", "var": "precipitation", "start": s2, "end": e2, "points": {n: {"cat": "Below", "prob": 40.0} for n in pts}},
+    ]}
+    return {"discussions": disc, "ero": ero, "cpc": cpc}

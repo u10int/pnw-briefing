@@ -58,6 +58,37 @@ their commercial tier or swap in Xweather points in `briefing/points.py`.
 - **Impacts.** Heavy rain (24 h and 72 h), snow, hard freeze, possible icy precipitation, strong
   gusts and heat. Each shows *Likely* or *Possible* confidence, the share of models agreeing,
   and the peak value per location, followed by a hazard-by-day agreement grid.
+- **Flood setup.**
+  - *How wet it's been:* observed precipitation over the past 7 and 30 days from NOAA's MRMS
+    radar-and-gauge analysis (Pass 2, 24-hour totals ending 12Z), with percent of PRISM normal for
+    regions and locations, and a map.
+  - *Atmospheric rivers:* integrated vapor transport (IVT) at the coastal locations from GFS and
+    ECMWF AIFS, computed from specific humidity and wind at 1000, 925, 850, 700, 500 and 300 hPa,
+    and ranked on the CW3E AR scale (Ralph et al. 2019): the peak IVT sets the category (250, 500,
+    750, 1000, 1250 kg m⁻¹ s⁻¹), 48 hours or longer adds a step, under 24 hours removes one.
+    ECMWF IFS open data has no pressure-level fields here, so AIFS stands in for ECMWF.
+  - *Ensemble odds:* the share of GEFS and ECMWF ENS members (pooled) reaching each location's
+    impact thresholds for 24-hour rain, 72-hour rain and 24-hour snow (ECMWF ENS snowfall at 10:1;
+    GEFS has no snowfall field), by day.
+- **What NWS forecasters say.** The synopsis, key messages (when an office writes them) and
+  hydrology notes from the latest Area Forecast Discussion of each office in `nws_offices`
+  (Seattle and Portland), with links to the full text; WPC's Excessive Rainfall Outlook for days
+  1–5 at each location; and CPC's 6–10 and 8–14 day temperature and precipitation outlooks
+  (most common category per region, with its probability). Outlooks come from NOAA's public map
+  services, one query per layer and point-in-polygon locally.
+- **Wind and snow.**
+  - *Pressure gradients:* sea-level pressure differences from each model for Olympia − Bellingham
+    (Puget Sound south wind), Eugene − Portland (Willamette Valley south wind), The Dalles −
+    Troutdale (Gorge east wind) and Seattle − Yakima (onshore push or offshore flow), with
+    rule-of-thumb thresholds. Pairs and thresholds are in `config.yaml` under `gradients`.
+  - *Snow level at the passes:* each model's freezing level minus 1,000 ft
+    (`snow_level_offset_ft`) at Snoqualmie, Stevens, White Pass and Government Camp, against the
+    pass elevation (`elev_ft` on each point).
+  - *Snowpack:* SNOTEL snow water equivalent from the USDA NRCS AWDB API for stations within
+    `radius_km` of each area under `snowpack` (Mt Baker, Olympics, the passes, Rainier, Mt Hood,
+    Santiam), against each station's median for the date, with depth and the 7-day change. The
+    area percent is total SWE over total median SWE, NRCS style, and stays blank until the median
+    reaches `min_median_in`, since early-season medians near zero make percentages meaningless.
 - **Interactive map.** MapLibre map with two modes. *Summary* shows every gridded model, the
   multi-model mean, spread and percent of normal for each window, plus highest and lowest
   temperature, strongest wind and strongest gust over each window. *Through time* steps through
@@ -96,6 +127,8 @@ Every run publishes its grids under `data/cogs/` next to the page:
 | `<model>_tmax_<N>d.tif`, `<model>_tmin_<N>d.tif` | Highest and lowest 2 m temperature over the window, °F |
 | `<model>_wind_<N>d.tif`, `<model>_gust_<N>d.tif` | Strongest sustained 10 m wind and strongest gust over the window, mph |
 | `mean_<tmax\|tmin\|wind\|gust>_<N>d.tif` | Multi-model mean of those extremes |
+| `odds_p24_<N>d.tif`, `odds_p72_<N>d.tif` | Chance (% of pooled GEFS + ECMWF ENS members) of 1" or more in a day, or 3" or more in 3 days, within the window (`odds_map` in config) |
+| `observed_obs_<N>d.tif`, `observed_obspct_<N>d.tif` | MRMS observed precipitation over the past 7 or 30 days (in) and percent of normal |
 
 Extremes, and the daily highs, lows and peak gusts at the forecast locations, are read at each
 model's native output steps, using the max/min-since-the-previous-output records wherever the
@@ -279,10 +312,15 @@ briefing/alerts.py          NWS zones and active alerts
 briefing/change.py          comparison with the previous briefing over the same days
 briefing/standalone.py      single-file briefing with everything embedded
 briefing/main.py            writes briefing.json + maps
+briefing/context.py         IVT and the AR scale, pressure gradients, pass snow level
+briefing/odds.py            ensemble exceedance odds (locations and maps)
+briefing/observed.py        MRMS observed precipitation, past 7 and 30 days vs normal
+briefing/snowpack.py        SNOTEL snowpack by area (NRCS AWDB)
+briefing/outlooks.py        NWS forecast discussions, WPC excessive rainfall and CPC outlooks
 briefing/demo.py            synthetic data for offline tests
 web/src/components/ui/      shadcn/ui components
-web/src/sections/           page sections (overview, changes, alerts, impacts, interactive map,
-                            maps, totals, location detail)
+web/src/sections/           page sections (overview, changes, alerts, impacts, flood setup and
+                            wind/snow signals, interactive map, maps, totals, location detail)
 web/src/lib/cog.ts          COG reading (geotiff.js)
 web/src/lib/gl/             WebGL grid and wind-particle layers for MapLibre
 web/src/types.ts            the briefing.json contract
