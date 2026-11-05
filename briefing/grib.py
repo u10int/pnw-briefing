@@ -644,23 +644,28 @@ def fetch_model(spec, cfg, start, points):
 
         fam = spec["family"]
         step = spec.get("sample_hours", 6)
-        hours = list(range(lead0, targets[-1] + 1, step))
+        # The daily values use whole 12Z-12Z days (`targets`); the map runs on to the end of a
+        # regional model's forecast (RRFS 84 h, NAM 60 h), whose last part is less than a day.
+        map_last = max(targets[-1], spec.get("max_hours", 0)) if spec.get("tier") == "regional" else targets[-1]
+        hours = list(range(lead0, map_last + 1, step))
         from . import fields
-        fhours = fields.field_hours(spec, lead0, targets[-1], hours)
+        fhours = fields.field_hours(spec, lead0, map_last, hours)
 
         def accum(var):
-            """Cumulative-from-init grids at the daily targets and, for the map, at every field hour.
-            If the extra hours can't be read, the daily targets alone (no accumulated map layer)."""
+            """Cumulative-from-init grids at the daily targets and, for the map, at every field hour
+            (with those hours). If the hours past the last whole day can't be read, the map stops
+            there; if no extra hours can be read, the daily targets alone (no accumulated map layer)."""
             fn = (lambda t: _accum_ncep(spec, run, var, t, dom)) if fam == "ncep" else \
                  (lambda t: _accum_ecmwf(spec, run, var, t, dom))
-            if fhours:
-                allh = sorted(set(targets) | set(fhours))
+            tries = [fhours, [h for h in fhours if h <= targets[-1]]] if fhours else []
+            for fh in [t for k, t in enumerate(tries) if t and (k == 0 or t != tries[0])]:
+                allh = sorted(set(targets) | set(fh))
                 try:
                     la, lo, a = fn(allh)
                     pos = {h: i for i, h in enumerate(allh)}
-                    return la, lo, a[[pos[h] for h in targets]], a[[pos[h] for h in fhours]]
+                    return la, lo, a[[pos[h] for h in targets]], (fh, a[[pos[h] for h in fh]])
                 except Exception as e:
-                    log.info("%s: no hourly %s accumulation for the map (%s)", spec["label"], var, report.short(e))
+                    log.info("%s: %s accumulation to f%03d unavailable (%s)", spec["label"], var, fh[-1], report.short(e))
             la, lo, a = fn(targets)
             return la, lo, a, None
 
@@ -668,7 +673,7 @@ def fetch_model(spec, cfg, start, points):
         cum = np.maximum(cum_all - cum_all[0], 0)  # from today's 12Z
         acc_fields = {}
         if cum_f is not None:
-            acc_fields["apcp"] = {"hours": fhours, "data": (np.maximum(cum_f - cum_all[0], 0) / 25.4).astype("float32")}
+            acc_fields["apcp"] = {"hours": cum_f[0], "data": (np.maximum(cum_f[1] - cum_all[0], 0) / 25.4).astype("float32")}
 
         snow, snow_method = None, None
         try:
@@ -678,7 +683,7 @@ def fetch_model(spec, cfg, start, points):
             snow = to_in(np.maximum(s - s[0], 0))
             snow_method = "model snowfall (ASNOW)" if fam == "ncep" else "snowfall water equivalent at 10:1"
             if s_f is not None:
-                acc_fields["asnow"] = {"hours": fhours, "data": to_in(np.maximum(s_f - s[0], 0)).astype("float32")}
+                acc_fields["asnow"] = {"hours": s_f[0], "data": to_in(np.maximum(s_f[1] - s[0], 0)).astype("float32")}
         except Exception as e:
             log.info("%s: no snowfall field (%s)", spec["label"], e)
         t2m = _samples(spec, run, hours, FIELDS[fam]["t2m"], dom)
@@ -690,7 +695,7 @@ def fetch_model(spec, cfg, start, points):
 
         # time-stepped fields for the interactive map; optional, never fails the model
         try:
-            model_fields = fields.fetch(spec, run, lead0, targets[-1], hours, {"t2m": t2m, "gust": gust}, dom,
+            model_fields = fields.fetch(spec, run, lead0, map_last, hours, {"t2m": t2m, "gust": gust}, dom,
                                         sites=outside_sites(cfg))
         except Exception as e:
             log.warning("%s: hourly fields skipped (%s)", spec["label"], report.short(e))

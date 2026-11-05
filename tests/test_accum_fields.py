@@ -92,3 +92,30 @@ def test_fire_points_from_map_fields(monkeypatch):
 def test_rh_from_dewpoint():
     np.testing.assert_allclose(fields.rh_from_dewpoint(68.0, 293.15), 100, rtol=1e-6)   # Td = T
     assert 35 < fields.rh_from_dewpoint(86.0, 287.15) < 40                                # 30 °C, Td 14 °C
+
+
+def test_regional_map_runs_to_max_hours(monkeypatch):
+    """Daily values stop at the last whole day; a regional model's map fields run to max_hours, and
+    if the hours past the last whole day can't be read, the accumulation map stops at that day."""
+    spec = dict(SPEC, max_hours=40)            # lead0 6, one day -> targets 6, 30; map to 40
+    seen = {}
+
+    def ffetch(spec_, run, lead0, last_hour, stepped_hours, *a, **k):
+        seen["last"], seen["stepped"] = last_hour, list(stepped_hours)
+        return {}
+    monkeypatch.setattr(grib, "_latest_run", lambda s, start: (datetime(2026, 11, 5, 6), 6, 1))
+    monkeypatch.setattr(grib, "_samples", lambda *a, **k: {})
+    monkeypatch.setattr(grib, "extreme_series", lambda *a, **k: {})
+    monkeypatch.setattr(grib, "outside_sites", lambda cfg: [])
+    monkeypatch.setattr(fields, "fetch", ffetch)
+
+    def accum(spec_, run, var, targets, dom):
+        if max(targets) > 30:
+            raise LookupError("f033 not published yet")
+        per = 1.0 if var == "APCP" else 0.01
+        return LAT, LON, np.stack([np.full(LAT.shape, per * h) for h in targets])
+    monkeypatch.setattr(grib, "_accum_ncep", accum)
+    m = grib.fetch_model(spec, CFG, datetime(2026, 11, 5, 12), [{"name": "A", "lat": 47.0, "lon": -123.0}])
+    assert seen["last"] == 40 and seen["stepped"][-1] == 39          # 3-hourly from 6 to 40
+    assert m["fields"]["apcp"]["hours"][-1] == 30                    # fell back to the whole day
+    assert m["range_days"] == 1
