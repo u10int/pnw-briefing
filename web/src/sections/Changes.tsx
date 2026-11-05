@@ -11,8 +11,7 @@ const since = (c: NonNullable<Briefing["change"]>) => (c.prevIssued ? issuedLabe
 
 type Kind = "new" | "upgraded" | "downgraded" | "same" | "dropped"
 /** Hue is confidence; weight is what changed: a solid fill for new or upgraded, the pale fill for
- *  unchanged, a faded fill with a dashed border in the same hue for moved, stripes with that border
- *  for downgraded, gray and dashed for yesterday's dates. */
+ *  unchanged, a faded fill for moved, light stripes for downgraded, gray and dashed for yesterday's dates. */
 const LEVEL = {
   likely: { word: "Likely", bg: "var(--likely-bg)", fg: "var(--likely)", bold: "var(--likely-bar)", boldText: "#fff" },
   possible: { word: "Possible", bg: "var(--possible-bg)", fg: "var(--possible)", bold: "var(--possible-bar)", boldText: "#3b2400" },
@@ -43,13 +42,12 @@ function Where({ e }: { e: EventChange }) {
 function Swatch({ kind }: { kind: "bold" | "same" | "moved" | "down" }) {
   const half = (l: (typeof LEVEL)["likely" | "possible"]) => {
     const fill = kind === "bold" ? l.bold : kind === "moved" ? `color-mix(in srgb, ${l.bg} 45%, var(--card))`
-      : kind === "down" ? `color-mix(in srgb, ${l.bold} 30%, var(--card))` : l.bg
+      : kind === "down" ? `color-mix(in srgb, ${l.bold} 18%, var(--card))` : l.bg
     return {
       background: kind === "down" ? `repeating-linear-gradient(135deg, ${fill} 0 3px, var(--card) 3px 6px)` : fill,
-      ...(kind === "moved" || kind === "down" ? { border: `1px dashed ${l.bold}` } : {}),
     }
   }
-  const edge = kind === "bold" || kind === "same" ? "shadow-[inset_0_0_0_1px_rgb(0_0_0/0.08)]" : ""
+  const edge = "shadow-[inset_0_0_0_1px_rgb(0_0_0/0.08)]"
   return (
     <span className="flex h-3 gap-px">
       <span className={`w-3 rounded-l-[3px] ${edge}`} style={half(LEVEL.likely)} />
@@ -120,11 +118,10 @@ export function HazardChanges({ data }: { data: Briefing }) {
         if (was.end < now.start) bars.push({ key: `l${i}`, start: was.end, end: now.start, color: "", link: "right", label: "", aria: "", tip: null })
         else if (now.end < was.start) bars.push({ key: `l${i}`, start: now.end, end: was.start, color: "", link: "left", label: "", aria: "", tip: null })
       }
-      const weaker = kind === "Moved" || kind === "Downgraded"
       // downgraded stripes use a light mix of the strong color: the pale fill alone barely shows
-      const fill = bold ? lv.bold : kind === "Downgraded" ? `color-mix(in srgb, ${lv.bold} 30%, var(--card))` : lv.bg
+      const fill = bold ? lv.bold : kind === "Downgraded" ? `color-mix(in srgb, ${lv.bold} 18%, var(--card))` : lv.bg
       bars.push({ key: `t${i}`, ...now, color: fill, text: bold ? lv.boldText : lv.fg,
-        faded: kind === "Moved", hatch: kind === "Downgraded", border: weaker ? lv.bold : undefined,
+        faded: kind === "Moved", hatch: kind === "Downgraded",
         label: lv.word, short: lv.word[0],
         aria: `${e.label}, ${when}: ${kind.toLowerCase()}, ${lv.word.toLowerCase()}`,
         tip: <><p className="font-semibold">{e.label} · {when}</p>
