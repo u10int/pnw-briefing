@@ -4,6 +4,7 @@ import { ExternalLink, Flame } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
+import { Progress } from "@/components/ui/progress"
 import { Switch } from "@/components/ui/switch"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -295,6 +296,40 @@ export function WildfireMapCard({ data, wf }: { data: Briefing; wf: Wildfire }) 
 
 // ------------------------------------------------------------------ incidents
 
+/** NWCG fire size classes, by acres; the colour steps up with the class. */
+const SIZE_CLASSES = [
+  { cls: "A", min: 0, typical: 0.1, range: "<¼", color: "#fde68a" }, { cls: "B", min: 0.25, typical: 4, range: "¼–10", color: "#fcc94a" },
+  { cls: "C", min: 10, typical: 40, range: "10–100", color: "#f9a529" }, { cls: "D", min: 100, typical: 200, range: "100–300", color: "#f07b1d" },
+  { cls: "E", min: 300, typical: 600, range: "300–1k", color: "#dc4c16" }, { cls: "F", min: 1000, typical: 2500, range: "1k–5k", color: "#b3261e" },
+  { cls: "G", min: 5000, typical: 30000, range: "5k+", color: "#7a1220" },
+]
+const sizeClass = (acres: number) => [...SIZE_CLASSES].reverse().find((c) => acres >= c.min)!
+const DOT_MAX = 20     // px diameter at 100,000 acres and up: fits the two-line row without growing it
+
+/** A circle sized on a log scale of acres (4 px under an acre to 20 px at 100,000+) and coloured by size class. */
+function SizeDot({ acres }: { acres: N }) {
+  if (acres == null) return <span className="inline-block size-5" aria-hidden />
+  const c = sizeClass(acres)
+  const d = Math.max(4, Math.min(DOT_MAX, 4 + (16 * Math.log10(Math.max(acres, 1))) / 5))
+  return (
+    <span className="inline-flex size-5 shrink-0 items-center justify-center" title={`Class ${c.cls} (${c.range} acres)`}>
+      <span className="rounded-full shadow-[inset_0_0_0_1px_rgb(0_0_0/0.15)]" style={{ width: d, height: d, background: c.color }} />
+    </span>
+  )
+}
+
+/** Percent contained as a bar and number; "Not reported" when the incident has no figure. */
+function Containment({ pct }: { pct: N }) {
+  if (pct == null) return <span className="text-xs text-muted-foreground">Not reported</span>
+  const v = Math.max(0, Math.min(100, pct))
+  return (
+    <div className="flex items-center gap-2">
+      <Progress value={v} aria-label={`${Math.round(v)}% contained`} className="h-1.5 w-20 bg-muted [&>[data-slot=progress-indicator]]:bg-[var(--ok)]" />
+      <span className="w-9 text-right tabular-nums">{Math.round(v)}%</span>
+    </div>
+  )
+}
+
 export function IncidentsCard({ wf }: { wf: Wildfire }) {
   const [all, setAll] = React.useState(false)
   const items = wf.incidents
@@ -328,7 +363,7 @@ export function IncidentsCard({ wf }: { wf: Wildfire }) {
             <Table className="min-w-[640px]">
               <TableHeader>
                 <TableRow>
-                  <TableHead>Fire</TableHead><TableHead className="text-right">Acres</TableHead><TableHead className="text-right">Contained</TableHead>
+                  <TableHead>Fire</TableHead><TableHead className="text-right">Acres</TableHead><TableHead className="w-[150px]">Contained</TableHead>
                   <TableHead>Discovered</TableHead><TableHead>Cause</TableHead>
                 </TableRow>
               </TableHeader>
@@ -339,8 +374,13 @@ export function IncidentsCard({ wf }: { wf: Wildfire }) {
                       <span className="font-medium">{r.name}</span>
                       <span className="block text-xs text-muted-foreground">{r.type}{r.county ? ` · ${r.county} County` : ""}, {r.state}</span>
                     </TableCell>
-                    <TableCell className="text-right tabular-nums">{r.acres != null ? Math.round(r.acres).toLocaleString("en-US") : "–"}</TableCell>
-                    <TableCell className="text-right tabular-nums">{r.contained != null ? `${Math.round(r.contained)}%` : "–"}</TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      <span className="inline-flex items-center justify-end gap-2">
+                        {r.acres != null ? Math.round(r.acres).toLocaleString("en-US") : "–"}
+                        <SizeDot acres={r.acres} />
+                      </span>
+                    </TableCell>
+                    <TableCell><Containment pct={r.contained} /></TableCell>
                     <TableCell className="tabular-nums">{r.discovered ? new Date(r.discovered).toLocaleDateString("en-US", { month: "short", day: "numeric", year: new Date(r.discovered).getFullYear() !== new Date().getFullYear() ? "numeric" : undefined }) : "–"}</TableCell>
                     <TableCell>{r.cause ?? "–"}</TableCell>
                   </TableRow>
@@ -348,6 +388,12 @@ export function IncidentsCard({ wf }: { wf: Wildfire }) {
               </TableBody>
             </Table>
             {shown.length > 40 && <p className="mt-2 text-xs text-muted-foreground">And {shown.length - 40} smaller fires.</p>}
+            <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+              <span>Size class</span>
+              {SIZE_CLASSES.map((c) => (
+                <span key={c.cls} className="flex items-center gap-1"><SizeDot acres={c.typical} />{c.cls} {c.range}</span>
+              ))}
+            </div>
           </div>
         )}
       </CardContent>
