@@ -1,3 +1,5 @@
+import * as React from "react"
+
 import { Delta } from "@/components/Delta"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
@@ -8,9 +10,11 @@ import type { Briefing, EventChange } from "@/types"
 const since = (c: NonNullable<Briefing["change"]>) => (c.prevIssued ? issuedLabel(c.prevIssued) : "yesterday")
 
 type Kind = "new" | "upgraded" | "downgraded" | "same" | "dropped"
+/** Hue is confidence; weight is what changed: a solid fill for new or upgraded, the pale fill for
+ *  moved or downgraded, the pale fill faded for unchanged, gray and dashed for yesterday's dates. */
 const LEVEL = {
-  likely: { word: "Likely", bg: "var(--likely-bg)", fg: "var(--likely)" },
-  possible: { word: "Possible", bg: "var(--possible-bg)", fg: "var(--possible)" },
+  likely: { word: "Likely", bg: "var(--likely-bg)", fg: "var(--likely)", bold: "var(--likely-bar)", boldText: "#fff" },
+  possible: { word: "Possible", bg: "var(--possible-bg)", fg: "var(--possible)", bold: "var(--possible-bar)", boldText: "#3b2400" },
 } as const
 const dayN = (d: string) => Date.parse(`${d}T12:00:00Z`) / 864e5
 const nDays = (k: number) => `${Math.abs(k)} day${Math.abs(k) === 1 ? "" : "s"}`
@@ -34,6 +38,17 @@ function Where({ e }: { e: EventChange }) {
   )
 }
 
+/** A legend swatch in both confidence colors: likely on the left, possible on the right. */
+const Swatch = ({ a, b, faded }: { a: string; b: string; faded?: boolean }) => (
+  <span className="flex h-3 w-5 overflow-hidden rounded-[3px] shadow-[inset_0_0_0_1px_rgb(0_0_0/0.08)]" style={faded ? { opacity: 0.55 } : {}}>
+    <span className="flex-1" style={{ background: a }} /><span className="flex-1" style={{ background: b }} />
+  </span>
+)
+
+const Key = ({ swatch, children }: { swatch: React.ReactNode; children: React.ReactNode }) => (
+  <span className="flex items-center gap-1.5">{swatch}{children}</span>
+)
+
 /** Hazards added, upgraded, downgraded, moved or dropped since yesterday's briefing, on the
  *  forecast's day axis: today's events in one row, yesterday's dates for anything that moved or
  *  dropped out in a muted, dashed row beneath. */
@@ -56,41 +71,49 @@ export function HazardChanges({ data }: { data: Briefing }) {
     g.items.push(x)
     byHazard.set(id, g)
   }
+  const span = (a: string, b: string) => ({ start: ptMidnight(a), end: ptMidnight(b) + 24 * H })
   const groups: TimelineGroup[] = [...byHazard.entries()].sort((a, b) => a[1].first - b[1].first).map(([id, g]) => {
-    const today: TimelineBar[] = [], before: TimelineBar[] = []
-    g.items.forEach(({ k, e }, i) => {
-      const span = (a: string, b: string) => ({ start: ptMidnight(a), end: ptMidnight(b) + 24 * H })
+    // one lane per event: the row label says what changed, the bar shows today's dates and
+    // confidence; a moved event also shows yesterday's dates (dashed) in its own lane
+    const lanes = g.items.map(({ k, e }, i) => {
       const when = dateRange(e.start, e.end)
       if (k === "dropped") {
-        before.push({ key: `d${i}`, ...span(e.start, e.end), color: "", ghost: true, label: "Dropped", short: "×",
+        const bar: TimelineBar = { key: `d${i}`, ...span(e.start, e.end), color: "", ghost: true, label: "Dropped", short: "×",
           aria: `${e.label}, ${when}: dropped since yesterday`,
           tip: <><p className="font-semibold">{e.label} · {when}</p>
                  <p>Dropped: yesterday's briefing had it as {e.prevLevel ? LEVEL[e.prevLevel].word.toLowerCase() : "a flag"}; today no longer reaches the threshold.</p>
-                 <Where e={e} /></> })
-        return
+                 <Where e={e} /></> }
+        return { sort: dayN(e.start), row: { key: `r${i}`, label: "Dropped", bars: [bar] } as TimelineRow }
       }
       const lv = LEVEL[e.level ?? "possible"]
       const mv = moved(e)
-      const kind = k === "new" ? "New" : k === "upgraded" ? "Upgraded" : k === "downgraded" ? "Downgraded" : mv ? "Moved" : null
+      const kind = k === "new" ? "New" : k === "upgraded" ? "Upgraded" : k === "downgraded" ? "Downgraded" : mv ? "Moved" : "Unchanged"
+      const bold = k === "new" || k === "upgraded"
       const status = k === "new" ? "New: not in yesterday's briefing."
         : k === "upgraded" || k === "downgraded" ? `${k === "upgraded" ? "Upgraded" : "Downgraded"} from ${e.prevLevel ? LEVEL[e.prevLevel].word.toLowerCase() : "–"} to ${lv.word.toLowerCase()}.`
         : mv ? "Same confidence as yesterday." : "Unchanged since yesterday."
-      today.push({ key: `t${i}`, ...span(e.start, e.end), color: lv.bg, text: lv.fg,
-        label: kind ? `${kind} · ${lv.word}` : lv.word, short: kind ?? "",
-        aria: `${e.label}, ${when}: ${kind ?? "unchanged"}, ${lv.word.toLowerCase()}`,
+      const bars: TimelineBar[] = []
+      const now = span(e.start, e.end)
+      if (mv && e.prevStart && e.prevEnd) {
+        const was = span(e.prevStart, e.prevEnd)
+        const apart = was.end <= now.start || now.end <= was.start
+        bars.push({ key: `p${i}`, ...was, color: "", ghost: true, label: apart ? "Was" : "", short: "",
+          aria: `${e.label}: yesterday's dates ${dateRange(e.prevStart, e.prevEnd)}`,
+          tip: <><p className="font-semibold">{e.label} · yesterday {dateRange(e.prevStart, e.prevEnd)}</p><p>Now {when}, {mv}.</p></> })
+        // a gap between the old and new dates gets an arrow from one to the other
+        if (was.end < now.start) bars.push({ key: `l${i}`, start: was.end, end: now.start, color: "", link: "right", label: "", aria: "", tip: null })
+        else if (now.end < was.start) bars.push({ key: `l${i}`, start: now.end, end: was.start, color: "", link: "left", label: "", aria: "", tip: null })
+      }
+      bars.push({ key: `t${i}`, ...now, color: bold ? lv.bold : lv.bg, text: bold ? lv.boldText : lv.fg, faded: kind === "Unchanged",
+        label: lv.word, short: lv.word[0],
+        aria: `${e.label}, ${when}: ${kind.toLowerCase()}, ${lv.word.toLowerCase()}`,
         tip: <><p className="font-semibold">{e.label} · {when}</p>
                <p>{status}{mv && e.prevStart && e.prevEnd && ` Moved ${mv} (yesterday: ${dateRange(e.prevStart, e.prevEnd)}).`}</p>
                <p>{lv.word}{e.agreement != null ? `, ${Math.round(e.agreement * 100)}% of models agree` : ""}</p>
                <Where e={e} /></> })
-      if (mv && e.prevStart && e.prevEnd)
-        before.push({ key: `p${i}`, ...span(e.prevStart, e.prevEnd), color: "", ghost: true, label: "Yesterday's dates", short: "Was",
-          aria: `${e.label}: yesterday's dates ${dateRange(e.prevStart, e.prevEnd)}`,
-          tip: <><p className="font-semibold">{e.label} · yesterday {dateRange(e.prevStart, e.prevEnd)}</p><p>Now {when}, {mv}.</p></> })
+      return { sort: dayN(e.start), row: { key: `r${i}`, label: kind, bars } as TimelineRow }
     })
-    const rows: TimelineRow[] = []
-    if (today.length) rows.push({ key: "now", label: "Today", bars: today })
-    if (before.length) rows.push({ key: "prev", label: "Yesterday", bars: before })
-    return { key: id, label: g.label, rows }
+    return { key: id, label: g.label, rows: lanes.sort((a, b) => a.sort - b.sort).map((l) => l.row) }
   })
 
   return (
@@ -106,24 +129,19 @@ export function HazardChanges({ data }: { data: Briefing }) {
         <CardContent className="space-y-3">
           {all.length ? (
             <>
-              <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 text-sm">
-                <p className="text-muted-foreground">
-                  {counts.filter(([n]) => n > 0).map(([n, w], i) => (
-                    <span key={w}>{i > 0 && " · "}<span className="font-semibold text-foreground tabular-nums">{n}</span> {w}</span>
-                  ))}
-                </p>
-                <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-                  {(["likely", "possible"] as const).map((l) => (
-                    <span key={l} className="flex items-center gap-1.5">
-                      <span className="h-3 w-5 rounded-[3px] shadow-[inset_0_0_0_1px_rgb(0_0_0/0.08)]" style={{ background: LEVEL[l].bg }} />{LEVEL[l].word}
-                    </span>
-                  ))}
-                  <span className="flex items-center gap-1.5">
-                    <span className="h-3 w-5 rounded-[3px] border border-dashed border-muted-foreground/60" />Yesterday's dates, or dropped
-                  </span>
-                </div>
+              <p className="text-sm text-muted-foreground">
+                {counts.filter(([n]) => n > 0).map(([n, w], i) => (
+                  <span key={w}>{i > 0 && " · "}<span className="font-semibold text-foreground tabular-nums">{n}</span> {w}</span>
+                ))}
+              </p>
+              <Timeline t0={t0} t1={t1} groups={groups} groupW={150} rowW={84} />
+              <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-muted-foreground">
+                <Key swatch={<Swatch a={LEVEL.likely.bold} b={LEVEL.possible.bold} />}>New or upgraded</Key>
+                <Key swatch={<Swatch a={LEVEL.likely.bg} b={LEVEL.possible.bg} />}>Moved or downgraded</Key>
+                <Key swatch={<Swatch a={LEVEL.likely.bg} b={LEVEL.possible.bg} faded />}>Unchanged</Key>
+                <Key swatch={<span className="h-3 w-5 rounded-[3px] border border-dashed border-muted-foreground/60" />}>Yesterday's dates, or dropped</Key>
+                <span>Red: likely · Amber: possible</span>
               </div>
-              <Timeline t0={t0} t1={t1} groups={groups} groupW={150} rowW={76} />
             </>
           ) : (
             <p className="text-sm text-muted-foreground">No impacts flagged in either briefing.</p>

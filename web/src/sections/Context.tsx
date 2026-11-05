@@ -380,6 +380,8 @@ export interface TimelineBar {
   key: string; start: number; end: number          // ms
   color: string; text?: string
   ghost?: boolean                                  // muted, dashed: a past or withdrawn position
+  faded?: boolean                                  // drawn at reduced strength (nothing changed)
+  link?: "right" | "left"                          // not a bar: a dashed arrow joining two bars, pointing this way
   label: string; short?: string                    // full label, and a shorter one for narrow bars
   aria: string; tip: React.ReactNode; onClick?: () => void
 }
@@ -395,7 +397,7 @@ function TimelineBarView({ e, left, w, label }: { e: TimelineBar; left: number; 
       <TooltipTrigger asChild>
         <button type="button" onClick={() => { setTimeout(() => setOpen(true), 0); e.onClick?.() }} aria-label={e.aria}
                 className={`absolute top-1 bottom-1 flex items-center overflow-hidden rounded-[4px] px-1.5 font-medium whitespace-nowrap outline-offset-1 focus-visible:outline-2 focus-visible:outline-ring ${e.ghost ? "border border-dashed border-muted-foreground/60 bg-card/80 text-muted-foreground hover:bg-card" : "shadow-[inset_0_0_0_1px_rgb(0_0_0/0.08)] hover:brightness-105"} ${e.onClick ? "" : "cursor-default"}`}
-                style={{ left: `${left}%`, width: `${w}%`, ...(e.ghost ? {} : { background: e.color, color: e.text ?? "var(--foreground)" }) }}>
+                style={{ left: `${left}%`, width: `${w}%`, ...(e.ghost ? {} : { background: e.color, color: e.text ?? "var(--foreground)" }), ...(e.faded ? { opacity: 0.55 } : {}) }}>
           {label}
         </button>
       </TooltipTrigger>
@@ -485,6 +487,12 @@ export function Timeline({ t0, t1, groups, groupW = 96, rowW = 88 }: {
                       const a = Math.max(t0, e.start), b = Math.min(t1, e.end)
                       if (b <= a) return null
                       const left = x(a), w = Math.max(0.6, x(b) - x(a))
+                      if (e.link) return (
+                        <div key={e.key} aria-hidden className="pointer-events-none absolute top-1/2 h-0 border-t border-dashed border-muted-foreground/70"
+                             style={{ left: `${left}%`, width: `${w}%` }}>
+                          <span className={`absolute -top-[4.5px] size-0 border-y-4 border-y-transparent ${e.link === "right" ? "right-0 border-l-[6px] border-l-muted-foreground/70" : "left-0 border-r-[6px] border-r-muted-foreground/70"}`} />
+                        </div>
+                      )
                       const px = (w / 100) * width
                       const fits = (s: string) => px >= s.length * 6.4 + 14
                       const label = fits(e.label) ? e.label : e.short && fits(e.short) ? e.short : ""
