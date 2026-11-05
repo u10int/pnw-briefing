@@ -146,7 +146,7 @@ export default function App() {
 
         <Tabs value={tab} onValueChange={(v) => openTab(v as Tab, false)} className="mt-14 gap-0">
           <div ref={tabsTop} className="sticky top-0 z-30 -mx-8 border-b bg-background/95 px-8 py-2.5 backdrop-blur max-sm:-mx-4 max-sm:px-4">
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto overflow-y-hidden">
               <TabsList className="h-10">
                 {TABS.map((t) => <TabsTrigger key={t.id} value={t.id} className="px-3.5">{t.label}</TabsTrigger>)}
               </TabsList>
