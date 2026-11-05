@@ -1,6 +1,7 @@
 """Small-multiple maps of window precipitation and snowfall (matplotlib + cartopy)."""
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 
@@ -25,28 +26,34 @@ plt.rcParams["font.family"] = REG.get_name()
 
 BLACK, GRAY, RULE, PAPER = "#1b1f24", "#6b7280", "#d9dce1", "#ffffff"
 
-# One hue, light -> dark, ending in a deep blue-violet so 20"+ windward totals separate.
-PRECIP_LEVELS = [0.1, 0.25, 0.5, 1, 1.5, 2, 3, 4, 6, 8, 10, 15, 20, 30]
-PRECIP_COLORS = ["#e9f0fb", "#d3e2f8", "#bdd3f4", "#a2c1ef", "#86afea", "#6a9ce4", "#4f88dd",
-                 "#3474d5", "#1f5fd1", "#1a50b2", "#164293", "#123576", "#0f2a5e", "#0b1f47", "#1c1240"]
-SNOW_LEVELS = [0.5, 1, 2, 4, 6, 8, 12, 18, 24, 36, 48, 72]
-SNOW_COLORS = ["#f3f1fc", "#e3dff8", "#cdc6f2", "#b4aaeb", "#998de3", "#7f70da", "#6553cf",
-               "#5040b6", "#3f3299", "#30267b", "#221a5e", "#160f42", "#0d082c"]
+# Precipitation, snowfall, temperature and wind use Ryan Maue's GrADS colour tables, the same file
+# the page reads (web/src/lib/ramps/maue.json, from forecasteagle.com/ramps), cut to the range worth
+# drawing here. Lists below follow _cmap's layout: with clamp, colour i covers [level i, level i+1)
+# and the last colour is "over"; without, colour 0 is an unused "under" slot and the rest shift by one.
+_MAUE = json.loads((Path(__file__).resolve().parents[1] / "web/src/lib/ramps/maue.json").read_text())["ramps"]
+LEGEND_TICKS: dict[tuple, list] = {}
+
+
+def _maue(name, lo, hi, ticks, clamp=False):
+    stops = [s for s in _MAUE[name]["stops"] if lo - 1e-6 <= s[0] <= hi + 1e-6]
+    levels, colors = [s[0] for s in stops], [s[1] for s in stops]
+    LEGEND_TICKS[tuple(levels)] = ticks
+    return levels, (colors if clamp else [colors[0]] + colors)
+
+
+PRECIP_LEVELS, PRECIP_COLORS = _maue("maue_precip_rgbset", 0.01, 20, [0.01, 0.1, 0.25, 0.5, 1, 2, 3, 4, 6, 8, 10, 16])
+SNOW_LEVELS, SNOW_COLORS = _maue("maue_snowfall", 0.1, 48, [0.1, 1, 2, 4, 6, 8, 12, 18, 24, 36, 48])
 # Spread is uncertainty, not a hazard: neutral gray, so red stays reserved for hazards.
 SPREAD_LEVELS = [0.25, 0.5, 1, 2, 3, 4, 6, 8, 12]
 SPREAD_COLORS = ["#f4f4f4", "#e6e6e6", "#d2d2d2", "#bcbcbc", "#a3a3a3", "#898989", "#6e6e6e",
                  "#545454", "#383838", "#1c1c1c"]
 
-# Same ramps as the interactive map (web/src/lib/ramps.ts): colour i covers [level i, level i+1).
-TEMP_LEVELS = [-10, -5, 0, 5, 10, 15, 20, 25, 30, 32, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100]
-TEMP_COLORS = ["#4b2c7f", "#5e3a9e", "#6b4bb8", "#5867c9", "#4a7fd4", "#3f97d9", "#43acd6", "#5cc0d2", "#8ad3d4",
-               "#b7e3cf", "#d6ecb4", "#e8ef9c", "#f4e98a", "#f7d872", "#f6c25e", "#f2a84f", "#ec8c45", "#e2703f",
-               "#d4543a", "#c13a36", "#a62533", "#87162d", "#661026", "#4a0b1d"]
-WIND_LEVELS = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 60, 70, 80]
-WIND_COLORS = ["#f2f4f7", "#dbe7f0", "#bcd7e6", "#95c3d8", "#6eaec9", "#4b98b8", "#3a8f8c", "#5a9f4f", "#a3b23a",
-               "#d9a72c", "#e47c2a", "#d9482b", "#b0203f", "#7a1258"]
-EXTREME_RAMPS = {"tmax": (TEMP_LEVELS, TEMP_COLORS), "tmin": (TEMP_LEVELS, TEMP_COLORS),
-                 "wind": (WIND_LEVELS, WIND_COLORS), "gust": (WIND_LEVELS, WIND_COLORS)}
+TEMP_LEVELS, TEMP_COLORS = _maue("maue_weather_us_temp", -10, 110, list(range(-10, 111, 10)), clamp=True)
+# Maue's wind table is in knots, here on a miles-per-hour axis; nothing painted below its first level
+WIND_LEVELS, WIND_COLORS = _maue("maue_wind10m_mph", 6.9, 103.6,
+                                 [6.904674, 11.50779, 23.01558, 34.52337, 43.729602, 57.53895, 69.04674, 92.06232])
+EXTREME_RAMPS = {"tmax": (TEMP_LEVELS, TEMP_COLORS, True), "tmin": (TEMP_LEVELS, TEMP_COLORS, True),
+                 "wind": (WIND_LEVELS, WIND_COLORS, False), "gust": (WIND_LEVELS, WIND_COLORS, False)}
 
 
 def _cmap(levels, colors, clamp=False):
@@ -127,9 +134,17 @@ def _legend(fig, rect, levels, colors, label, clamp=False):
     cax = fig.add_axes(rect)
     cb = fig.colorbar(plt.cm.ScalarMappable(norm=nm, cmap=cm), cax=cax, orientation="horizontal",
                       extend="both" if clamp else "max", ticks=levels, extendfrac=0.04)
-    every = 2 if len(levels) > 16 else 1
-    cb.ax.set_xticklabels([f"{v:g}" if k % every == 0 else "" for k, v in enumerate(levels)],
-                          fontproperties=REG, fontsize=7.5, color=BLACK)
+    ticks = LEGEND_TICKS.get(tuple(levels))
+    if ticks is not None:       # long tables: tick and label only the chosen levels
+        shown = [v for v in levels if any(abs(v - t) < 1e-6 for t in ticks)]
+        cb.set_ticks(shown)
+        cb.ax.set_xticklabels([f"{v:.0f}" if abs(v) >= 10 else f"{v:g}" if abs(v) >= 1 else f"{v:.2g}" for v in shown],
+                              fontproperties=REG, fontsize=7.5, color=BLACK)
+    else:
+        every = 2 if len(levels) > 16 else 1
+        cb.ax.set_xticklabels([f"{v:g}" if k % every == 0 else "" for k, v in enumerate(levels)],
+                              fontproperties=REG, fontsize=7.5, color=BLACK)
+    cb.ax.minorticks_off()
     cb.ax.tick_params(length=2, width=0.5, color=BLACK)
     cb.outline.set_visible(False)
     cax.set_title(label, loc="left", fontproperties=REG, fontsize=8, color=GRAY, pad=4)
@@ -236,8 +251,8 @@ def window_extreme(grib_models, cfg, var, wdays, out_path):
         stack = np.stack([analysis.regrid(m["lat"], m["lon"], f, glat, glon) for m, f in ms])
         with np.errstate(all="ignore"):
             panels.append((glat, glon, np.nanmean(stack, 0), "Mean", f"{len(ms)} models"))
-    levels, colors = EXTREME_RAMPS[var]
-    return _figure(panels, cfg, out_path, levels, colors, _ext_label(var, _horizon(wdays)), clamp=True)
+    levels, colors, clamp = EXTREME_RAMPS[var]
+    return _figure(panels, cfg, out_path, levels, colors, _ext_label(var, _horizon(wdays)), clamp=clamp)
 
 
 def full_range_extreme(grib_models, cfg, var, min_days, out_path):
@@ -254,8 +269,8 @@ def full_range_extreme(grib_models, cfg, var, min_days, out_path):
         stack = np.stack([analysis.regrid(m["lat"], m["lon"], window(m, var, common), glat, glon) for m in ms])
         with np.errstate(all="ignore"):
             panels.append((glat, glon, np.nanmean(stack, 0), "Mean", f"First {common} days, {len(ms)} models"))
-    levels, colors = EXTREME_RAMPS[var]
-    return _figure(panels, cfg, out_path, levels, colors, _ext_label(var, None), clamp=True)
+    levels, colors, clamp = EXTREME_RAMPS[var]
+    return _figure(panels, cfg, out_path, levels, colors, _ext_label(var, None), clamp=clamp)
 
 
 # ---------------------------------------------------------------- observed (MRMS)

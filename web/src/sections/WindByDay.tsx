@@ -62,7 +62,7 @@ export function WindByDayCard({ data }: { data: Briefing }) {
             </Tabs>
           )}
           <ModelPick models={models} value={pick} onChange={setPick} />
-          <div className="sm:ml-auto"><RampStrip ramp={ramp} from="10" to="60+ mph" start={2} n={10} /></div>
+          <div className="sm:ml-auto"><RampStrip ramp={ramp} range={[6.9, 69.05]} extra={<span>mph</span>} /></div>
         </div>
         <DayMatrix dates={data.dates} rows={rows} leadHead="Peak" leadSub={`${span} days`} dimFrom={model ? model.days : undefined}
           style={(x) => rampCell(x, ramp)} fmt={mph} tip={tip} />
