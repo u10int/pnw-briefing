@@ -67,8 +67,37 @@ class Regridder:
 
 
 def regrid(lat, lon, field, glat, glon):
-    """Nearest-neighbour onto a regular grid; good enough for display mean/spread."""
-    return Regridder(lat, lon, glat, glon)(field)
+    """Onto a regular grid: bilinear from a regular lat/lon source (the global models, ensembles and
+    PRISM), so a coarse 0.25° field doesn't land on the finer common grid as solid blocks; nearest
+    neighbour from projected regional grids, which are finer than the target anyway, and wherever
+    bilinear would need a missing neighbour (data edges) so coverage doesn't shrink."""
+    near = Regridder(lat, lon, glat, glon)(field)
+    lat, lon = np.asarray(lat), np.asarray(lon)
+    if lat.ndim != 1 or lat.size < 2 or lon.size < 2:
+        return near
+    return _bilinear(lat, lon, np.asarray(field, dtype="float32"), np.asarray(glat), np.asarray(glon), near)
+
+
+def _bilinear(lat, lon, f, glat, glon, near):
+    oy, ox = np.argsort(lat), np.argsort(lon)
+    lat, lon = lat[oy], lon[ox]
+    f = f[..., oy, :][..., ox]
+
+    def frac(src, dst):
+        pos = np.interp(dst, src, np.arange(src.size, dtype="float64"), left=np.nan, right=np.nan)
+        i0 = np.clip(np.floor(np.nan_to_num(pos)).astype(int), 0, src.size - 2)
+        return i0, pos - i0, np.isfinite(pos)
+
+    iy, ty, oky = frac(lat, glat)
+    ix, tx, okx = frac(lon, glon)
+    Y0, X0 = iy[:, None], ix[None, :]
+    TY, TX = ty[:, None].astype("float32"), tx[None, :].astype("float32")
+    v00, v01 = f[..., Y0, X0], f[..., Y0, X0 + 1]
+    v10, v11 = f[..., Y0 + 1, X0], f[..., Y0 + 1, X0 + 1]
+    out = (v00 * (1 - TY) * (1 - TX) + v01 * (1 - TY) * TX + v10 * TY * (1 - TX) + v11 * TY * TX).astype("float32")
+    inside = oky[:, None] & okx[None, :]
+    use = inside & np.isfinite(out)
+    return np.where(use, out, near)
 
 
 def grid_window(m, wdays):
