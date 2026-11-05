@@ -320,7 +320,7 @@ function ArBadge({ rank }: { rank: number }) {
 }
 
 const AR_RANGE = "kg m⁻¹ s⁻¹"
-const H = 36e5
+export const H = 36e5
 
 /** Pacific midnights between two times (ms). */
 function midnights(t0: number, t1: number) {
@@ -351,14 +351,15 @@ function rankNote(e: ArEvent, breaks: number[]) {
 
 // ------------------------------------------------------------------ shared: horizontal timeline
 
-interface TimelineBar {
+export interface TimelineBar {
   key: string; start: number; end: number          // ms
   color: string; text?: string
+  ghost?: boolean                                  // muted, dashed: a past or withdrawn position
   label: string; short?: string                    // full label, and a shorter one for narrow bars
   aria: string; tip: React.ReactNode; onClick?: () => void
 }
-interface TimelineRow { key: string; label: React.ReactNode; bars: TimelineBar[] }
-interface TimelineGroup { key: string; label: string; title?: string; onClick?: () => void; selected?: boolean; rows: TimelineRow[] }
+export interface TimelineRow { key: string; label: React.ReactNode; bars: TimelineBar[] }
+export interface TimelineGroup { key: string; label: string; title?: string; onClick?: () => void; selected?: boolean; rows: TimelineRow[] }
 
 /** One bar. Hover or focus opens the tooltip; a tap or click opens it too, since touch screens
  *  have no hover. */
@@ -368,8 +369,8 @@ function TimelineBarView({ e, left, w, label }: { e: TimelineBar; left: number; 
     <Tooltip open={open} onOpenChange={setOpen}>
       <TooltipTrigger asChild>
         <button type="button" onClick={() => { setTimeout(() => setOpen(true), 0); e.onClick?.() }} aria-label={e.aria}
-                className={`absolute top-1 bottom-1 flex items-center overflow-hidden rounded-[4px] px-1.5 font-medium whitespace-nowrap shadow-[inset_0_0_0_1px_rgb(0_0_0/0.08)] outline-offset-1 hover:brightness-105 focus-visible:outline-2 focus-visible:outline-ring ${e.onClick ? "" : "cursor-default"}`}
-                style={{ left: `${left}%`, width: `${w}%`, background: e.color, color: e.text ?? "var(--foreground)" }}>
+                className={`absolute top-1 bottom-1 flex items-center overflow-hidden rounded-[4px] px-1.5 font-medium whitespace-nowrap outline-offset-1 focus-visible:outline-2 focus-visible:outline-ring ${e.ghost ? "border border-dashed border-muted-foreground/60 bg-card/80 text-muted-foreground hover:bg-card" : "shadow-[inset_0_0_0_1px_rgb(0_0_0/0.08)] hover:brightness-105"} ${e.onClick ? "" : "cursor-default"}`}
+                style={{ left: `${left}%`, width: `${w}%`, ...(e.ghost ? {} : { background: e.color, color: e.text ?? "var(--foreground)" }) }}>
           {label}
         </button>
       </TooltipTrigger>
@@ -382,7 +383,7 @@ function TimelineBarView({ e, left, w, label }: { e: TimelineBar; left: number; 
 
 /** Groups (a place) with child rows (a model, an outlook), each row a track of bars placed by
  *  start and duration on a shared day axis. Hover or focus a bar for its tooltip. */
-function Timeline({ t0, t1, groups, groupW = 96, rowW = 88 }: {
+export function Timeline({ t0, t1, groups, groupW = 96, rowW = 88 }: {
   t0: number; t1: number; groups: TimelineGroup[]; groupW?: number; rowW?: number
 }) {
   const [trackRef, width] = useWidth<HTMLDivElement>()
@@ -1040,7 +1041,7 @@ function cpcColor(v: "temperature" | "precipitation", cat: string, prob: number 
   return `color-mix(in srgb, ${base} ${k}%, transparent)`
 }
 /** Midnight Pacific at the start of a YYYY-MM-DD date. */
-const ptMidnight = (d: string) => {
+export const ptMidnight = (d: string) => {
   const t = Date.parse(`${d}T00:00:00-08:00`)
   return ptHour(t) === 1 ? t - H : t                      // daylight time
 }
