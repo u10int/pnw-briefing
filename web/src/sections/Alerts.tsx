@@ -4,14 +4,25 @@ import { ExternalLink, RefreshCw, ShieldCheck } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import type { Alert, Briefing } from "@/types"
+import type { Alert, Alerts, Briefing } from "@/types"
 
 const zoneId = (u: string) => u.replace(/\/$/, "").split("/").pop()!
-/** weather.gov's hazards page for the alert's first forecast zone and county (same as briefing/alerts.py). */
-const alertUrl = (ids: string[]) => {
-  const zone = ids.find((z) => /^[A-Z]{2}Z\d{3}$/.test(z)), county = ids.find((z) => /^[A-Z]{2}C\d{3}$/.test(z))
-  if (!zone && !county) return null
-  return `https://forecast.weather.gov/showsigwx.php?warnzone=${zone ?? county}${county ? `&warncounty=${county}` : ""}`
+/** A location's hazards page: from the briefing (`pages`), or, for briefings built before it was
+ *  recorded, rebuilt from the location's zone list: its county (C) and two zones (Z), the forecast
+ *  zone numbered below the fire weather zone in this region. */
+function locationPage(snap: Alerts | null | undefined, point: string) {
+  if (snap?.pages?.[point]) return snap.pages[point]
+  const ids = snap?.zones?.[point] ?? []
+  const zs = ids.filter((z) => /^[A-Z]{2}Z\d{3}$/.test(z)).sort(), county = ids.find((z) => /^[A-Z]{2}C\d{3}$/.test(z))
+  if (!zs.length) return null
+  return `https://forecast.weather.gov/showsigwx.php?warnzone=${zs[0]}${county ? `&warncounty=${county}` : ""}${zs[1] ? `&firewxzone=${zs[1]}` : ""}`
+}
+/** Where an alert links (as briefing/alerts.py): the hazards page of the first forecast location it
+ *  covers, which shows the alert in full; else the page for the alert's first forecast zone. */
+const alertUrl = (snap: Alerts | null | undefined, points: string[], ids: string[]) => {
+  for (const p of points) { const u = locationPage(snap, p); if (u) return u }
+  const zone = ids.find((z) => /^[A-Z]{2}Z\d{3}$/.test(z))
+  return zone ? `https://forecast.weather.gov/showsigwx.php?warnzone=${zone}` : null
 }
 
 /** Warning red, watch amber, advisory blue, statements gray: the usual NWS reading order. */
@@ -32,7 +43,10 @@ const when = (iso: string | null) =>
  */
 export function NwsAlerts({ data }: { data: Briefing }) {
   const snap = data.alerts
-  const [items, setItems] = React.useState<Alert[]>(snap?.items ?? [])
+  // briefings built before the hazards-page links carry dead alerts.weather.gov URLs: re-point those
+  const fixed = React.useMemo(() => (snap?.items ?? []).map((a) => (a.url?.includes("alerts.weather.gov")
+    ? { ...a, url: alertUrl(snap, a.points, []) } : a)), [snap])
+  const [items, setItems] = React.useState<Alert[]>(fixed)
   const [state, setState] = React.useState<{ live: boolean; at: string | null; error: string | null }>(
     { live: false, at: snap?.fetched ?? null, error: null })
 
@@ -53,7 +67,7 @@ export function NwsAlerts({ data }: { data: Briefing }) {
           if (!pts.length) continue
           out.push({ id: p.id, event: p.event, severity: p.severity, certainty: p.certainty, urgency: p.urgency,
             headline: p.headline, onset: p.onset ?? p.effective, ends: p.ends ?? p.expires, sender: p.senderName,
-            areaDesc: p.areaDesc, points: pts, url: alertUrl([...affected]) })
+            areaDesc: p.areaDesc, points: pts, url: alertUrl(snap, pts, [...affected]) })
         }
         const rank = (e: string) => (/warning/i.test(e) ? 0 : /watch/i.test(e) ? 1 : /advisory/i.test(e) ? 2 : 3)
         out.sort((a, b) => rank(a.event) - rank(b.event) || (a.onset ?? "").localeCompare(b.onset ?? ""))

@@ -69,7 +69,8 @@ export interface Alert {
   headline: string | null; onset: string | null; ends: string | null; sender: string | null
   areaDesc: string | null; points: string[]; url: string | null
 }
-export interface Alerts { fetched: string; areas: string[]; zones: Record<string, string[]>; items: Alert[]; ok: boolean; demo?: boolean }
+/** `pages`: each location's weather.gov hazards page (forecast zone, county, fire weather zone). */
+export interface Alerts { fetched: string; areas: string[]; zones: Record<string, string[]>; pages?: Record<string, string>; items: Alert[]; ok: boolean; demo?: boolean }
 
 /** Window extremes: highest/lowest 2 m temperature (°F), strongest sustained wind and gust (mph). */
 export type ExtremeVar = "tmax" | "tmin" | "wind" | "gust"

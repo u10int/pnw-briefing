@@ -87,9 +87,12 @@ def test_demo_is_complete():
     assert d["alerts"] and d["spc"] and d["psa"]["areas"] and d["incidents"] and d["drought"]["categories"]
 
 
-def test_alert_url_uses_zone_page():
+def test_alert_url_uses_the_location_page():
     from briefing import alerts
-    zs = ["https://api.weather.gov/zones/county/WAC033", "https://api.weather.gov/zones/forecast/WAZ558",
-          "https://api.weather.gov/zones/fire/WAZ654"]
-    assert alerts.alert_url(zs) == "https://forecast.weather.gov/showsigwx.php?warnzone=WAZ558&warncounty=WAC033"
+    page = alerts.location_page("WAZ310", "WAC073", "WAZ653")
+    assert page == "https://forecast.weather.gov/showsigwx.php?warnzone=WAZ310&warncounty=WAC073&firewxzone=WAZ653"
+    zs = ["https://api.weather.gov/zones/forecast/WAZ303", "https://api.weather.gov/zones/forecast/WAZ310"]
+    # the first covered location's page wins; otherwise the alert's first forecast zone
+    assert alerts.alert_url(zs, {"Bellingham": page}, ["Bellingham"]) == page
+    assert alerts.alert_url(zs) == "https://forecast.weather.gov/showsigwx.php?warnzone=WAZ303"
     assert alerts.alert_url([]) is None

@@ -209,7 +209,7 @@ def collect(cfg: dict, out: Path, demo: bool = False, products: bool = True) -> 
         "normals": norm,
         "tempDeparture": tdep,
         "alerts": nws_alerts,
-        "wildfire": safe("wildfire", lambda: wildfire.fetch(cfg, (nws_alerts or {}).get("zones"), demo)) if products else None,
+        "wildfire": safe("wildfire", lambda: wildfire.fetch(cfg, (nws_alerts or {}).get("zones"), demo, (nws_alerts or {}).get("pages"))) if products else None,
         "ar": ar,
         "gradients": grads,
         "snowLevel": snow_lvl,

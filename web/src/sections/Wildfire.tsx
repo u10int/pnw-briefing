@@ -51,7 +51,7 @@ export function FireAlertsCard({ wf }: { wf: Wildfire }) {
                 <div className="flex flex-wrap items-center gap-2">
                   <Badge variant={a.event === "Red Flag Warning" ? "likely" : "possible"}>{a.event}</Badge>
                   <span className="text-sm tabular-nums text-muted-foreground">{when(a.onset)} – {when(a.ends)}</span>
-                  {a.url && <a href={a.url} target="_blank" rel="noopener" aria-label="Open on weather.gov" className="text-muted-foreground hover:text-foreground"><ExternalLink className="size-3.5" /></a>}
+                  {a.url && !a.url.includes("alerts.weather.gov") && <a href={a.url} target="_blank" rel="noopener" aria-label="Open on weather.gov" className="text-muted-foreground hover:text-foreground"><ExternalLink className="size-3.5" /></a>}
                 </div>
                 {a.headline && <p className="text-sm">{a.headline}</p>}
                 <p className="text-xs text-muted-foreground">{a.areaDesc}{a.points.length > 0 && <> · covers {a.points.join(", ")}</>}</p>
