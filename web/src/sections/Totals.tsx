@@ -153,7 +153,7 @@ export function ByLocation({ data }: { data: Briefing }) {
           {showPct ? "Each model's total as a percent of the 1991–2020 normal for the same days." : "Totals in inches."} The
           Median row is the median across models{chg ? "; the row below it is the change in that median since yesterday" : ""}.
         </CardDescription>
-        <CardAction className="flex flex-wrap justify-end gap-2">
+        <CardAction className="flex flex-wrap justify-start gap-2 @xl/card-header:justify-end">
           {data.normals && (
             <Tabs value={mode} onValueChange={(v) => setMode(v as "in" | "pct")}>
               <TabsList>

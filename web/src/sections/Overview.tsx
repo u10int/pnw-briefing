@@ -124,7 +124,7 @@ export function WindowCard({ w, data }: { w: Window; data: Briefing }) {
     <Card className="gap-4">
       <CardHeader>
         <CardTitle>{w.label}</CardTitle>
-        <CardAction className="text-sm text-muted-foreground">{w.regions[0]?.n ?? 0} models</CardAction>
+        <CardAction className="col-start-2 row-start-1 mt-0 justify-self-end text-sm text-muted-foreground">{w.regions[0]?.n ?? 0} models</CardAction>
       </CardHeader>
       <CardContent className="space-y-4">
         {w.regions.map((r) => (
