@@ -1,4 +1,6 @@
 import * as React from "react"
+import { contrastTextColor } from "@/lib/contrast"
+import { DayHead } from "@/components/DayHead"
 
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectSeparator, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
@@ -86,14 +88,7 @@ export function usePick(models: Model[]) {
 }
 
 /** Text that stays legible on a cell colour. */
-function inkOn(hex: string) {
-  const n = parseInt(hex.slice(1), 16)
-  const [r, g, b] = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((c) => {
-    const s = c / 255
-    return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4
-  })
-  return 0.2126 * r + 0.7152 * g + 0.0722 * b < 0.3 ? "#fff" : "#1b1f24"
-}
+const inkOn = contrastTextColor
 
 /** A cell coloured by a ramp. `floor`: values under the first level stay uncoloured (rain, snow). */
 export function rampCell(v: N, ramp: Ramp, floor = false): React.CSSProperties {
@@ -137,14 +132,11 @@ export function DayMatrix({ dates, rows, leadHead, leadSub, style, fmt, tip, dim
           <tr className="border-b">
             <th className="sticky left-0 z-10 bg-card px-2 py-1.5 text-left font-medium">Location</th>
             <th className="px-2 py-1.5 text-center font-medium whitespace-nowrap">{leadHead}<span className="block font-normal text-muted-foreground">{leadSub}</span></th>
-            {dates.map((d, k) => {
-              const t = new Date(`${d}T12:00:00`)
-              return (
-                <th key={d} className={`min-w-10 px-1 py-1.5 text-center font-medium ${dimFrom != null && k >= dimFrom ? "text-muted-foreground" : ""}`}>
-                  {t.toLocaleDateString("en-US", { weekday: "short" })}<span className="block font-normal text-muted-foreground">{t.getDate()}</span>
-                </th>
-              )
-            })}
+            {dates.map((d, k) => (
+              <th key={d} className={`min-w-10 px-1 py-1.5 text-center font-medium ${dimFrom != null && k >= dimFrom ? "text-muted-foreground" : ""}`}>
+                <DayHead day={d} />
+              </th>
+            ))}
           </tr>
         </thead>
         <tbody>

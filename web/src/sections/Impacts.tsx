@@ -1,4 +1,5 @@
 import * as React from "react"
+import { DayHead } from "@/components/DayHead"
 
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -131,7 +132,7 @@ export function AgreementGrid({ data }: { data: Briefing }) {
           <TableHeader>
             <TableRow className="hover:bg-transparent border-0">
               <TableHead className="sticky left-0 z-10 bg-card" />
-              {dates.map((d) => <TableHead key={d} className="h-7 px-0 text-center text-xs font-normal">{dayShort(d)}</TableHead>)}
+              {dates.map((d) => <TableHead key={d} className="h-auto px-0 py-1 text-center text-xs font-medium leading-tight"><DayHead day={d} /></TableHead>)}
             </TableRow>
           </TableHeader>
           <TableBody>

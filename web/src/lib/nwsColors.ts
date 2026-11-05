@@ -1,3 +1,5 @@
+import { contrastTextColor } from "@/lib/contrast"
+
 /** Official NWS hazard colours by event name (as published at weather.gov/help-map and
  *  xweather.com/docs/maps/reference/alert-types), with readable text on each. */
 const COLORS: Record<string, string> = {
@@ -49,14 +51,8 @@ const COLORS: Record<string, string> = {
   "Winter Storm Warning": "#ff69b4", "Winter Storm Watch": "#4682b4", "Winter Weather Advisory": "#7b68ee",
 }
 const UNKNOWN = "#e8e8e8"
-const lum = (hex: string) => {
-  const c = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255).map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4))
-  return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
-}
-/** The event's colour and whichever of near-black or white reads better on it. */
+/** The event's colour and the text colour (APCA) that reads on it. */
 export function alertColor(event: string) {
   const bg = COLORS[event] ?? COLORS[event.replace(/^(Small Craft Advisory).*/, "$1")] ?? UNKNOWN
-  const L = lum(bg)
-  // contrast against #111 vs #fff
-  return { bg, fg: (L + 0.05) / (0.0056 + 0.05) >= 1.05 / (L + 0.05) ? "#111111" : "#ffffff" }
+  return { bg, fg: contrastTextColor(bg) }
 }

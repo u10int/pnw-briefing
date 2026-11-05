@@ -6,6 +6,7 @@ import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle }
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { alertColor } from "@/lib/nwsColors"
 import type { Alert, Alerts, Briefing } from "@/types"
+import { DayHead } from "@/components/DayHead"
 
 const zoneId = (u: string) => u.replace(/\/$/, "").split("/").pop()!
 /** A location's hazards page: from the briefing (`pages`), or, for briefings built before it was
@@ -86,10 +87,10 @@ function AlertTimeline({ items, snap }: { items: Alert[]; snap: Alerts }) {
       {/* day axis */}
       <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,15rem)_1fr] sm:gap-4">
         <div className="max-sm:hidden" />
-        <div ref={ref} className="relative h-6 text-xs text-muted-foreground">
+        <div ref={ref} className="relative h-9 text-xs font-medium leading-tight">
           {days.slice(0, -1).map((t, k) => (
             <span key={t} className={`absolute truncate tabular-nums ${px / nd >= 30 ? "px-1.5" : "text-center"}`} style={{ left: `${pct(t)}%`, width: `${pct(days[k + 1]) - pct(t)}%` }}>
-              {px / nd >= 64 ? dayMD(t) : px / nd >= 30 ? dayMD(t).split(" ")[0] : dayMD(t)[0]}
+              {px / nd >= 34 ? <DayHead day={t + 12 * HOUR} /> : dayMD(t)[0]}
             </span>
           ))}
           {nowAt != null && <span className="absolute -top-0.5 -translate-x-1/2 rounded bg-foreground/80 px-1 text-[10px] font-medium text-background max-sm:hidden" style={{ left: `${nowAt}%`, top: "100%" }}>Now</span>}
@@ -108,7 +109,8 @@ function AlertTimeline({ items, snap }: { items: Alert[]; snap: Alerts }) {
           <div key={a.id} className="grid grid-cols-1 items-center gap-x-4 gap-y-1.5 border-t py-3 sm:grid-cols-[minmax(0,15rem)_1fr]">
             <div className="min-w-0">
               <div className="flex items-center gap-2">
-                <AlertBadge event={a.event} />
+                <span className="size-2.5 shrink-0 rounded-full ring-1 ring-black/15" style={{ background: c.bg }} aria-hidden />
+                <span className="text-sm font-medium">{a.event}</span>
                 {a.url && (
                   <a href={a.url} target="_blank" rel="noopener" className="text-muted-foreground hover:text-foreground" aria-label={`Open ${a.event} on weather.gov`}>
                     <ExternalLink className="size-3.5" />
