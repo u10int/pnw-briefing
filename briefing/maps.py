@@ -84,6 +84,16 @@ def _features():
     return _FEATURES
 
 
+COLS = 4   # every figure is this many panels wide, so a panel is the same size on the page whatever the count
+
+
+def _full_width(fig):
+    """An invisible frame over the whole figure, so the tight crop keeps the empty columns of a
+    short row and every image comes out COLS panels wide."""
+    from matplotlib.patches import Rectangle
+    fig.patches.append(Rectangle((0, 0), 1, 1, transform=fig.transFigure, fill=False, edgecolor="none", linewidth=0))
+
+
 def _axes(fig, gs, n, dom):
     import cartopy.crs as ccrs
     proj = ccrs.LambertConformal(central_longitude=-122.5, standard_parallels=(45, 48))
@@ -132,7 +142,7 @@ def _run(m):
 def _figure(panels, cfg, out_path, levels, colors, label, spread=None, clamp=False):
     """panels: list of (lat, lon, field, title, sub). `spread` appended in its own ramp."""
     n = len(panels) + (1 if spread is not None else 0)
-    ncols = n if n <= 6 else 5        # wide rows: small multiples read best side by side
+    ncols = COLS                      # rows of four; extra panels wrap to the next row
     rows = (n + ncols - 1) // ncols
     PW, PH, LEG = 2.45, 3.5, 0.75   # panel width/height and legend band, inches
     fig = plt.figure(figsize=(PW * ncols, PH * rows + LEG), facecolor=PAPER, dpi=160)
@@ -150,7 +160,8 @@ def _figure(panels, cfg, out_path, levels, colors, label, spread=None, clamp=Fal
         _legend(fig, [0.01, leg_y, 0.5, 0.11 / (PH * rows + LEG)], levels, colors, label)
         _legend(fig, [0.6, leg_y, 0.39, 0.11 / (PH * rows + LEG)], SPREAD_LEVELS, SPREAD_COLORS, "Model spread, max − min (in)")
     else:
-        _legend(fig, [0.01, leg_y, 0.6 if n > 2 else 0.98, 0.11 / (PH * rows + LEG)], levels, colors, label, clamp)
+        _legend(fig, [0.01, leg_y, 0.6, 0.11 / (PH * rows + LEG)], levels, colors, label, clamp)
+    _full_width(fig)
     fig.savefig(out_path, facecolor=PAPER, bbox_inches="tight", pad_inches=0.08)
     plt.close(fig)
     return out_path
@@ -264,14 +275,15 @@ def observed(grids, cfg, out_path):
         panels.append((grids["pct30"], "Past 30 days", "Percent of 1991–2020 normal", PCT_LEVELS, PCT_COLORS, True))
     n = len(panels)
     PW, PH, LEG = 2.45, 3.5, 0.8
-    fig = plt.figure(figsize=(PW * n, PH + LEG), facecolor=PAPER, dpi=160)
-    gs = fig.add_gridspec(1, n, left=0.01, right=0.99, top=1 - 0.32 / (PH + LEG), bottom=LEG / (PH + LEG), wspace=0.07)
+    fig = plt.figure(figsize=(PW * COLS, PH + LEG), facecolor=PAPER, dpi=160)
+    gs = fig.add_gridspec(1, COLS, left=0.01, right=0.99, top=1 - 0.32 / (PH + LEG), bottom=LEG / (PH + LEG), wspace=0.07)
     axes, tr = _axes(fig, gs, n, cfg["domain"])
     for k, (ax, (f, title, label, levels, colors, clamp)) in enumerate(zip(axes, panels)):
         cm, nm = _cmap(levels, colors, clamp)
         _draw(ax, tr, grids["lat"], grids["lon"], f, cm, nm, title, "MRMS multi-sensor QPE", cfg)
-        w = 0.98 / n
+        w = 0.98 / COLS
         _legend(fig, [0.01 + k * w + 0.01, 0.2 / (PH + LEG), w - 0.03, 0.11 / (PH + LEG)], levels, colors, label, clamp)
+    _full_width(fig)
     fig.savefig(out_path, facecolor=PAPER, bbox_inches="tight", pad_inches=0.08)
     plt.close(fig)
     return out_path
