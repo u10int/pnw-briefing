@@ -54,3 +54,15 @@ def test_falls_back_to_daily_targets(monkeypatch):
     m, calls = _run(monkeypatch, fail_hourly=True)
     assert "apcp" not in m["fields"] and "asnow" not in m["fields"]
     np.testing.assert_allclose(m["data"]["A"]["precipitation_sum"][0], 24 / 25.4, rtol=1e-6)
+
+
+def test_daily_wind_from_map_fields(monkeypatch):
+    """Without an interval wind maximum, the day's strongest 10 m wind comes from the map's u/v samples."""
+    def ffetch(*a, **k):
+        hrs = [9, 12, 15, 18]
+        u = np.stack([np.full(LAT.shape, 10.0 * (i + 1)) for i in range(4)])     # mph
+        return {"u10": {"hours": hrs, "data": u}, "v10": {"hours": hrs, "data": np.zeros_like(u)}}
+    m, _ = _run(monkeypatch)
+    monkeypatch.setattr(fields, "fetch", ffetch)
+    m = grib.fetch_model(SPEC, CFG, datetime(2026, 11, 5, 12), [{"name": "A", "lat": 47.0, "lon": -123.0}])
+    assert m["data"]["A"]["wind_speed_10m_max"][0] == 40.0

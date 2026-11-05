@@ -18,6 +18,7 @@ import { Headline, WindowCard } from "@/sections/Overview"
 import { ByLocation, GribAreaMeans, RegionTotals } from "@/sections/Totals"
 import { RainByDayCard } from "@/sections/RainByDay"
 import { TempDepartureCard } from "@/sections/TempDeparture"
+import { WindByDayCard } from "@/sections/WindByDay"
 import type { Briefing } from "@/types"
 
 // MapLibre is large; load it only when the Map tab is first opened.
@@ -188,6 +189,7 @@ export default function App() {
             <Section title="Wind" first
               description="Pressure gradients behind the region's classic wind events (south wind, Gorge and Fraser outflow, onshore pushes), and the strongest winds and gusts in each model."
               action={<MapLink req={{ mode: "hourly", layer: "pgrad", isobars: true, pairs: true }} label="Pressure gradients on the map" />}>
+              <WindByDayCard data={data} />
               <GradientsCard data={data} />
               <MapCard title="Wind and gust maps" description="The strongest sustained wind and gust in each model."
                 tabs={[...pickExtremes(data, "short", "the next 48 hours", ["gust", "wind"], " (48 h)"),

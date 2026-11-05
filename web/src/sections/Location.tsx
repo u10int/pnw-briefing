@@ -226,7 +226,7 @@ export function DayByDay({ data, point }: { data: Briefing; point: string }) {
   const hiIdx = has("temperature_2m_max"), loIdx = has("temperature_2m_min"), guIdx = has("wind_gusts_10m_max")
 
   const rows = data.dates.map((d, t) => {
-    const col = (k: keyof (typeof data.models)[0]["data"][string]) => data.models.map((m) => m.data[point][k][t])
+    const col = (k: keyof (typeof data.models)[0]["data"][string]) => data.models.map((m) => m.data[point]?.[k]?.[t] ?? null)
     const pr = col("precipitation_sum"), tx = col("temperature_2m_max"), tn = col("temperature_2m_min"), gu = col("wind_gusts_10m_max")
     const pm = median(pr) ?? 0
     const row: Record<string, unknown> = {
