@@ -204,6 +204,7 @@ export default function App() {
               description="Where the snow level sits against the passes, how much snow the models put down, the snowpack so far, and avalanche danger."
               action={<MapLink req={{ mode: "hourly", layer: "frz" }} label="Freezing level on the map" />}>
               <SnowLevelCard data={data} />
+              <RainByDayCard data={data} only="snow" />
               <MapCard title="Snowfall maps" description="From each model's own snow field; models without one are left out."
                 tabs={[
                   { id: "s48", label: "Next 48 hours", src: data.maps.snow_short, alt: "48-hour snowfall by model", note: "Model snowfall over the next two 12Z–12Z days." },
