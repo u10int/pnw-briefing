@@ -78,7 +78,8 @@ export function HazardChanges({ data }: { data: Briefing }) {
     const lanes = g.items.map(({ k, e }, i) => {
       const when = dateRange(e.start, e.end)
       if (k === "dropped") {
-        const bar: TimelineBar = { key: `d${i}`, ...span(e.start, e.end), color: "", ghost: true, label: "Dropped", short: "×",
+        const bar: TimelineBar = { key: `d${i}`, ...span(e.start, e.end), color: "", ghost: true,
+          label: e.prevLevel ? LEVEL[e.prevLevel].word : "", short: e.prevLevel ? LEVEL[e.prevLevel].word[0] : "",
           aria: `${e.label}, ${when}: dropped since yesterday`,
           tip: <><p className="font-semibold">{e.label} · {when}</p>
                  <p>Dropped: yesterday's briefing had it as {e.prevLevel ? LEVEL[e.prevLevel].word.toLowerCase() : "a flag"}; today no longer reaches the threshold.</p>
@@ -97,7 +98,9 @@ export function HazardChanges({ data }: { data: Briefing }) {
       if (mv && e.prevStart && e.prevEnd) {
         const was = span(e.prevStart, e.prevEnd)
         const apart = was.end <= now.start || now.end <= was.start
-        bars.push({ key: `p${i}`, ...was, color: "", ghost: true, label: apart ? "Was" : "", short: "",
+        // yesterday's confidence, muted; only when the bar doesn't cover the start of the old dates
+        const prevWord = LEVEL[e.prevLevel ?? e.level ?? "possible"].word
+        bars.push({ key: `p${i}`, ...was, color: "", ghost: true, label: apart ? prevWord : "", short: apart ? prevWord[0] : "",
           aria: `${e.label}: yesterday's dates ${dateRange(e.prevStart, e.prevEnd)}`,
           tip: <><p className="font-semibold">{e.label} · yesterday {dateRange(e.prevStart, e.prevEnd)}</p><p>Now {when}, {mv}.</p></> })
         // a gap between the old and new dates gets an arrow from one to the other
