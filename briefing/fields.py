@@ -42,6 +42,9 @@ VARS = {
     # running totals from the start of the briefing (today's 12Z), from the model's own accumulations
     "apcp":  {"label": "Accumulated precipitation", "units": "in",  "scale": 0.01},
     "asnow": {"label": "Accumulated snowfall",      "units": "in",  "scale": 0.01},
+    # fire weather: 2 m relative humidity, and HRRR/RRFS near-surface smoke (MASSDEN at 8 m)
+    "rh":    {"label": "Relative humidity",         "units": "%",   "scale": 0.1},
+    "smoke": {"label": "Near-surface smoke",        "units": "µg/m³", "scale": 0.1},
     "ptype": {"label": "Precipitation type",        "units": "",    "scale": 1.0,
               "categories": {0: "none", 1: "rain", 2: "snow", 3: "freezing rain", 4: "sleet", 5: "mix"}},
 }
@@ -57,9 +60,11 @@ PATTERNS = {
         "t2m": [":TMP:2 m above ground:"], "gust": [":GUST:surface:", ":GUST:10 m above ground:"],
         "crain": [":CRAIN:surface:"], "csnow": [":CSNOW:surface:"],
         "cfrzr": [":CFRZR:surface:"], "cicep": [":CICEP:surface:"],
+        "rh": [":RH:2 m above ground:"], "smoke": [":MASSDEN:8 m above ground:"],
     },
     "ecmwf": {"u10": [":10u:"], "v10": [":10v:"], "mslp": [":msl:"], "ptype": [":ptype:"],
-              "t2m": [":2t:"], "gust": [":10fg:", ":10fg3:", ":10fg6:"]},
+              "t2m": [":2t:"], "gust": [":10fg:", ":10fg3:", ":10fg6:"],
+              "d2m": [":2d:"]},      # 2 m dewpoint: humidity comes from it and the temperature
 }
 
 CONVERT = {
@@ -70,7 +75,16 @@ CONVERT = {
     "mslp": lambda p: p / 100.0,
     "frz": lambda m: m * 3.28084,
     "refc": lambda d: d,
+    "rh": lambda r: np.clip(r, 0, 100),
+    "smoke": lambda m: np.clip(m, 0, None) * 1e9,       # kg/m³ -> µg/m³
 }
+
+
+def rh_from_dewpoint(t_f, td_k):
+    """Relative humidity (%) from temperature (°F) and dewpoint (K), Magnus over water."""
+    t, td = (np.asarray(t_f) - 32) * 5 / 9, np.asarray(td_k) - 273.15
+    e = lambda x: np.exp(17.625 * x / (243.04 + x))
+    return np.clip(100 * e(td) / e(t), 0, 100)
 
 # ECMWF precipitation type code table -> our categories
 ECMWF_PTYPE = {0: 0, 1: 1, 3: 3, 5: 2, 6: 2, 7: 5, 8: 4, 12: 3}
@@ -148,7 +162,11 @@ def fetch(spec, run, lead0, last_hour, stepped_hours, samples, dom, sites=None):
     hourly_hours_list = list(range(lead0 + 1, min(last_hour, lead0 + hourly_hours) + 1)) if hourly else []
 
     def raw_names(v):
-        return ["crain", "csnow", "cfrzr", "cicep"] if (v == "ptype" and fam == "ncep") else [v]
+        if v == "ptype" and fam == "ncep":
+            return ["crain", "csnow", "cfrzr", "cicep"]
+        if v == "rh" and fam == "ecmwf":
+            return ["d2m"]
+        return [v]
 
     plan: dict[int, list[str]] = {}
     for h in stepped_hours:
@@ -186,7 +204,18 @@ def fetch(spec, run, lead0, last_hour, stepped_hours, samples, dom, sites=None):
         hrs = [h for h in sorted(results) if name in results[h]]
         return hrs, (np.stack([results[h][name] for h in hrs]) if hrs else None)
 
-    for var in [v for v in dict.fromkeys(stepped + hourly) if v != "ptype"]:
+    if fam == "ecmwf" and "rh" in stepped + hourly:
+        # ECMWF open data has dewpoint, not humidity: pair it with the temperature at the same hour
+        hrs, arr = collect("d2m")
+        temps = {h: out["t2m"]["data"][i] for i, h in enumerate(out.get("t2m", {}).get("hours", []))}
+        keep = [k for k, h in enumerate(hrs) if h in temps]
+        if arr is not None and keep:
+            out["rh"] = {"hours": [hrs[k] for k in keep],
+                         "data": np.stack([rh_from_dewpoint(temps[hrs[k]], arr[k]) for k in keep]).astype("float32")}
+        else:
+            log.info("%s: no humidity (dewpoint or temperature missing)", spec["label"])
+
+    for var in [v for v in dict.fromkeys(stepped + hourly) if v != "ptype" and not (v == "rh" and fam == "ecmwf")]:
         hrs, arr = collect(var)
         if arr is not None and var in out:
             # hourly reads merged into the samples (t2m, gust)

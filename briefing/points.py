@@ -20,7 +20,8 @@ log = logging.getLogger(__name__)
 
 FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 ENSEMBLE_URL = "https://ensemble-api.open-meteo.com/v1/ensemble"
-HOURLY = ["precipitation", "rain", "snowfall", "temperature_2m", "wind_speed_10m", "wind_gusts_10m"]
+HOURLY = ["precipitation", "rain", "snowfall", "temperature_2m", "wind_speed_10m", "wind_gusts_10m",
+          "relative_humidity_2m", "vapour_pressure_deficit"]
 UNITS = {"precipitation_unit": "inch", "temperature_unit": "fahrenheit", "wind_speed_unit": "mph",
          "timezone": "GMT"}
 HEADERS = {"User-Agent": "pnw-briefing/1.0"}
@@ -73,6 +74,8 @@ def fetch_deterministic(cfg, start):
             for p, loc in zip(pts, js):
                 h = loc["hourly"]
                 df = pd.DataFrame({k: h.get(k) for k in HOURLY}, index=pd.to_datetime(h["time"])).astype(float)
+                # surface Hot-Dry-Windy Index: VPD (kPa -> hPa) times wind (mph -> m/s)
+                df["hdw"] = df["vapour_pressure_deficit"] * 10 * df["wind_speed_10m"] / 2.23694
                 g = _days(df, start, n)
                 agg = pd.DataFrame({
                     "precipitation_sum": g["precipitation"].sum(min_count=1),
@@ -82,6 +85,8 @@ def fetch_deterministic(cfg, start):
                     "temperature_2m_min": g["temperature_2m"].min(),
                     "wind_gusts_10m_max": g["wind_gusts_10m"].max(),
                     "wind_speed_10m_max": g["wind_speed_10m"].max(),
+                    "relative_humidity_2m_min": g["relative_humidity_2m"].min(),
+                    "hdw_max": g["hdw"].max(),
                 }).reindex(range(n))
                 # a day is only valid if the model covers all of it
                 counts = g["precipitation"].count().reindex(range(n)).fillna(0)

@@ -18,6 +18,7 @@ import { Headline, WindowCard } from "@/sections/Overview"
 import { ByLocation, GribAreaMeans, RegionTotals } from "@/sections/Totals"
 import { RainByDayCard } from "@/sections/RainByDay"
 import { TempDepartureCard } from "@/sections/TempDeparture"
+import { WildfireTab } from "@/sections/Wildfire"
 import { WindByDayCard } from "@/sections/WindByDay"
 import type { Briefing } from "@/types"
 
@@ -30,6 +31,7 @@ const TABS = [
   { id: "wind", label: "Wind" },
   { id: "snow", label: "Snow & mountains" },
   { id: "temp", label: "Temperature" },
+  { id: "fire", label: "Wildfire" },
   { id: "map", label: "Map" },
   { id: "locations", label: "Locations" },
 ] as const
@@ -223,6 +225,14 @@ export default function App() {
             </Section>
           </TabsContent>
 
+          <TabsContent value="fire">
+            <Section title="Wildfire" first
+              description="Red Flag Warnings, the fire outlooks from Predictive Services and SPC, humidity and Hot-Dry-Windy conditions in each model, current fires, smoke and drought."
+              action={<MapLink req={{ mode: "hourly", layer: "smoke" }} label="Smoke on the map" />}>
+              <WildfireTab data={data} />
+            </Section>
+          </TabsContent>
+
           <TabsContent value="map" forceMount className={tab === "map" ? "" : "hidden"}>
             {mapSeen && (
               <Section title="Map" first
@@ -255,7 +265,8 @@ export default function App() {
               {meta.hasSupplement && " Models marked * come from Open-Meteo."}</p>
             <p className="mt-2">Observed precipitation from NOAA MRMS; snowpack from USDA NRCS SNOTEL; avalanche danger from the
               Northwest Avalanche Center (avalanche.org); landslide threshold from USGS; forecast discussions,
-              alerts and outlooks from NWS, WPC and CPC.</p>
+              alerts and outlooks from NWS, WPC and CPC; fire outlooks from SPC and NWCC Predictive Services; fire incidents
+              and perimeters from NIFC; drought from the US Drought Monitor.</p>
           </div>
           <div>
             <h3 className="mb-1.5 font-medium text-foreground">Definitions</h3>

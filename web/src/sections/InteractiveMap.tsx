@@ -3,7 +3,6 @@ import * as maplibregl from "maplibre-gl"
 import type { GeoJSONSource, MapMouseEvent, StyleSpecification } from "maplibre-gl"
 import "maplibre-gl/dist/maplibre-gl.css"
 // MapLibre runs a web worker for vector/GeoJSON work; have Vite bundle it and tell MapLibre where it is.
-import workerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url"
 import { Pause, Play, SlidersHorizontal } from "lucide-react"
 import { Popover } from "radix-ui"
 
@@ -14,6 +13,7 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrig
 import { Slider } from "@/components/ui/slider"
 import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { FALLBACK, STYLE_URL, withKey } from "@/lib/basemap"
 import { loadCog } from "@/lib/cog"
 import { bicubicAt, contourLines, fieldUrl, gridPos, loadField, nearestAt, nearestTime, type Elevation, elevationFor, pressureCenters, pressureGradient, windArrows, windFrom } from "@/lib/fields"
 import { GRAD_COLORS, gradLevel, pairName, seriesAt } from "@/lib/gradients"
@@ -21,18 +21,13 @@ import type { MapRequest } from "@/lib/maplink"
 import { GridLayer, type GridDraw } from "@/lib/gl/grid-layer"
 import { ParticleLayer, type WindDraw } from "@/lib/gl/particle-layer"
 import { type Grid, sameGrid } from "@/lib/gl/util"
-import { FRZ, GUST, IVT, legendBins, PCT, PGRAD, PRECIP, PROB, PTYPE_COLORS, PTYPE_NAMES, type Ramp, REFC, SNOW, SPREAD, TDEP, TEMP, WIND } from "@/lib/ramps"
+import { FRZ, GUST, IVT, legendBins, PCT, PGRAD, PRECIP, PROB, PTYPE_COLORS, PTYPE_NAMES, type Ramp, REFC, RH, SMOKE, SNOW, SPREAD, TDEP, TEMP, WIND } from "@/lib/ramps"
 import type { Briefing, Cog, ExtremeVar, FieldEntry, FieldsManifest, FieldVar, Gradient } from "@/types"
 
 // ------------------------------------------------------------------ map plumbing
 
 const EMPTY: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: [] }
 
-// CARTO's Positron vector basemap. The weather layers go under its first label layer, so place
-// names stay readable on top. Vector styles load without a key today; set the CARTO_KEY repository
-// variable to send one (CARTO's raster tiles already require it).
-const CARTO_KEY = (import.meta.env.VITE_CARTO_KEY as string | undefined) || ""
-const STYLE_URL = "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json"
 /** Public AWS Terrain Tiles (Terrarium-encoded elevation), no key needed, read through a protocol
  *  that flattens everything below sea level: the tiles include bathymetry, and sea-floor relief
  *  under the ocean grids would read as weather structure. */
@@ -58,23 +53,7 @@ function addDemProtocol() {
     return { data: await (await c.convertToBlob({ type: "image/png" })).arrayBuffer() }
   })
 }
-const withKey = (url: string) =>
-  CARTO_KEY && url.includes("cartocdn.com") && !/[?&]key=/.test(url)
-    ? { url: `${url}${url.includes("?") ? "&" : "?"}key=${encodeURIComponent(CARTO_KEY)}` }
-    : undefined
-// If the basemap can't load (offline, blocked), the data still shows on a plain background.
-const FALLBACK: StyleSpecification = {
-  version: 8, sources: {},
-  layers: [{ id: "bg", type: "background", paint: { "background-color": "#eef0f3" } }],
-}
 
-// A standalone (single-file) copy carries the worker inline; turn it into a blob URL. The bundled
-// worker is a classic script, and MapLibre runs URLs ending in ".cjs" as classic workers, which is
-// what lets it start from a file:// page. The fragment changes nothing about what is fetched.
-const inlineWorker = (window as unknown as { __MAPLIBRE_WORKER__?: string }).__MAPLIBRE_WORKER__
-maplibregl.setWorkerUrl(inlineWorker
-  ? URL.createObjectURL(new Blob([Uint8Array.from(atob(inlineWorker), (c) => c.charCodeAt(0))], { type: "text/javascript" })) + "#worker.cjs"
-  : workerUrl)
 
 const cogUrl = (c: Cog) => (c.path.startsWith("data:") ? c.path : `data/${c.path}`)
 
@@ -565,8 +544,8 @@ function totalsView(c: Cog | undefined, ramp: Ramp, windowLabel: string, digits 
 
 // ------------------------------------------------------------------ hourly mode
 
-type HLayer = "radar" | "apcp" | "asnow" | "t2m" | "gust" | "wind" | "frz" | "ivt" | "pgrad"
-type HGroup = "Precipitation" | "Temperature" | "Wind and pressure"
+type HLayer = "radar" | "apcp" | "asnow" | "t2m" | "gust" | "wind" | "frz" | "ivt" | "pgrad" | "rh" | "smoke"
+type HGroup = "Precipitation" | "Temperature" | "Wind and pressure" | "Fire weather"
 const HLAYERS: { id: HLayer; label: string; group: HGroup; primary: (e: Record<string, FieldEntry>) => FieldEntry | undefined }[] = [
   { id: "radar", label: "Radar and precip type", group: "Precipitation", primary: (e) => e.refc ?? e.ptype },
   { id: "apcp", label: "Accumulated precipitation", group: "Precipitation", primary: (e) => e.apcp },
@@ -577,8 +556,10 @@ const HLAYERS: { id: HLayer; label: string; group: HGroup; primary: (e: Record<s
   { id: "wind", label: "Wind", group: "Wind and pressure", primary: (e) => (e.u10 && e.v10 ? e.u10 : undefined) },
   { id: "gust", label: "Gusts", group: "Wind and pressure", primary: (e) => e.gust },
   { id: "pgrad", label: "Pressure gradient", group: "Wind and pressure", primary: (e) => e.mslp },
+  { id: "rh", label: "Relative humidity", group: "Fire weather", primary: (e) => e.rh },
+  { id: "smoke", label: "Near-surface smoke", group: "Fire weather", primary: (e) => e.smoke },
 ]
-const H_GROUPS: HGroup[] = ["Precipitation", "Temperature", "Wind and pressure"]
+const H_GROUPS: HGroup[] = ["Precipitation", "Temperature", "Wind and pressure", "Fire weather"]
 const APCP: Ramp = { ...PRECIP, label: "Accumulated precipitation, liquid equivalent" }
 const ASNOW: Ramp = { ...SNOW, label: "Accumulated snowfall" }
 /** The vector pair a layer's particles follow: water vapor transport on the IVT layer, else the 10 m wind. */
@@ -674,7 +655,7 @@ function hourlyView(model: string, entries: Record<string, FieldEntry>, layer: H
   const name = def.label.toLowerCase()
   const nearest = (time: number | null) => (time == null ? null : bracket(prim.times, time, false, 3.1))
   const ramp = layer === "t2m" ? TEMP : layer === "gust" ? GUST : layer === "wind" ? WIND : layer === "ivt" ? IVT : layer === "pgrad" ? PGRAD
-    : layer === "apcp" ? APCP : layer === "asnow" ? ASNOW : FRZ
+    : layer === "apcp" ? APCP : layer === "asnow" ? ASNOW : layer === "rh" ? RH : layer === "smoke" ? SMOKE : FRZ
 
   return {
     key: `hr|${model}|${layer}|${iso ? 1 : 0}|${pairs ? 1 : 0}`,
@@ -749,6 +730,8 @@ function hourlyView(model: string, entries: Record<string, FieldEntry>, layer: H
               if (layer === "gust") return `Gusts ${Math.round(v)} mph`
               if (layer === "apcp") return v < 0.005 ? "No precipitation yet" : `${v.toFixed(2)} in so far`
               if (layer === "asnow") return v < 0.05 ? "No snow yet" : `${v.toFixed(1)} in of snow so far`
+              if (layer === "rh") return `Humidity ${Math.round(v)}%`
+              if (layer === "smoke") return v < 1 ? "No smoke" : `Smoke ${Math.round(v)} µg/m³`
               return `Freezing level ${(Math.round(v / 100) * 100).toLocaleString("en-US")} ft`
             }
           }
@@ -1175,6 +1158,8 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
             {smooth && layer === "radar" && entriesA.refc && entriesA.ptype && <p className="text-xs text-muted-foreground">Reflectivity is smoothed; precipitation type keeps each model cell's category.</p>}
             {layer === "apcp" && <RampLegend ramp={APCP} note={`Running total since ${accStart}, the start of the briefing.`} />}
             {layer === "asnow" && <RampLegend ramp={ASNOW} note={`Running total since ${accStart}. NCEP models report their own snowfall; ECMWF snowfall is water equivalent at 10:1.`} />}
+            {layer === "rh" && <RampLegend ramp={RH} note="2 m relative humidity; ECMWF from its dewpoint. Under about 25% with wind is when fires spread fastest." />}
+            {layer === "smoke" && <RampLegend ramp={SMOKE} note="HRRR and RRFS near-surface smoke (8 m). Above about 35 µg/m³ is unhealthy for sensitive groups, 55 and up unhealthy." />}
             {layer === "t2m" && <RampLegend ramp={TEMP} note="The dashed blue line marks 32°F." />}
             {layer === "gust" && <RampLegend ramp={GUST} />}
             {layer === "wind" && <RampLegend ramp={WIND} note={showParticles ? "Particles trace the 10 m wind; faster particles mean stronger wind." : "Arrows point the way the wind is blowing; longer arrows are stronger winds."} />}

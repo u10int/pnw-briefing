@@ -102,25 +102,26 @@ points:
 # `fields` adds time-stepped grids to the interactive map. Temperature and gusts come from the
 # samples above for free (listing them under `hourly` adds the hours in between). `stepped` fields
 # are taken every `sample_hours`; `hourly` fields every hour for the first `hourly_hours`. Names: wind (10 m u and v), mslp, frz (freezing level),
-# refc (simulated composite reflectivity), ptype (precipitation type). A field a model doesn't
-# publish is skipped and logged.
+# refc (simulated composite reflectivity), ptype (precipitation type), rh (2 m relative humidity;
+# ECMWF from dewpoint), smoke (near-surface smoke, HRRR/RRFS). A field a model doesn't publish is
+# skipped and logged.
 # ----------------------------------------------------------------------------
 grib_models:
   # regional, convection-allowing
   - {id: hrrr, label: HRRR, tier: regional, family: ncep, herbie: {model: hrrr, product: sfc},
      cycles: [0, 6, 12, 18], max_hours: 48, range_days: 2, sample_hours: 3, chain_step: 1,
      extremes: {step: 1, wind: max},                          # no 2 m max/min: hourly temperature
-     fields: {hourly: [refc, ptype, t2m, gust, wind, mslp, frz], hourly_hours: 48, stepped: [wind, mslp, frz]}}
+     fields: {hourly: [refc, ptype, t2m, gust, wind, mslp, frz, rh, smoke], hourly_hours: 48, stepped: [wind, mslp, frz, rh]}}
   - {id: rrfs, label: RRFS, tier: regional, family: ncep,
      herbie: {model: rrfs, product: 2dfld, domain: conus},   # operational RRFS: deterministic = no member
      cycles: [0, 6, 12, 18], max_hours: 84, range_days: 3, sample_hours: 3, chain_step: 1,
      extremes: {step: 1, temp: maxmin, wind: max},
-     fields: {hourly: [refc, ptype, t2m, gust, wind, mslp, frz], hourly_hours: 48, stepped: [wind, mslp, frz]}}
+     fields: {hourly: [refc, ptype, t2m, gust, wind, mslp, frz, rh, smoke], hourly_hours: 48, stepped: [wind, mslp, frz, rh]}}
   - {id: namnest, label: NAM 3 km, tier: regional, family: ncep,
      herbie: {model: nam, product: conusnest.hiresf},
      cycles: [0, 6, 12, 18], max_hours: 60, range_days: 2, sample_hours: 3, chain_step: 1,
      extremes: {step: 1, temp: maxmin, wind: maxuv},          # max wind as components
-     fields: {hourly: [refc, ptype, t2m, gust, wind, mslp, frz], hourly_hours: 48, stepped: [wind, mslp, frz]}}
+     fields: {hourly: [refc, ptype, t2m, gust, wind, mslp, frz, rh], hourly_hours: 48, stepped: [wind, mslp, frz, rh]}}
   # blend
   - {id: nbm, label: NBM, tier: blend, family: ncep, herbie: {model: nbm, product: co},
      cycles: [0, 6, 12, 18], max_hours: 264, range_days: 11, sample_hours: 6, chain_step: 6,
@@ -130,15 +131,15 @@ grib_models:
      cycles: [0, 6, 12, 18], max_hours: 384, range_days: 14, sample_hours: 6,
      extremes: {step: 3, temp: maxmin},                       # 6-h (3-h after day 5) max/min
      ivt: true,                                               # water vapour transport (AR scale)
-     fields: {stepped: [wind, mslp, frz, ptype]}}
+     fields: {stepped: [wind, mslp, frz, ptype, rh]}}
   - {id: ifs, label: ECMWF IFS, tier: global, family: ecmwf, herbie: {model: ifs, product: oper},
      cycles: [0, 12], max_hours: 240, range_days: 14, sample_hours: 6,
      extremes: {steps: [[144, 3], [360, 6]], temp: maxmin},  # mx2t3/mn2t3, then mx2t6/mn2t6
-     fields: {stepped: [wind, mslp, ptype]}}
+     fields: {stepped: [wind, mslp, ptype, rh]}}
   - {id: aifs, label: ECMWF AIFS, tier: global, family: ecmwf, herbie: {model: aifs, product: oper},
      cycles: [0, 12], max_hours: 360, range_days: 14, sample_hours: 6, gust: false,
      ivt: true,
-     fields: {stepped: [wind, mslp, ptype]}}
+     fields: {stepped: [wind, mslp, ptype, rh]}}
 
 grib_ensembles:
   - {id: gefs, label: GEFS, family: ncep, herbie: {model: gefs, product: atmos.5},

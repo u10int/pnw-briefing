@@ -9,7 +9,7 @@ Every model is reduced to the same shape, on the briefing's 12Z-12Z days:
      "snow_in":   same or None, "snow_method",
      "data": {point: {precipitation_sum, rain_sum, snowfall_sum,
                       temperature_2m_max, temperature_2m_min, wind_gusts_10m_max,
-                      wind_speed_10m_max}}}
+                      wind_speed_10m_max, relative_humidity_2m_min, hdw_max, smoke_max}}}
 
 Ensembles reduce to {"id", "label", "dates", "members": {point: [member, day]}}.
 
@@ -535,6 +535,52 @@ def _by_hour(entry, factor=1.0):
 
 # ---------------------------------------------------------------- points
 
+def _point_series(entry, idx, grid):
+    """{hour: values at the points} from a map-field entry on the model grid."""
+    if not entry or np.shape(entry["data"])[-2:] != grid:
+        return {}
+    d = np.asarray(entry["data"])
+    return {h: np.array([d[k, i, j] for i, j in idx], dtype="float64") for k, h in enumerate(entry["hours"])}
+
+
+def _daily_points(series, lead0, ndays, npts, reduce):
+    """[point, day] reduction over each 12Z-12Z day (hours a < h <= b); NaN where none."""
+    out = np.full((npts, ndays), np.nan)
+    for d in range(ndays):
+        a, b = lead0 + 24 * d, lead0 + 24 * (d + 1)
+        vals = [v for h, v in series.items() if a < h <= b]
+        if vals:
+            with np.errstate(all="ignore"):
+                out[:, d] = reduce(np.stack(vals), axis=0)
+    return out
+
+
+def hdw_surface(t_f, rh, wind_mph):
+    """Hot-Dry-Windy Index from 2 m temperature and humidity and 10 m wind: vapour pressure
+    deficit (hPa) times wind speed (m/s). The published index takes the largest product in the
+    lowest 500 m; at the surface it runs lower, so read it against its own history rather than
+    the published thresholds."""
+    t = (np.asarray(t_f) - 32) * 5 / 9
+    es = 6.112 * np.exp(17.67 * t / (t + 243.5))
+    return es * (1 - np.asarray(rh) / 100) * np.asarray(wind_mph) / M_S_TO_MPH
+
+
+def fire_points(model_fields, lat, lon, idx, lead0, ndays):
+    """Daily minimum humidity, maximum surface Hot-Dry-Windy Index and maximum near-surface smoke
+    at each point, from the map fields (whatever hours the model has). Missing inputs give NaN."""
+    grid = lat.shape if lat.ndim == 2 else (lat.size, lon.size)
+    npts = len(idx)
+    rh = _point_series(model_fields.get("rh"), idx, grid)
+    t = _point_series(model_fields.get("t2m"), idx, grid)
+    u, v = _point_series(model_fields.get("u10"), idx, grid), _point_series(model_fields.get("v10"), idx, grid)
+    smoke = _point_series(model_fields.get("smoke"), idx, grid)
+    hdw = {h: hdw_surface(t[h], rh[h], np.hypot(u[h], v[h])) for h in rh if h in t and h in u and h in v}
+    nan = np.full((npts, ndays), np.nan)
+    return {"relative_humidity_2m_min": _daily_points(rh, lead0, ndays, npts, np.nanmin) if rh else nan,
+            "hdw_max": _daily_points(hdw, lead0, ndays, npts, np.nanmax) if hdw else nan,
+            "smoke_max": _daily_points(smoke, lead0, ndays, npts, np.nanmax) if smoke else nan}
+
+
 def nearest_index(lat, lon, points):
     """Grid index (tuple) of the nearest cell for each point; works for 1-D or 2-D coords."""
     if lat.ndim == 1:
@@ -689,6 +735,7 @@ def fetch_model(spec, cfg, start, points):
             d = extremes.daily(w, lead0, ndays, "max")
             return np.array([d[:, i, j] for i, j in idx])
         wmax = at_points("wind", wind_from_fields)
+        fire = fire_points(model_fields, lat, lon, idx, lead0, ndays)
         rain = np.clip(daily_p - np.nan_to_num(daily_s) / 10, 0, None)
 
         n = cfg["days"]
@@ -701,7 +748,8 @@ def fetch_model(spec, cfg, start, points):
         data = {p["name"]: {"precipitation_sum": pad(daily_p[k]), "rain_sum": pad(rain[k]),
                             "snowfall_sum": pad(daily_s[k]), "temperature_2m_max": pad(tmax[k]),
                             "temperature_2m_min": pad(tmin[k]), "wind_gusts_10m_max": pad(gmax[k]),
-                            "wind_speed_10m_max": pad(wmax[k])}
+                            "wind_speed_10m_max": pad(wmax[k]),
+                            **{key: pad(v[k]) for key, v in fire.items()}}
                 for k, p in enumerate(points)}
         dates = [(start + timedelta(days=d)).replace(tzinfo=timezone.utc).astimezone(tz).date() for d in range(n)]
         return {"id": spec["id"], "label": spec["label"], "source": "grib", "tier": spec.get("tier", "global"),
