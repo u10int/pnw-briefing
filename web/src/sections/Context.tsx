@@ -380,13 +380,26 @@ export interface TimelineBar {
   key: string; start: number; end: number          // ms
   color: string; text?: string
   ghost?: boolean                                  // muted, dashed: a past or withdrawn position
-  faded?: boolean                                  // drawn at reduced strength (nothing changed)
+  faded?: boolean                                  // fill drawn at reduced strength
+  border?: string                                  // a dashed border in this color
+  hatch?: boolean                                  // diagonal stripes of the fill color instead of a solid fill
   link?: "right" | "left"                          // not a bar: a dashed arrow joining two bars, pointing this way
   label: string; short?: string                    // full label, and a shorter one for narrow bars
   aria: string; tip: React.ReactNode; onClick?: () => void
 }
 export interface TimelineRow { key: string; label: React.ReactNode; bars: TimelineBar[] }
 export interface TimelineGroup { key: string; label: string; title?: string; onClick?: () => void; selected?: boolean; rows: TimelineRow[] }
+
+/** Fill, text and border for a non-ghost bar. A faded fill mixes the color toward the card so the
+ *  border and label stay at full strength. */
+function barFill(e: TimelineBar): React.CSSProperties {
+  const fill = e.faded ? `color-mix(in srgb, ${e.color} 45%, var(--card))` : e.color
+  return {
+    background: e.hatch ? `repeating-linear-gradient(135deg, ${fill} 0 4px, var(--card) 4px 8px)` : fill,
+    color: e.text ?? "var(--foreground)",
+    ...(e.border ? { borderColor: e.border } : {}),
+  }
+}
 
 /** One bar. Hover or focus opens the tooltip; a tap or click opens it too, since touch screens
  *  have no hover. */
@@ -396,8 +409,8 @@ function TimelineBarView({ e, left, w, label }: { e: TimelineBar; left: number; 
     <Tooltip open={open} onOpenChange={setOpen}>
       <TooltipTrigger asChild>
         <button type="button" onClick={() => { setTimeout(() => setOpen(true), 0); e.onClick?.() }} aria-label={e.aria}
-                className={`absolute top-1 bottom-1 flex items-center overflow-hidden rounded-[4px] px-1.5 font-medium whitespace-nowrap outline-offset-1 focus-visible:outline-2 focus-visible:outline-ring ${e.ghost ? "border border-dashed border-muted-foreground/60 bg-card/80 text-muted-foreground hover:bg-card" : "shadow-[inset_0_0_0_1px_rgb(0_0_0/0.08)] hover:brightness-105"} ${e.onClick ? "" : "cursor-default"}`}
-                style={{ left: `${left}%`, width: `${w}%`, ...(e.ghost ? {} : { background: e.color, color: e.text ?? "var(--foreground)" }), ...(e.faded ? { opacity: 0.55 } : {}) }}>
+                className={`absolute top-1 bottom-1 flex items-center overflow-hidden rounded-[4px] px-1.5 font-medium whitespace-nowrap outline-offset-1 focus-visible:outline-2 focus-visible:outline-ring ${e.ghost ? "border border-dashed border-muted-foreground/60 bg-card/80 text-muted-foreground hover:bg-card" : e.border ? "border border-dashed hover:brightness-105" : "shadow-[inset_0_0_0_1px_rgb(0_0_0/0.08)] hover:brightness-105"} ${e.onClick ? "" : "cursor-default"}`}
+                style={{ left: `${left}%`, width: `${w}%`, ...(e.ghost ? {} : barFill(e)) }}>
           {label}
         </button>
       </TooltipTrigger>

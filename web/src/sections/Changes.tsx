@@ -11,7 +11,8 @@ const since = (c: NonNullable<Briefing["change"]>) => (c.prevIssued ? issuedLabe
 
 type Kind = "new" | "upgraded" | "downgraded" | "same" | "dropped"
 /** Hue is confidence; weight is what changed: a solid fill for new or upgraded, the pale fill for
- *  moved or downgraded, the pale fill faded for unchanged, gray and dashed for yesterday's dates. */
+ *  unchanged, a faded fill with a dashed border in the same hue for moved, stripes with that border
+ *  for downgraded, gray and dashed for yesterday's dates. */
 const LEVEL = {
   likely: { word: "Likely", bg: "var(--likely-bg)", fg: "var(--likely)", bold: "var(--likely-bar)", boldText: "#fff" },
   possible: { word: "Possible", bg: "var(--possible-bg)", fg: "var(--possible)", bold: "var(--possible-bar)", boldText: "#3b2400" },
@@ -38,12 +39,24 @@ function Where({ e }: { e: EventChange }) {
   )
 }
 
-/** A legend swatch in both confidence colors: likely on the left, possible on the right. */
-const Swatch = ({ a, b, faded }: { a: string; b: string; faded?: boolean }) => (
-  <span className="flex h-3 w-5 overflow-hidden rounded-[3px] shadow-[inset_0_0_0_1px_rgb(0_0_0/0.08)]" style={faded ? { opacity: 0.55 } : {}}>
-    <span className="flex-1" style={{ background: a }} /><span className="flex-1" style={{ background: b }} />
-  </span>
-)
+/** A legend swatch in both confidence colors (likely left, possible right), drawn like the bars. */
+function Swatch({ kind }: { kind: "bold" | "same" | "moved" | "down" }) {
+  const half = (l: (typeof LEVEL)["likely" | "possible"]) => {
+    const fill = kind === "bold" ? l.bold : kind === "moved" ? `color-mix(in srgb, ${l.bg} 45%, var(--card))`
+      : kind === "down" ? `color-mix(in srgb, ${l.bold} 30%, var(--card))` : l.bg
+    return {
+      background: kind === "down" ? `repeating-linear-gradient(135deg, ${fill} 0 3px, var(--card) 3px 6px)` : fill,
+      ...(kind === "moved" || kind === "down" ? { border: `1px dashed ${l.bold}` } : {}),
+    }
+  }
+  const edge = kind === "bold" || kind === "same" ? "shadow-[inset_0_0_0_1px_rgb(0_0_0/0.08)]" : ""
+  return (
+    <span className="flex h-3 gap-px">
+      <span className={`w-3 rounded-l-[3px] ${edge}`} style={half(LEVEL.likely)} />
+      <span className={`w-3 rounded-r-[3px] ${edge}`} style={half(LEVEL.possible)} />
+    </span>
+  )
+}
 
 const Key = ({ swatch, children }: { swatch: React.ReactNode; children: React.ReactNode }) => (
   <span className="flex items-center gap-1.5">{swatch}{children}</span>
@@ -107,7 +120,11 @@ export function HazardChanges({ data }: { data: Briefing }) {
         if (was.end < now.start) bars.push({ key: `l${i}`, start: was.end, end: now.start, color: "", link: "right", label: "", aria: "", tip: null })
         else if (now.end < was.start) bars.push({ key: `l${i}`, start: now.end, end: was.start, color: "", link: "left", label: "", aria: "", tip: null })
       }
-      bars.push({ key: `t${i}`, ...now, color: bold ? lv.bold : lv.bg, text: bold ? lv.boldText : lv.fg, faded: kind === "Unchanged",
+      const weaker = kind === "Moved" || kind === "Downgraded"
+      // downgraded stripes use a light mix of the strong color: the pale fill alone barely shows
+      const fill = bold ? lv.bold : kind === "Downgraded" ? `color-mix(in srgb, ${lv.bold} 30%, var(--card))` : lv.bg
+      bars.push({ key: `t${i}`, ...now, color: fill, text: bold ? lv.boldText : lv.fg,
+        faded: kind === "Moved", hatch: kind === "Downgraded", border: weaker ? lv.bold : undefined,
         label: lv.word, short: lv.word[0],
         aria: `${e.label}, ${when}: ${kind.toLowerCase()}, ${lv.word.toLowerCase()}`,
         tip: <><p className="font-semibold">{e.label} · {when}</p>
@@ -139,9 +156,10 @@ export function HazardChanges({ data }: { data: Briefing }) {
               </p>
               <Timeline t0={t0} t1={t1} groups={groups} groupW={150} rowW={84} />
               <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-muted-foreground">
-                <Key swatch={<Swatch a={LEVEL.likely.bold} b={LEVEL.possible.bold} />}>New or upgraded</Key>
-                <Key swatch={<Swatch a={LEVEL.likely.bg} b={LEVEL.possible.bg} />}>Moved or downgraded</Key>
-                <Key swatch={<Swatch a={LEVEL.likely.bg} b={LEVEL.possible.bg} faded />}>Unchanged</Key>
+                <Key swatch={<Swatch kind="bold" />}>New or upgraded</Key>
+                <Key swatch={<Swatch kind="same" />}>Unchanged</Key>
+                <Key swatch={<Swatch kind="moved" />}>Moved</Key>
+                <Key swatch={<Swatch kind="down" />}>Downgraded</Key>
                 <Key swatch={<span className="h-3 w-5 rounded-[3px] border border-dashed border-muted-foreground/60" />}>Yesterday's dates, or dropped</Key>
                 <span>Red: likely · Amber: possible</span>
               </div>
