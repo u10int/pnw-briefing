@@ -8,7 +8,8 @@ Every model is reduced to the same shape, on the briefing's 12Z-12Z days:
      "precip_mm": [day_boundary, y, x] cumulative from the first boundary,
      "snow_in":   same or None, "snow_method",
      "data": {point: {precipitation_sum, rain_sum, snowfall_sum,
-                      temperature_2m_max, temperature_2m_min, wind_gusts_10m_max}}}
+                      temperature_2m_max, temperature_2m_min, wind_gusts_10m_max,
+                      wind_speed_10m_max}}}
 
 Ensembles reduce to {"id", "label", "dates", "members": {point: [member, day]}}.
 
@@ -678,6 +679,16 @@ def fetch_model(spec, cfg, start, points):
         tmax = at_points("tmax", lambda: K_TO_F(_daily_extreme(t2m, lead0, ndays, idx, np.nanmax)) if t2m else nan())
         tmin = at_points("tmin", lambda: K_TO_F(_daily_extreme(t2m, lead0, ndays, idx, np.nanmin)) if t2m else nan())
         gmax = at_points("gust", lambda: _daily_extreme(gust, lead0, ndays, idx, np.nanmax) * M_S_TO_MPH if gust else nan())
+
+        def wind_from_fields():
+            # no interval wind maximum: the strongest of the map's 10 m wind samples (mph) that day
+            w = extremes._from_fields({"fields": model_fields}).get("wind")
+            grid = lat.shape if lat.ndim == 2 else (lat.size, lon.size)
+            if not w or w[0][2].shape != grid:
+                return nan()
+            d = extremes.daily(w, lead0, ndays, "max")
+            return np.array([d[:, i, j] for i, j in idx])
+        wmax = at_points("wind", wind_from_fields)
         rain = np.clip(daily_p - np.nan_to_num(daily_s) / 10, 0, None)
 
         n = cfg["days"]
@@ -689,7 +700,8 @@ def fetch_model(spec, cfg, start, points):
 
         data = {p["name"]: {"precipitation_sum": pad(daily_p[k]), "rain_sum": pad(rain[k]),
                             "snowfall_sum": pad(daily_s[k]), "temperature_2m_max": pad(tmax[k]),
-                            "temperature_2m_min": pad(tmin[k]), "wind_gusts_10m_max": pad(gmax[k])}
+                            "temperature_2m_min": pad(tmin[k]), "wind_gusts_10m_max": pad(gmax[k]),
+                            "wind_speed_10m_max": pad(wmax[k])}
                 for k, p in enumerate(points)}
         dates = [(start + timedelta(days=d)).replace(tzinfo=timezone.utc).astimezone(tz).date() for d in range(n)]
         return {"id": spec["id"], "label": spec["label"], "source": "grib", "tier": spec.get("tier", "global"),

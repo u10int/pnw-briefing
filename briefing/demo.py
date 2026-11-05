@@ -90,11 +90,12 @@ def grib(cfg):
             tmax = base - np.where(d >= 8, 5 + (d - 8) * 0.8, 0) + RNG.normal(0, 1.5, nd)
             tmin = tmax - RNG.uniform(7, 11, nd) - (2.5 if p["kind"] == "lowland" else 0) * (d >= 11)
             gust = 18 + 22 * np.exp(-((d - 4) / 0.8) ** 2) * (1.5 if p["kind"] == "coast" else 1) + RNG.normal(0, 3, nd)
+            wind = 0.62 * gust + RNG.normal(0, 1.5, nd)
             if spec.get("gust") is False:
                 gust = np.full(nd, np.nan)
             row = {"precipitation_sum": pr, "rain_sum": np.clip(pr - np.nan_to_num(sn) / 10, 0, None),
                    "snowfall_sum": sn, "temperature_2m_max": tmax, "temperature_2m_min": tmin,
-                   "wind_gusts_10m_max": gust}
+                   "wind_gusts_10m_max": gust, "wind_speed_10m_max": wind}
             data[p["name"]] = {k: list(np.concatenate([v, np.full(n - nd, np.nan)])) for k, v in row.items()}
         run = start - timedelta(hours=0 if spec.get("tier") != "global" else 12)
         lead0 = int((start - run).total_seconds() // 3600)

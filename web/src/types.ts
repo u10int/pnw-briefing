@@ -22,6 +22,7 @@ export interface ImpactEvent {
 export interface DailyVars {
   precipitation_sum: N[]; rain_sum: N[]; snowfall_sum: N[]
   temperature_2m_max: N[]; temperature_2m_min: N[]; wind_gusts_10m_max: N[]
+  wind_speed_10m_max?: N[]            // absent in briefings built before it was added
 }
 
 export interface Model {
