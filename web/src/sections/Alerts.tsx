@@ -3,7 +3,7 @@ import { ExternalLink, RefreshCw, ShieldCheck } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import type { Alert, Alerts, Briefing } from "@/types"
 
 const zoneId = (u: string) => u.replace(/\/$/, "").split("/").pop()!
@@ -34,8 +34,128 @@ function variantFor(event: string): "likely" | "possible" | "regional" | "second
   return "secondary"
 }
 
-const when = (iso: string | null) =>
-  iso ? new Date(iso).toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", timeZone: "America/Los_Angeles" }) : "–"
+const PT = "America/Los_Angeles"
+const HOUR = 3600e3, DAY = 24 * HOUR
+const parts = (t: number) => Object.fromEntries(new Intl.DateTimeFormat("en-US", {
+  timeZone: PT, year: "numeric", month: "numeric", day: "numeric", hour: "numeric", minute: "numeric", hourCycle: "h23",
+}).formatToParts(t).map((p) => [p.type, Number(p.value)]))
+/** The Pacific midnight at or before t (shifted by `days`). */
+function midnight(t: number, days = 0) {
+  const p = parts(t)
+  const wall = Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute)
+  const off = wall - Math.floor(t / 60e3) * 60e3                 // Pacific offset at t
+  return Date.UTC(p.year, p.month - 1, p.day + days) - off
+}
+const dayMD = (t: number) => { const p = parts(t + 12 * HOUR); return `${new Date(t + 12 * HOUR).toLocaleDateString("en-US", { weekday: "short", timeZone: PT })} ${p.month}/${p.day}` }
+const hour = (t: number) => new Date(t).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: PT }).replace(":00", "")
+const full = (t: number) => `${dayMD(midnight(t))} ${hour(t)}`
+
+/** Bar colours follow the badges: warning red, watch amber, advisory blue, statement gray. */
+const BAR: Record<ReturnType<typeof variantFor>, { bg: string; edge: string; text: string }> = {
+  likely: { bg: "var(--likely-bg)", edge: "var(--likely-bar)", text: "var(--likely)" },
+  possible: { bg: "var(--possible-bg)", edge: "var(--possible-bar)", text: "var(--possible)" },
+  regional: { bg: "var(--tier-regional-bg)", edge: "var(--tier-regional)", text: "var(--tier-regional)" },
+  secondary: { bg: "var(--secondary)", edge: "var(--muted-foreground)", text: "var(--secondary-foreground)" },
+}
+
+/** Each alert as a bar on a shared Pacific-time axis: whole days from today (or the earliest
+ *  onset) to the last end, at most 14 days, with day lines and a "now" marker. */
+function AlertTimeline({ items, snap }: { items: Alert[]; snap: Alerts }) {
+  const now = Date.now()
+  // the track's width decides how much text fits in a day and in a bar
+  const ref = React.useRef<HTMLDivElement>(null)
+  const [px, setPx] = React.useState(800)
+  React.useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const ro = new ResizeObserver(([e]) => setPx(e.contentRect.width))
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+  const span = items.map((a) => {
+    const s = a.onset ? Date.parse(a.onset) : now
+    return { a, s, e: a.ends ? Date.parse(a.ends) : null }
+  })
+  const t0 = midnight(Math.min(now, ...span.map((x) => x.s)))
+  const last = Math.max(now + HOUR, ...span.map((x) => x.e ?? x.s + DAY))
+  let nd = Math.max(2, Math.ceil((midnight(last, 1) - t0) / DAY - 0.01))
+  nd = Math.min(nd, 14)
+  const days = Array.from({ length: nd + 1 }, (_, k) => midnight(t0 + k * DAY + 2 * HOUR))
+  const t1 = days[nd]
+  const pct = (t: number) => (100 * (Math.min(Math.max(t, t0), t1) - t0)) / (t1 - t0)
+  const nowAt = now >= t0 && now <= t1 ? pct(now) : null
+
+  const grid = (
+    <div className="pointer-events-none absolute inset-0" aria-hidden>
+      {days.slice(1, -1).map((t) => <div key={t} className="absolute inset-y-0 border-l border-dashed border-border" style={{ left: `${pct(t)}%` }} />)}
+      {nowAt != null && <div className="absolute inset-y-0 border-l-2 border-foreground/60" style={{ left: `${nowAt}%` }} />}
+    </div>
+  )
+  return (
+    <div className="space-y-1">
+      {/* day axis */}
+      <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,15rem)_1fr] sm:gap-4">
+        <div className="max-sm:hidden" />
+        <div ref={ref} className="relative h-6 text-xs text-muted-foreground">
+          {days.slice(0, -1).map((t, k) => (
+            <span key={t} className={`absolute truncate tabular-nums ${px / nd >= 30 ? "px-1.5" : "text-center"}`} style={{ left: `${pct(t)}%`, width: `${pct(days[k + 1]) - pct(t)}%` }}>
+              {px / nd >= 64 ? dayMD(t) : px / nd >= 30 ? dayMD(t).split(" ")[0] : dayMD(t)[0]}
+            </span>
+          ))}
+          {nowAt != null && <span className="absolute -top-0.5 -translate-x-1/2 rounded bg-foreground/80 px-1 text-[10px] font-medium text-background max-sm:hidden" style={{ left: `${nowAt}%`, top: "100%" }}>Now</span>}
+        </div>
+      </div>
+      {span.map(({ a, s, e }) => {
+        const v = variantFor(a.event), c = BAR[v]
+        const l = pct(s), r = e != null ? pct(e) : 100, w = Math.max(r - l, 0.8)
+        const cut = e == null || e > t1
+        const sameDay = e != null && midnight(s) === midnight(e)
+        const label = e == null ? `${full(s)} onward` : sameDay ? `${hour(s)} – ${hour(e)}` : `${full(s)} – ${full(e)}`
+        const inside = (w / 100) * px > label.length * 6 + 18
+        return (
+          <div key={a.id} className="grid grid-cols-1 items-center gap-x-4 gap-y-1.5 border-t py-3 sm:grid-cols-[minmax(0,15rem)_1fr]">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <Badge variant={v}>{a.event}</Badge>
+                {a.url && (
+                  <a href={a.url} target="_blank" rel="noopener" className="text-muted-foreground hover:text-foreground" aria-label={`Open ${a.event} on weather.gov`}>
+                    <ExternalLink className="size-3.5" />
+                  </a>
+                )}
+              </div>
+              <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
+                {a.points.join(", ")}{a.sender && <> · {a.sender.replace(/^NWS /, "")}</>}
+              </p>
+              <p className="mt-1 text-xs font-medium tabular-nums sm:hidden">{label}</p>
+            </div>
+            <div className="relative h-9">
+              {grid}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div tabIndex={0} aria-label={`${a.event}: ${label}`}
+                    className={`absolute top-1/2 flex h-7 -translate-y-1/2 items-center overflow-hidden border px-2 text-xs font-medium whitespace-nowrap tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-ring ${cut ? "rounded-l-md" : "rounded-md"}`}
+                    style={{ left: `${l}%`, width: `${w}%`, background: c.bg, borderColor: c.edge, color: c.text }}>
+                    {inside && <span className="max-sm:hidden">{label}</span>}
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent className="max-w-xs">
+                  <p className="font-semibold">{a.event}</p>
+                  <p>{e == null ? `From ${full(s)}, no end time given` : `${full(s)} to ${full(e)}`}</p>
+                  {a.headline && <p className="mt-1 opacity-80">{a.headline}</p>}
+                </TooltipContent>
+              </Tooltip>
+              {!inside && (
+                <span className="absolute top-1/2 -translate-y-1/2 text-xs max-sm:hidden whitespace-nowrap text-muted-foreground tabular-nums"
+                  style={l + w > 60 ? { right: `${100 - l + 1}%` } : { left: `calc(${l + w}% + 6px)` }}>{label}</span>
+              )}
+            </div>
+          </div>
+        )
+      })}
+      {snap && <span className="sr-only">Times are Pacific.</span>}
+    </div>
+  )
+}
 
 /**
  * Active NWS alerts for the forecast locations. The build-time snapshot renders first; the page
@@ -100,7 +220,7 @@ export function NwsAlerts({ data }: { data: Briefing }) {
       <CardHeader>
         <CardTitle>NWS watches, warnings and advisories</CardTitle>
         <CardDescription>
-          Official alerts covering the forecast locations, alongside the automated flags below.
+          Official alerts covering the forecast locations, alongside the automated flags below. Times are Pacific; hover a bar for the full headline.
         </CardDescription>
         <CardAction className="flex items-center gap-1.5 text-xs text-muted-foreground">
           <RefreshCw className="size-3" aria-hidden />
@@ -111,38 +231,7 @@ export function NwsAlerts({ data }: { data: Briefing }) {
         {!snap.ok && !state.live ? (
           <p className="text-sm text-muted-foreground">The NWS alert service didn't answer when this briefing was built. Check weather.gov directly.</p>
         ) : items.length ? (
-          <Table className="min-w-[720px]">
-            <TableHeader>
-              <TableRow>
-                <TableHead>Alert</TableHead>
-                <TableHead>From</TableHead>
-                <TableHead>Until</TableHead>
-                <TableHead>Forecast locations</TableHead>
-                <TableHead>Issued by</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {items.map((a) => (
-                <TableRow key={a.id}>
-                  <TableCell>
-                    <div className="flex items-center gap-2">
-                      <Badge variant={variantFor(a.event)}>{a.event}</Badge>
-                      {a.url && (
-                        <a href={a.url} target="_blank" rel="noopener" className="text-muted-foreground hover:text-foreground" aria-label={`Open ${a.event} on weather.gov`}>
-                          <ExternalLink className="size-3.5" />
-                        </a>
-                      )}
-                    </div>
-                    {a.headline && <p className="mt-1 max-w-[52ch] text-xs whitespace-normal text-muted-foreground">{a.headline}</p>}
-                  </TableCell>
-                  <TableCell className="tabular-nums">{when(a.onset)}</TableCell>
-                  <TableCell className="tabular-nums">{when(a.ends)}</TableCell>
-                  <TableCell className="whitespace-normal">{a.points.join(", ")}</TableCell>
-                  <TableCell className="text-muted-foreground">{a.sender?.replace(/^NWS /, "") ?? "–"}</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+          <AlertTimeline items={items} snap={snap} />
         ) : (
           <p className="text-sm text-muted-foreground">No active NWS alerts for the forecast locations.</p>
         )}

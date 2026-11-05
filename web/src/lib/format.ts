@@ -11,13 +11,14 @@ export const dayMonth = (iso: string) =>
 export const dayLong = (iso: string) =>
   d(iso).toLocaleDateString("en-US", { weekday: "short", month: "long", day: "numeric" })
 
-const month = (iso: string) => d(iso).toLocaleDateString("en-US", { month: "short" })
+/** "Sat 11/7" */
+export const dayMD = (iso: string) =>
+  `${d(iso).toLocaleDateString("en-US", { weekday: "short" })} ${d(iso).getMonth() + 1}/${d(iso).getDate()}`
 
-/** "Fri 6 Nov", "Fri 6–Sat 7 Nov", or "Mon 30 Nov–Tue 1 Dec". */
+/** "Sat 11/7", or "Sat 11/7 – Sun 11/8". */
 export function dateRange(a: string, b: string) {
-  if (a.slice(0, 10) === b.slice(0, 10)) return `${dayShort(a)} ${month(a)}`
-  if (a.slice(5, 7) === b.slice(5, 7)) return `${dayShort(a)}–${dayShort(b)} ${month(b)}`
-  return `${dayShort(a)} ${month(a)}–${dayShort(b)} ${month(b)}`
+  if (a.slice(0, 10) === b.slice(0, 10)) return dayMD(a)
+  return `${dayMD(a)} – ${dayMD(b)}`
 }
 
 export const issuedLabel = (iso: string) =>
