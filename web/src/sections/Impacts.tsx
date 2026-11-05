@@ -65,9 +65,10 @@ export function ImpactsTable({ data }: { data: Briefing }) {
   const rank = (h: string) => (HAZARD_ORDER.indexOf(h) + HAZARD_ORDER.length + 1) % (HAZARD_ORDER.length + 1)
   const ordered = [...groups.entries()].sort((a, b) => rank(a[0]) - rank(b[0]) || a[1][0].start.localeCompare(b[1][0].start))
   return (
-    <Card className="gap-0 py-2">
-      <CardContent className="px-2">
-        <Table className="min-w-[680px] table-fixed">
+    <Card>
+      {/* the card's own padding, like the other cards; the outer cells drop theirs so text lines up with it */}
+      <CardContent>
+        <Table className="min-w-[680px] table-fixed [&_td:first-child]:pl-0 [&_th:first-child]:pl-0 [&_td:last-child]:pr-0 [&_th:last-child]:pr-0 [&_tbody:last-child_tr:last-child]:border-b-0">
           <colgroup>
             <col className="w-[170px]" /><col className="w-[110px]" /><col className="w-[180px]" /><col />
           </colgroup>
