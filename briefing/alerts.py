@@ -39,31 +39,48 @@ def _zone_id(url: str) -> str:
     return url.rstrip("/").rsplit("/", 1)[-1]
 
 
+HAZARDS_PAGE = "https://forecast.weather.gov/showsigwx.php"
+
+
+def location_page(forecast=None, county=None, fire=None):
+    """weather.gov's hazards page for one place, the page its forecasts link to: every active watch,
+    warning and advisory for that forecast zone, county and fire weather zone, in full text."""
+    if not forecast:
+        return None
+    url = f"{HAZARDS_PAGE}?warnzone={forecast}"
+    url += f"&warncounty={county}" if county else ""
+    return url + (f"&firewxzone={fire}" if fire else "")
+
+
 def resolve_zones(points, ua):
-    zones = {}
+    """Each location's NWS zones (for matching alerts) and its hazards page (for linking them)."""
+    zones, pages = {}, {}
     for p in points:
         try:
             pr = _get(f"{API}/points/{p['lat']:.4f},{p['lon']:.4f}", ua)["properties"]
-            zones[p["name"]] = sorted({_zone_id(pr[k]) for k in ("forecastZone", "county", "fireWeatherZone") if pr.get(k)})
+            ids = {k: _zone_id(pr[k]) for k in ("forecastZone", "county", "fireWeatherZone") if pr.get(k)}
+            zones[p["name"]] = sorted(set(ids.values()))
+            page = location_page(ids.get("forecastZone"), ids.get("county"), ids.get("fireWeatherZone"))
+            if page:
+                pages[p["name"]] = page
         except Exception as e:
             log.info("zones for %s unavailable (%s)", p["name"], e)
-    return zones
+    return zones, pages
 
 
-def alert_url(affected_zones):
-    """The public page for an alert: weather.gov's hazards page for its first forecast zone (and
-    county), which lists every active watch, warning and advisory there with full text. NWS
-    retired alerts.weather.gov's per-alert search, and the API's alert URL is raw JSON."""
+def alert_url(affected_zones, pages=None, points=()):
+    """Where an alert links: the hazards page of the first forecast location it covers (that page
+    shows the alert in full), else the page for the alert's first forecast zone. NWS retired
+    alerts.weather.gov's per-alert search, and the API's alert URL is raw JSON."""
+    for name in points:
+        if pages and pages.get(name):
+            return pages[name]
     ids = [_zone_id(z) for z in affected_zones or []]
     zone = next((z for z in ids if re.fullmatch(r"[A-Z]{2}Z\d{3}", z)), None)
-    county = next((z for z in ids if re.fullmatch(r"[A-Z]{2}C\d{3}", z)), None)
-    if not zone and not county:
-        return None
-    url = f"https://forecast.weather.gov/showsigwx.php?warnzone={zone or county}"
-    return url + (f"&warncounty={county}" if county else "")
+    return location_page(zone)
 
 
-def match(features, zones):
+def match(features, zones, pages=None):
     """Turn alert features into compact records, keeping those that touch a forecast location."""
     out = []
     for f in features:
@@ -77,7 +94,7 @@ def match(features, zones):
             "certainty": pr.get("certainty"), "urgency": pr.get("urgency"), "headline": pr.get("headline"),
             "onset": pr.get("onset") or pr.get("effective"), "ends": pr.get("ends") or pr.get("expires"),
             "sender": pr.get("senderName"), "areaDesc": pr.get("areaDesc"), "points": hit,
-            "url": alert_url(pr.get("affectedZones")),
+            "url": alert_url(pr.get("affectedZones"), pages, hit),
         })
     out.sort(key=lambda a: (_rank(a["event"]), a["onset"] or ""))
     return out
@@ -94,14 +111,14 @@ def fetch(cfg, demo: bool = False):
         return _demo(cfg, areas)
     ua = user_agent(cfg)
     try:
-        zones = resolve_zones(cfg["points"], ua)
+        zones, pages = resolve_zones(cfg["points"], ua)
         feats = _get(f"{API}/alerts/active", ua, params={"area": ",".join(areas)}).get("features", [])
-        items = match(feats, zones)
+        items = match(feats, zones, pages)
         log.info("NWS alerts: %d active for the forecast locations", len(items))
-        return {"fetched": datetime.now(timezone.utc), "areas": areas, "zones": zones, "items": items, "ok": True}
+        return {"fetched": datetime.now(timezone.utc), "areas": areas, "zones": zones, "pages": pages, "items": items, "ok": True}
     except Exception as e:
         log.warning("NWS alerts unavailable (%s)", e)
-        return {"fetched": datetime.now(timezone.utc), "areas": areas, "zones": {}, "items": [], "ok": False}
+        return {"fetched": datetime.now(timezone.utc), "areas": areas, "zones": {}, "pages": {}, "items": [], "ok": False}
 
 
 def _demo(cfg, areas):

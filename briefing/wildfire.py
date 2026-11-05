@@ -133,7 +133,7 @@ def _spc_time(s):
 
 # ---------------------------------------------------------------- parts
 
-def fire_alerts(cfg, zones):
+def fire_alerts(cfg, zones, pages=None):
     """Red Flag Warnings and Fire Weather Watches issued by the region's offices, whether or not
     they cover a forecast location (fire weather zones run well beyond the towns)."""
     ua = nws.user_agent(cfg)
@@ -146,13 +146,14 @@ def fire_alerts(cfg, zones):
         if pr.get("event") not in FIRE_EVENTS or (cities and not any(c in (pr.get("senderName") or "") for c in cities)):
             continue
         affected = {nws._zone_id(z) for z in pr.get("affectedZones", [])}
+        hit = [n for n, zs in (zones or {}).items() if affected & set(zs)]
         out.append({
             "id": pr.get("id"), "event": pr.get("event"), "headline": pr.get("headline"),
             "onset": pr.get("onset") or pr.get("effective"), "ends": pr.get("ends") or pr.get("expires"),
             "sender": pr.get("senderName"), "areaDesc": pr.get("areaDesc"),
-            "points": [n for n, zs in (zones or {}).items() if affected & set(zs)],
+            "points": hit,
             "description": (pr.get("description") or "")[:1200],
-            "url": nws.alert_url(pr.get("affectedZones")),
+            "url": nws.alert_url(pr.get("affectedZones"), pages, hit),
         })
     out.sort(key=lambda a: (a["event"] != "Red Flag Warning", a["onset"] or ""))
     return out
@@ -296,11 +297,11 @@ def drought(cfg):
 
 # ---------------------------------------------------------------- all parts
 
-def fetch(cfg, zones=None, demo: bool = False):
+def fetch(cfg, zones=None, demo: bool = False, pages=None):
     if demo:
         return _demo(cfg)
     out = {"fetched": datetime.now(timezone.utc).isoformat(), "sources": {}}
-    parts = [("alerts", lambda: fire_alerts(cfg, zones)), ("spc", lambda: spc_outlooks(cfg)),
+    parts = [("alerts", lambda: fire_alerts(cfg, zones, pages)), ("spc", lambda: spc_outlooks(cfg)),
              ("psa", lambda: psa_potential(cfg)), ("incidents", lambda: incidents(cfg)),
              ("perimeters", lambda: perimeters(cfg)), ("drought", lambda: drought(cfg))]
     for key, fn in parts:
