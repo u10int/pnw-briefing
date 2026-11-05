@@ -1032,17 +1032,29 @@ const issuedAt = (iso: string | null) =>
 
 /** Collapsed to each office's key messages (or the synopsis's opening paragraph when there are
  *  none); one toggle opens the full synopsis and hydrology for both offices. */
+const OFFICE_NAME: Record<string, string> = { SEW: "NWS Seattle", PQR: "NWS Portland", OTX: "NWS Spokane", PDT: "NWS Pendleton", MFR: "NWS Medford" }
+/** A paragraph as sentences (the AFD synopsis is a few plain sentences). */
+const sentences = (p: string) => p.split(/(?<=[.!?])\s+(?=[A-Z(])/).map((x) => x.trim()).filter(Boolean)
+const BRIEF = 3      // synopsis sentences shown as bullets before "show more"
+
 export function DiscussionsCard({ data }: { data: Briefing }) {
   const ds = data.outlooks?.discussions ?? []
   const [full, setFull] = React.useState(false)
   if (!ds.length) return null
-  const more = ds.some((d) => (d.keyMessages ? (d.synopsis?.length ?? 0) > 0 : (d.synopsis?.length ?? 0) > 1) || (d.hydrology?.length ?? 0) > 0)
+  // without key messages (most days: offices write them for significant weather), the synopsis
+  // sentences stand in as the bullets
+  const sents = (d: (typeof ds)[number]) => (d.synopsis ?? []).flatMap(sentences)
+  const more = ds.some((d) => (d.keyMessages ? sents(d).length > 0 : sents(d).length > BRIEF) || (d.hydrology?.length ?? 0) > 0)
   const head = (t: string) => <p className="mb-1 text-xs font-medium text-muted-foreground uppercase">{t}</p>
+  const bullets = (xs: string[]) => <ul className="list-disc space-y-1 pl-5 marker:text-muted-foreground">{xs.map((k, i) => <li key={i} className="leading-snug">{k}</li>)}</ul>
   return (
     <Card>
       <CardHeader>
         <CardTitle>From the forecast discussions</CardTitle>
-        <CardDescription>The key messages, or the start of the synopsis, from each NWS office's latest Area Forecast Discussion{more && "; the rest of the synopsis and the hydrology notes are a click away"}.</CardDescription>
+        <CardDescription>
+          The key messages from each NWS office's latest Area Forecast Discussion, or the main points of its synopsis when it has none
+          {more && "; the rest of the synopsis and the hydrology notes are a click away"}.
+        </CardDescription>
         {more && (
           <CardAction>
             <Button variant="outline" size="sm" onClick={() => setFull((x) => !x)} aria-expanded={full}>
@@ -1054,35 +1066,26 @@ export function DiscussionsCard({ data }: { data: Briefing }) {
       </CardHeader>
       <CardContent className="grid gap-6 lg:grid-cols-2">
         {ds.map((d) => {
-          const syn = d.synopsis ?? []
-          const showSyn = full ? syn : d.keyMessages ? [] : syn.slice(0, 1)
+          const syn = sents(d)
+          const km = d.keyMessages?.map((k) => k.replace(/^\*\s*/, ""))
+          const showSyn = km ? (full ? syn : []) : full ? syn : syn.slice(0, BRIEF)
           return (
             <div key={d.office} className="space-y-3 text-sm">
               <div className="flex flex-wrap items-baseline justify-between gap-2">
-                <span className="font-medium">{d.name}</span>
+                <span className="font-medium">{OFFICE_NAME[d.office] ?? d.name}</span>
                 <a className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground" href={d.url} target="_blank" rel="noopener">
                   Issued {issuedAt(d.issued)} · full discussion
                 </a>
               </div>
-              {d.keyMessages && (
-                <div>
-                  {head("Key messages")}
-                  <ul className="list-disc space-y-1 pl-5">{d.keyMessages.map((k, i) => <li key={i}>{k.replace(/^\*\s*/, "")}</li>)}</ul>
-                </div>
-              )}
-              {showSyn.length > 0 && (
-                <div>
-                  {head("Synopsis")}
-                  <div className="space-y-2">{showSyn.map((p, i) => <p key={i} className="leading-relaxed">{p}</p>)}</div>
-                </div>
-              )}
+              {km && <div>{head("Key messages")}{bullets(km)}</div>}
+              {showSyn.length > 0 && <div>{head(km ? "Synopsis" : "From the synopsis")}{bullets(showSyn)}</div>}
               {full && d.hydrology && (
                 <div>
                   {head("Hydrology")}
                   <div className="space-y-2">{d.hydrology.map((p, i) => <p key={i} className="leading-relaxed">{p}</p>)}</div>
                 </div>
               )}
-              {!d.keyMessages && !syn.length && <p className="text-muted-foreground">No synopsis in the latest discussion.</p>}
+              {!km && !syn.length && <p className="text-muted-foreground">No synopsis in the latest discussion.</p>}
             </div>
           )
         })}
