@@ -36,6 +36,9 @@ def _section(text, name):
     return [p for p in paras if p] or None
 
 
+OFFICE_NAME = {"SEW": "NWS Seattle", "PQR": "NWS Portland", "OTX": "NWS Spokane", "PDT": "NWS Pendleton", "MFR": "NWS Medford"}
+
+
 def discussions(cfg):
     ua = user_agent(cfg)
     out = []
@@ -47,7 +50,7 @@ def discussions(cfg):
                 continue
             p = _get(f"https://api.weather.gov/products/{items[0]['id']}", ua)
             text = p.get("productText", "")
-            out.append({"office": office, "name": p.get("issuingOffice") or office,
+            out.append({"office": office, "name": OFFICE_NAME.get(office, p.get("issuingOffice") or office),
                         "issued": p.get("issuanceTime"),
                         "url": f"https://forecast.weather.gov/product.php?site={office}&issuedby={office}&product=AFD",
                         "synopsis": _section(text, "SYNOPSIS"), "keyMessages": _section(text, "KEY MESSAGES"),
