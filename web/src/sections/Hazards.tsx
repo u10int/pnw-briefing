@@ -8,9 +8,10 @@ import { gradLevel, pairName } from "@/lib/gradients"
 import type { Briefing } from "@/types"
 
 export type HazardTab = "precip" | "flood" | "wind" | "snow" | "temp"
-type Tone = "quiet" | "watch" | "alert"
+export type Tone = "quiet" | "watch" | "alert"
 interface Item { icon: LucideIcon; text: string }
-interface Summary { tab: HazardTab; title: string; icon: LucideIcon; items: Item[]; tone: Tone }
+/** `lead` is the short phrase the overview headline uses when this hazard is the one to lead with. */
+export interface Summary { tab: HazardTab; title: string; icon: LucideIcon; items: Item[]; tone: Tone; lead?: string }
 
 const PT = "America/Los_Angeles"
 // "Wed 4", built by hand: Intl orders weekday and day differently across engines
@@ -20,6 +21,7 @@ const day = (t: number | string) => {
 }
 /** A plain YYYY-MM-DD date read at midday UTC, so it stays on the same calendar day in Pacific time. */
 const midday = (d: string) => (/^\d{4}-\d{2}-\d{2}$/.test(d) ? `${d}T20:00:00Z` : d)
+const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
 const AR_SHORT = ["Below scale", "AR1", "AR2", "AR3", "AR4", "AR5"]
 const AR_WORD = ["", "weak", "moderate", "strong", "extreme", "exceptional"]
 const AVY = ["", "Low", "Moderate", "Considerable", "High", "Extreme"]
@@ -28,28 +30,31 @@ function precip(d: Briefing): Summary {
   const items: Item[] = []
   const w = d.windows.find((x) => x.days === 7) ?? d.windows[d.windows.length - 1]
   const norm = d.normals?.windows.find((x) => x.days === w?.days)
-  let topPct = 0
+  let topPct = 0, topRegion = ""
   if (w) {
     for (const r of w.regions) {
       const pct = norm?.regions[r.rid]?.pct
-      if (pct != null) topPct = Math.max(topPct, pct)
+      if (pct != null && pct > topPct) { topPct = pct; topRegion = r.region }
       items.push({ icon: CloudRain, text: `${r.region}: ${r.median.toFixed(1)} in over ${w.label.toLowerCase().replace("next ", "the next ")}${pct != null ? `, ${Math.round(pct)}% of normal` : ""}` })
     }
   }
   if (d.wettest) items.push({ icon: CalendarDays, text: `Wettest stretch ${day(midday(d.wettest.start))}–${day(midday(d.wettest.end))}, about ${d.wettest.amount.toFixed(1)} in across the locations` })
-  return { tab: "precip", title: "Precip", icon: CloudRain, items, tone: topPct >= 200 ? "alert" : topPct >= 130 ? "watch" : "quiet" }
+  const tone: Tone = topPct >= 200 ? "alert" : topPct >= 130 ? "watch" : "quiet"
+  const lead = tone !== "quiet" && w ? `${topRegion} rain near ${Math.round(topPct / 10) * 10}% of normal over ${w.label.toLowerCase().replace("next ", "the next ")}` : undefined
+  return { tab: "precip", title: "Precip", icon: CloudRain, items, tone, lead }
 }
 
 function flood(d: Briefing): Summary {
   const lines: Item[] = []
   let tone: Tone = "quiet"
+  let lead: string | undefined
   const evs = (d.ar?.events ?? []).filter((e) => e.rank >= 1)
   if (evs.length) {
     const top = Math.max(...evs.map((e) => e.rank))
     const e = evs.filter((x) => x.rank === top).sort((a, b) => a.start.localeCompare(b.start))[0]
     const models = new Set(evs.filter((x) => x.rank >= top - 1 && Math.abs(Date.parse(x.start) - Date.parse(e.start)) < 2 * 864e5).map((x) => x.model))
     lines.push({ icon: Waves, text: `${AR_SHORT[top]} (${AR_WORD[top]}) atmospheric river at ${e.point}, ${day(e.start)}–${day(e.end)} (${[...models].join(", ")})` })
-    if (top >= 3) tone = "watch"
+    if (top >= 3) { tone = "watch"; lead = `${cap(AR_WORD[top])} atmospheric river at ${e.point} ${day(e.start)}–${day(e.end)}` }
     if (top >= 4) tone = "alert"
   } else if (d.ar) lines.push({ icon: Waves, text: "No atmospheric river reaches the coast" })
   const ls = d.landslide
@@ -66,11 +71,12 @@ function flood(d: Briefing): Summary {
     if (b) {
       lines.push({ icon: Mountain, text: `Landslide threshold reached at ${b.name} in ${b.k} of ${b.n} models (${day(Date.parse(ls.days[b.day].start) + 12 * 36e5)})` })
       tone = tone === "alert" ? "alert" : "watch"
+      lead ??= `Landslide threshold reached at ${b.name} by ${day(Date.parse(ls.days[b.day].start) + 12 * 36e5)}`
     } else lines.push({ icon: Mountain, text: "Landslide threshold not reached" })
   }
   const w7 = d.windows.find((w) => w.days === 7) ?? d.windows[d.windows.length - 1]
   if (w7 && !lines.length) lines.push({ icon: Waves, text: "No flooding signals in this briefing" })
-  return { tab: "flood", title: "Flooding", icon: Waves, items: lines, tone }
+  return { tab: "flood", title: "Flooding", icon: Waves, items: lines, tone, lead }
 }
 
 function wind(d: Briefing): Summary {
@@ -96,12 +102,15 @@ function wind(d: Briefing): Summary {
   const lines: Item[] = hits.slice(0, 2).map((h) => ({ icon: ArrowLeftRight, text: `${h.label} (${pairName(h.g)}), ${day(h.t)}: ${h.models.size} of ${h.n} models` }))
   if (!lines.length) lines.push({ icon: ArrowLeftRight, text: gs.length ? "No pressure gradient reaches its threshold" : "No gradient data" })
   const top = hits[0]?.level ?? 0
-  return { tab: "wind", title: "Wind", icon: Wind, items: lines, tone: top >= 2 ? "alert" : top ? "watch" : "quiet" }
+  const h0 = hits[0]
+  const lead = h0 ? `${cap(h0.label)} ${day(h0.t)} (${h0.g.codes?.length === 2 && h0.g.codes.every(Boolean) ? h0.g.codes.join("–") : pairName(h0.g)})` : undefined
+  return { tab: "wind", title: "Wind", icon: Wind, items: lines, tone: top >= 2 ? "alert" : top ? "watch" : "quiet", lead }
 }
 
 function snow(d: Briefing): Summary {
   const lines: Item[] = []
   let tone: Tone = "quiet"
+  let lead: string | undefined
   const sl = d.snowLevel
   if (sl) {
     const t0 = Date.parse(d.dates[0] + "T12:00:00Z"), t7 = t0 + 7 * 864e5
@@ -122,6 +131,7 @@ function snow(d: Briefing): Summary {
     if (b) {
       lines.push({ icon: CloudSnow, text: `Snow level reaches ${b.pass} (${b.elev.toLocaleString("en-US")} ft) by ${day(b.t)}: ${b.models.size} of ${b.n} models` })
       tone = "watch"
+      lead = `Snow level down to ${b.pass} by ${day(b.t)}`
     } else lines.push({ icon: CloudSnow, text: "Snow level stays above the passes for the next 7 days" })
   }
   const av = d.avalanche
@@ -131,11 +141,11 @@ function snow(d: Briefing): Summary {
       const top = Math.max(...av.zones.map((z) => z.level))
       const zones = av.zones.filter((z) => z.level === top).length
       lines.push({ icon: MountainSnow, text: `Avalanche danger ${AVY[top] ?? "—"} in ${zones} of ${av.zones.length} zones` })
-      if (top >= 3) tone = "watch"
+      if (top >= 3) { tone = "watch"; lead = `${AVY[top]} avalanche danger in the mountains` }
       if (top >= 4) tone = "alert"
     }
   }
-  return { tab: "snow", title: "Snow & mountains", icon: Snowflake, items: lines, tone }
+  return { tab: "snow", title: "Snow & mountains", icon: Snowflake, items: lines, tone, lead }
 }
 
 function temp(d: Briefing): Summary {
@@ -153,7 +163,9 @@ function temp(d: Briefing): Summary {
   const lines: Item[] = [{ icon: mean > 1.5 ? ThermometerSun : mean < -1.5 ? ThermometerSnowflake : Thermometer,
                            text: [word(hi, "Highs"), word(lo, "lows")].filter(Boolean).join(", ") + ` over ${w.label.toLowerCase()}` }]
   const m = Math.max(Math.abs(hi ?? 0), Math.abs(lo ?? 0))
-  return { tab: "temp", title: "Temperature", icon: Thermometer, items: lines, tone: m >= 8 ? "alert" : m >= 4 ? "watch" : "quiet" }
+  const tone: Tone = m >= 8 ? "alert" : m >= 4 ? "watch" : "quiet"
+  return { tab: "temp", title: "Temperature", icon: Thermometer, items: lines, tone,
+           lead: tone === "quiet" ? undefined : `${word(Math.abs(hi ?? 0) >= Math.abs(lo ?? 0) ? hi : lo, Math.abs(hi ?? 0) >= Math.abs(lo ?? 0) ? "Highs" : "Lows")} this week` }
 }
 
 /** Severity lives only in the badge (icon + label), in the impacts table's Likely and Possible
@@ -164,9 +176,12 @@ const TONE: Record<Tone, { label: string; icon: LucideIcon; badge: "secondary" |
   alert: { label: "Significant", icon: OctagonAlert, badge: "likely" },
 }
 
+/** The five hazard summaries, in tab order. The overview headline and the cards both read these. */
+export const summarize = (d: Briefing): Summary[] => [precip(d), flood(d), wind(d), snow(d), temp(d)]
+
 /** One summary per hazard tab; each opens its tab. */
 export function HazardStrip({ data, onOpen }: { data: Briefing; onOpen: (tab: HazardTab) => void }) {
-  const items = React.useMemo(() => [precip(data), flood(data), wind(data), snow(data), temp(data)], [data])
+  const items = React.useMemo(() => summarize(data), [data])
   return (
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
       {items.map((h) => {

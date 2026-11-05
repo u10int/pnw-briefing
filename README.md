@@ -1,4 +1,4 @@
-# PNW precipitation and impacts
+# PNW weather briefing
 
 A daily, automated forecast briefing for **Western Washington and Northwest Oregon**. It compares
 precipitation totals across regional, blended and global models and flags weather impacts from
@@ -46,10 +46,10 @@ their commercial tier or swap in Xweather points in `briefing/points.py`.
 
 ## What's on the page
 
-The page opens with an **overview**: the headline and run status, the window totals and the
-change since yesterday, NWS alerts, a summary card per hazard tab (precip, flooding, wind, snow and
-mountains, temperature; each flags how notable the forecast is and opens its tab), the impacts
-table and agreement grid, and what NWS forecasters are saying. Below it, **tabs** group the
+The page opens with an **overview**: the headline and run status, a summary card per hazard tab
+(precip, flooding, wind, snow and mountains, temperature; each flags how notable the forecast is
+and opens its tab), NWS alerts, the impacts table and agreement grid, what changed since
+yesterday, and what NWS forecasters are saying. Below it, **tabs** group the
 detail by hazard: *Precip* (how much, when and where), *Flooding* (how wet it's been, landslide
 threshold, atmospheric rivers, ensemble heavy-rain odds), *Wind*, *Snow & mountains*, *Temperature*, *Map* (the
 interactive map, loaded when first opened) and *Locations*. The tab bar sticks to the top while
@@ -57,13 +57,16 @@ scrolling, the selected tab is kept in the URL (`#wind`, `#map`, …) so links o
 and "on the map" buttons in each hazard tab open the Map tab on the matching layer. The sections
 below are described in that order of content, not page order.
 
-- **Headline.** The 14-day model-median total for each region, written as a sentence.
-- **Run status.** Every model, the run that was used, and anything that's missing.
-- **Window cards.** The 48 h, 7 d and 14 d medians per region, with the model range drawn as a bar,
-  percent of normal, and the change since yesterday's briefing.
-- **Since yesterday.** Region totals now and in yesterday's briefing, compared over the *same
-  dates* (today's 14-day window overlaps yesterday's for 13 days), plus hazards that are new,
-  upgraded, downgraded or dropped.
+- **Headline.** Built from the same summaries as the hazard cards: it leads with the most notable
+  hazard, lists any others worth watching, then gives the 14-day regional totals and the wettest
+  stretch. A briefing with nothing notable says so.
+- **Run status.** One line ("16 of 16 model runs") that opens the per-model list, with an amber
+  badge naming any model that's missing.
+- **Window cards** (Precip tab). The 48 h, 7 d and 14 d medians per region, with the model range
+  drawn as a bar, percent of normal, and the change since yesterday's briefing.
+- **Since yesterday.** Impacts that are new, upgraded, downgraded or dropped sit in the overview;
+  region totals now and in yesterday's briefing, compared over the *same dates* (today's 14-day
+  window overlaps yesterday's for 13 days), sit in the Precip tab.
 - **NWS alerts.** Active watches, warnings and advisories for the forecast locations, beside the
   automated flags. The list is captured at build time and refreshed live in the browser.
 - **Impacts.** Heavy rain (24 h and 72 h), snow, hard freeze, possible icy precipitation, strong
@@ -87,9 +90,10 @@ below are described in that order of content, not page order.
   - *Ensemble odds:* the share of GEFS and ECMWF ENS members (pooled) reaching each location's
     impact thresholds for 24-hour rain, 72-hour rain and 24-hour snow (ECMWF ENS snowfall at 10:1;
     GEFS has no snowfall field), by day.
-- **What NWS forecasters say.** The synopsis, key messages (when an office writes them) and
-  hydrology notes from the latest Area Forecast Discussion of each office in `nws_offices`
-  (Seattle and Portland), with links to the full text; WPC's Excessive Rainfall Outlook for days
+- **What NWS forecasters say.** The key messages (or, when an office writes none, the synopsis's
+  opening paragraph) from the latest Area Forecast Discussion of each office in `nws_offices`
+  (Seattle and Portland), with a toggle for the full synopsis and hydrology notes and links to
+  the full text; WPC's Excessive Rainfall Outlook for days
   1–5 at each location; and CPC's 6–10 and 8–14 day temperature and precipitation outlooks
   (most common category per region, with its probability). Outlooks come from NOAA's public map
   services, one query per layer and point-in-polygon locally.
@@ -241,7 +245,7 @@ grids to object storage such as Cloudflare R2; only the publish step changes.
   set `nws_user_agent` in the config.
 - **Yesterday.** The workflow reads the current `data/briefing.json` from the `gh-pages` branch
   before building, and passes it to `--previous`. The first run has nothing to compare with, so
-  the "Since yesterday" card says so until the second day.
+  the "What changed since yesterday" card says so until the second day.
 
 ## Setup (about 5 minutes)
 

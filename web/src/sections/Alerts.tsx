@@ -1,5 +1,5 @@
 import * as React from "react"
-import { ExternalLink, RefreshCw } from "lucide-react"
+import { ExternalLink, RefreshCw, ShieldCheck } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -59,6 +59,22 @@ export function NwsAlerts({ data }: { data: Briefing }) {
   }, [snap])
 
   if (!snap) return null
+  const stamp = (
+    <span>
+      {snap.demo ? "Demo alerts" : state.live ? "Live" : "As of the briefing"}
+      {state.at && `, ${new Date(state.at).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/Los_Angeles" })}`}
+    </span>
+  )
+  // nothing in effect: one line rather than a card
+  if (!items.length && (snap.ok || state.live)) {
+    return (
+      <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 rounded-xl border bg-card px-4 py-3 text-sm shadow-xs">
+        <ShieldCheck className="size-4 shrink-0 text-muted-foreground" />
+        <span>No active NWS watches, warnings or advisories for the forecast locations.</span>
+        <span className="ml-auto flex items-center gap-1.5 text-xs text-muted-foreground"><RefreshCw className="size-3" aria-hidden />{stamp}</span>
+      </div>
+    )
+  }
   return (
     <Card>
       <CardHeader>
@@ -68,10 +84,7 @@ export function NwsAlerts({ data }: { data: Briefing }) {
         </CardDescription>
         <CardAction className="flex items-center gap-1.5 text-xs text-muted-foreground">
           <RefreshCw className="size-3" aria-hidden />
-          <span>
-            {snap.demo ? "Demo alerts" : state.live ? "Live" : "As of the briefing"}
-            {state.at && `, ${new Date(state.at).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/Los_Angeles" })}`}
-          </span>
+          {stamp}
         </CardAction>
       </CardHeader>
       <CardContent>

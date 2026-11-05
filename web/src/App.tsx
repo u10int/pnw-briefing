@@ -9,12 +9,12 @@ import { issuedLabel } from "@/lib/format"
 import { type MapRequest, onOpenMap, openOnMap } from "@/lib/maplink"
 import { HazardStrip } from "@/sections/Hazards"
 import { NwsAlerts } from "@/sections/Alerts"
-import { SinceYesterday } from "@/sections/Changes"
+import { HazardChanges, TotalChanges } from "@/sections/Changes"
 import { AgreementGrid, ImpactsTable } from "@/sections/Impacts"
 import { ArCard, AvalancheCard, DiscussionsCard, GradientsCard, LandslideCard, ObservedCard, OddsCard, OutlooksCard, SnowLevelCard, SnowpackCard } from "@/sections/Context"
 import { DayByDay, EnsemblePlume, EnsembleTable, LocationPicker, RunningTotal } from "@/sections/Location"
 import { extremeTabs, MapCard } from "@/sections/Maps"
-import { Headline, RunStatus, WindowCard } from "@/sections/Overview"
+import { Headline, WindowCard } from "@/sections/Overview"
 import { ByLocation, GribAreaMeans, RegionTotals } from "@/sections/Totals"
 import { RainByDayCard } from "@/sections/RainByDay"
 import { TempDepartureCard } from "@/sections/TempDeparture"
@@ -122,22 +122,18 @@ export default function App() {
       </header>
 
       <main className="mx-auto max-w-[1320px] px-8 pb-16 max-sm:px-4">
-        <div className="grid items-end gap-6 pt-10 pb-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
-          <Headline data={data} />
-          <RunStatus data={data} />
-        </div>
+        <div className="pt-10 pb-8"><Headline data={data} /></div>
 
-        <div className="grid gap-4 md:grid-cols-3">
-          {data.windows.map((w) => <WindowCard key={w.days} w={w} data={data} />)}
+        <div className="space-y-4">
+          <HazardStrip data={data} onOpen={(t) => openTab(t)} />
+          <NwsAlerts data={data} />
         </div>
-        <div className="mt-4"><SinceYesterday data={data} /></div>
 
         <Section title="Impacts to watch"
           description={`Listed when at least ${Math.round(meta.minAgreement * 100)}% of models cross a threshold at a forecast location. Thresholds differ for lowland, coast and pass locations; regional models count for the days they cover.`}>
-          <NwsAlerts data={data} />
-          <HazardStrip data={data} onOpen={(t) => openTab(t)} />
           <ImpactsTable data={data} />
           <AgreementGrid data={data} />
+          <HazardChanges data={data} />
         </Section>
 
         {data.outlooks && (
@@ -161,7 +157,11 @@ export default function App() {
             <Section title="Precipitation" first
               description="How much falls, when and where: each location and day, the regional and per-location totals for every model, and the model maps."
               action={<MapLink req={{ mode: "totals", variable: "precip", days: 7 }} label="Precipitation totals on the map" />}>
+              <div className="grid gap-4 md:grid-cols-3">
+                {data.windows.map((w) => <WindowCard key={w.days} w={w} data={data} />)}
+              </div>
               <RainByDayCard data={data} />
+              <TotalChanges data={data} />
               <RegionTotals data={data} />
               <ByLocation data={data} />
               <MapCard title="Precipitation maps" description="Each model on its own grid, then the mean and spread on a common grid."
