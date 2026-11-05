@@ -24,7 +24,8 @@ import type { Briefing } from "@/types"
 const InteractiveMap = React.lazy(() => import("@/sections/InteractiveMap").then((m) => ({ default: m.InteractiveMap })))
 
 const TABS = [
-  { id: "rain", label: "Rain & flooding" },
+  { id: "precip", label: "Precip" },
+  { id: "flood", label: "Flooding" },
   { id: "wind", label: "Wind" },
   { id: "snow", label: "Snow & mountains" },
   { id: "temp", label: "Temperature" },
@@ -33,7 +34,8 @@ const TABS = [
 ] as const
 type Tab = (typeof TABS)[number]["id"]
 const tabFromHash = (): Tab | null => {
-  const h = location.hash.replace("#", "")
+  let h = location.hash.replace("#", "")
+  if (h === "rain") h = "precip"           // links from before the precip/flooding split
   return TABS.some((t) => t.id === h) ? (h as Tab) : null
 }
 
@@ -73,7 +75,7 @@ export default function App() {
   const [data, setData] = React.useState<Briefing | null>(null)
   const [error, setError] = React.useState<string | null>(null)
   const [point, setPoint] = React.useState("Seattle")
-  const [tab, setTab] = React.useState<Tab>(() => tabFromHash() ?? "rain")
+  const [tab, setTab] = React.useState<Tab>(() => tabFromHash() ?? "precip")
   const [mapSeen, setMapSeen] = React.useState(tab === "map")
   const [mapReq, setMapReq] = React.useState<(MapRequest & { nonce: number }) | null>(null)
   const tabsTop = React.useRef<HTMLDivElement>(null)
@@ -155,24 +157,30 @@ export default function App() {
             </div>
           </div>
 
-          <TabsContent value="rain">
-            <Section title="Rain and flooding" first
-              description="How much, when and where, how wet it has already been, and the signals behind flooding and landslides: atmospheric rivers, ensemble odds and model agreement."
-              action={<MapLink req={{ mode: "totals", variable: "precip", days: 7 }} label="Rain totals on the map" />}>
+          <TabsContent value="precip">
+            <Section title="Precipitation" first
+              description="How much falls, when and where: each location and day, the regional and per-location totals for every model, and the model maps."
+              action={<MapLink req={{ mode: "totals", variable: "precip", days: 7 }} label="Precipitation totals on the map" />}>
               <RainByDayCard data={data} />
               <RegionTotals data={data} />
               <ByLocation data={data} />
-              <ObservedCard data={data} />
-              <LandslideCard data={data} />
-              <ArCard data={data} />
-              <div className="flex justify-end"><MapLink req={{ mode: "hourly", layer: "ivt", isobars: true }} label="Moisture transport (IVT) on the map" /></div>
-              <OddsCard data={data} />
               <MapCard title="Precipitation maps" description="Each model on its own grid, then the mean and spread on a common grid."
                 tabs={[
                   { id: "p48", label: "Next 48 hours", src: data.maps.short, alt: "48-hour precipitation by model, with mean and spread", note: "Liquid equivalent. Spread is the highest minus the lowest model at each grid cell. Regional models next to the blend and the global models, over the same two 12Z–12Z days." },
                   { id: "pl", label: `Through day ${meta.days}`, src: data.maps.long, alt: "Full-range precipitation by model", note: "Each panel is labeled with the number of days the model covers; mean and spread use only the days every model covers." },
                 ]} />
               <GribAreaMeans data={data} />
+            </Section>
+          </TabsContent>
+
+          <TabsContent value="flood">
+            <Section title="Flooding" first
+              description="What turns rain into a problem: how wet it has already been, how close that puts the Seattle area to the landslide threshold, whether an atmospheric river is coming, and how many ensemble members reach the heavy-rain thresholds."
+              action={<MapLink req={{ mode: "hourly", layer: "ivt", isobars: true }} label="Moisture transport (IVT) on the map" />}>
+              <ObservedCard data={data} />
+              <LandslideCard data={data} />
+              <ArCard data={data} />
+              <OddsCard data={data} />
             </Section>
           </TabsContent>
 

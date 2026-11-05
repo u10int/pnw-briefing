@@ -1,13 +1,13 @@
 import * as React from "react"
 
-import { ArrowLeftRight, ChevronRight, CircleCheck, CloudRain, CloudSnow, type LucideIcon, Mountain, MountainSnow, OctagonAlert,
+import { ArrowLeftRight, CalendarDays, ChevronRight, CircleCheck, CloudRain, CloudSnow, type LucideIcon, Mountain, MountainSnow, OctagonAlert,
   Snowflake, Thermometer, ThermometerSnowflake, ThermometerSun, TriangleAlert, Waves, Wind } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { gradLevel, pairName } from "@/lib/gradients"
 import type { Briefing } from "@/types"
 
-export type HazardTab = "rain" | "wind" | "snow" | "temp"
+export type HazardTab = "precip" | "flood" | "wind" | "snow" | "temp"
 type Tone = "quiet" | "watch" | "alert"
 interface Item { icon: LucideIcon; text: string }
 interface Summary { tab: HazardTab; title: string; icon: LucideIcon; items: Item[]; tone: Tone }
@@ -18,11 +18,29 @@ const day = (t: number | string) => {
   const d = new Date(typeof t === "string" ? Date.parse(t) : t)
   return `${d.toLocaleDateString("en-US", { weekday: "short", timeZone: PT })} ${d.toLocaleDateString("en-US", { day: "numeric", timeZone: PT })}`
 }
+/** A plain YYYY-MM-DD date read at midday UTC, so it stays on the same calendar day in Pacific time. */
+const midday = (d: string) => (/^\d{4}-\d{2}-\d{2}$/.test(d) ? `${d}T20:00:00Z` : d)
 const AR_SHORT = ["Below scale", "AR1", "AR2", "AR3", "AR4", "AR5"]
 const AR_WORD = ["", "weak", "moderate", "strong", "extreme", "exceptional"]
 const AVY = ["", "Low", "Moderate", "Considerable", "High", "Extreme"]
 
-function rain(d: Briefing): Summary {
+function precip(d: Briefing): Summary {
+  const items: Item[] = []
+  const w = d.windows.find((x) => x.days === 7) ?? d.windows[d.windows.length - 1]
+  const norm = d.normals?.windows.find((x) => x.days === w?.days)
+  let topPct = 0
+  if (w) {
+    for (const r of w.regions) {
+      const pct = norm?.regions[r.rid]?.pct
+      if (pct != null) topPct = Math.max(topPct, pct)
+      items.push({ icon: CloudRain, text: `${r.region}: ${r.median.toFixed(1)} in over ${w.label.toLowerCase().replace("next ", "the next ")}${pct != null ? `, ${Math.round(pct)}% of normal` : ""}` })
+    }
+  }
+  if (d.wettest) items.push({ icon: CalendarDays, text: `Wettest stretch ${day(midday(d.wettest.start))}–${day(midday(d.wettest.end))}, about ${d.wettest.amount.toFixed(1)} in across the locations` })
+  return { tab: "precip", title: "Precip", icon: CloudRain, items, tone: topPct >= 200 ? "alert" : topPct >= 130 ? "watch" : "quiet" }
+}
+
+function flood(d: Briefing): Summary {
   const lines: Item[] = []
   let tone: Tone = "quiet"
   const evs = (d.ar?.events ?? []).filter((e) => e.rank >= 1)
@@ -51,8 +69,8 @@ function rain(d: Briefing): Summary {
     } else lines.push({ icon: Mountain, text: "Landslide threshold not reached" })
   }
   const w7 = d.windows.find((w) => w.days === 7) ?? d.windows[d.windows.length - 1]
-  if (w7 && !lines.length) lines.push({ icon: CloudRain, text: `${w7.label}: see totals` })
-  return { tab: "rain", title: "Rain & flooding", icon: CloudRain, items: lines, tone }
+  if (w7 && !lines.length) lines.push({ icon: Waves, text: "No flooding signals in this briefing" })
+  return { tab: "flood", title: "Flooding", icon: Waves, items: lines, tone }
 }
 
 function wind(d: Briefing): Summary {
@@ -148,9 +166,9 @@ const TONE: Record<Tone, { label: string; icon: LucideIcon; badge: "secondary" |
 
 /** One summary per hazard tab; each opens its tab. */
 export function HazardStrip({ data, onOpen }: { data: Briefing; onOpen: (tab: HazardTab) => void }) {
-  const items = React.useMemo(() => [rain(data), wind(data), snow(data), temp(data)], [data])
+  const items = React.useMemo(() => [precip(data), flood(data), wind(data), snow(data), temp(data)], [data])
   return (
-    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
       {items.map((h) => {
         const tone = TONE[h.tone]
         const Icon = h.icon, ToneIcon = tone.icon

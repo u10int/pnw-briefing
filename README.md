@@ -47,10 +47,11 @@ their commercial tier or swap in Xweather points in `briefing/points.py`.
 ## What's on the page
 
 The page opens with an **overview**: the headline and run status, the window totals and the
-change since yesterday, NWS alerts, a summary card per hazard (rain and flooding, wind, snow and
+change since yesterday, NWS alerts, a summary card per hazard tab (precip, flooding, wind, snow and
 mountains, temperature; each flags how notable the forecast is and opens its tab), the impacts
 table and agreement grid, and what NWS forecasters are saying. Below it, **tabs** group the
-detail by hazard: *Rain & flooding*, *Wind*, *Snow & mountains*, *Temperature*, *Map* (the
+detail by hazard: *Precip* (how much, when and where), *Flooding* (how wet it's been, landslide
+threshold, atmospheric rivers, ensemble heavy-rain odds), *Wind*, *Snow & mountains*, *Temperature*, *Map* (the
 interactive map, loaded when first opened) and *Locations*. The tab bar sticks to the top while
 scrolling, the selected tab is kept in the URL (`#wind`, `#map`, …) so links open it directly,
 and "on the map" buttons in each hazard tab open the Map tab on the matching layer. The sections
