@@ -200,6 +200,21 @@ def _fields(spec, la, lo, lead0, nd, sites=()):
             continue
         hrs = sorted(set(out.get(name, {}).get("hours", [])) | set(h_hours))   # hourly merged with stepped
         out[name] = {"hours": hrs, "data": np.stack([state(h)[name] for h in hrs]).astype("float32")}
+    # running precipitation and snowfall totals on the map time axis, from the reflectivity band
+    # (about 0.15 in/h in the heaviest cores) and the type, snow at 10:1
+    acc_hours = sorted({h for v in out.values() for h in v["hours"]} - {lead0})
+    p_run, s_run, prev, p_acc, s_acc = np.zeros_like(la), np.zeros_like(la), lead0, [], []
+    for h in acc_hours:
+        st = state(h)
+        rate = 0.15 * np.clip((np.nan_to_num(st["refc"]) - 12) / 38, 0, 1) * (h - prev)
+        p_run = p_run + rate
+        s_run = s_run + np.where(np.isin(st["ptype"], (2, 5)), rate * 10, 0) * np.where(st["ptype"] == 5, 0.5, 1)
+        p_acc.append(p_run)
+        s_acc.append(s_run)
+        prev = h
+    if acc_hours:
+        out["apcp"] = {"hours": acc_hours, "data": np.stack(p_acc).astype("float32")}
+        out["asnow"] = {"hours": acc_hours, "data": np.stack(s_acc).astype("float32")}
     if sites and "mslp" in out:
         # an arctic high building over the B.C. interior around days 8-11 (Fraser outflow)
         hrs = out["mslp"]["hours"]

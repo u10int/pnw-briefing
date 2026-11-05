@@ -563,16 +563,22 @@ function totalsView(c: Cog | undefined, ramp: Ramp, windowLabel: string, digits 
 
 // ------------------------------------------------------------------ hourly mode
 
-type HLayer = "radar" | "t2m" | "gust" | "wind" | "frz" | "ivt" | "pgrad"
-const HLAYERS: { id: HLayer; label: string; primary: (e: Record<string, FieldEntry>) => FieldEntry | undefined }[] = [
-  { id: "radar", label: "Precipitation", primary: (e) => e.refc ?? e.ptype },
-  { id: "t2m", label: "Temperature", primary: (e) => e.t2m },
-  { id: "gust", label: "Gusts", primary: (e) => e.gust },
-  { id: "wind", label: "Wind", primary: (e) => (e.u10 && e.v10 ? e.u10 : undefined) },
-  { id: "frz", label: "Freezing level", primary: (e) => e.frz },
-  { id: "pgrad", label: "Pressure gradient", primary: (e) => e.mslp },
-  { id: "ivt", label: "Moisture (IVT)", primary: (e) => (e.ivtu && e.ivtv ? e.ivtu : undefined) },
+type HLayer = "radar" | "apcp" | "asnow" | "t2m" | "gust" | "wind" | "frz" | "ivt" | "pgrad"
+type HGroup = "Precipitation" | "Temperature" | "Wind and pressure"
+const HLAYERS: { id: HLayer; label: string; group: HGroup; primary: (e: Record<string, FieldEntry>) => FieldEntry | undefined }[] = [
+  { id: "radar", label: "Radar and precip type", group: "Precipitation", primary: (e) => e.refc ?? e.ptype },
+  { id: "apcp", label: "Accumulated precipitation", group: "Precipitation", primary: (e) => e.apcp },
+  { id: "asnow", label: "Accumulated snowfall", group: "Precipitation", primary: (e) => e.asnow },
+  { id: "ivt", label: "Moisture (IVT)", group: "Precipitation", primary: (e) => (e.ivtu && e.ivtv ? e.ivtu : undefined) },
+  { id: "t2m", label: "Temperature", group: "Temperature", primary: (e) => e.t2m },
+  { id: "frz", label: "Freezing level", group: "Temperature", primary: (e) => e.frz },
+  { id: "wind", label: "Wind", group: "Wind and pressure", primary: (e) => (e.u10 && e.v10 ? e.u10 : undefined) },
+  { id: "gust", label: "Gusts", group: "Wind and pressure", primary: (e) => e.gust },
+  { id: "pgrad", label: "Pressure gradient", group: "Wind and pressure", primary: (e) => e.mslp },
 ]
+const H_GROUPS: HGroup[] = ["Precipitation", "Temperature", "Wind and pressure"]
+const APCP: Ramp = { ...PRECIP, label: "Accumulated precipitation, liquid equivalent" }
+const ASNOW: Ramp = { ...SNOW, label: "Accumulated snowfall" }
 /** The vector pair a layer's particles follow: water vapor transport on the IVT layer, else the 10 m wind. */
 const flowOf = (layer: HLayer, e: Record<string, FieldEntry>) =>
   layer === "ivt" ? (e.ivtu && e.ivtv ? { u: e.ivtu, v: e.ivtv, scale: 1 / 25 } : null)
@@ -665,7 +671,8 @@ function hourlyView(model: string, entries: Record<string, FieldEntry>, layer: H
   const iso = isobars && !!entries.mslp
   const name = def.label.toLowerCase()
   const nearest = (time: number | null) => (time == null ? null : bracket(prim.times, time, false, 3.1))
-  const ramp = layer === "t2m" ? TEMP : layer === "gust" ? GUST : layer === "wind" ? WIND : layer === "ivt" ? IVT : layer === "pgrad" ? PGRAD : FRZ
+  const ramp = layer === "t2m" ? TEMP : layer === "gust" ? GUST : layer === "wind" ? WIND : layer === "ivt" ? IVT : layer === "pgrad" ? PGRAD
+    : layer === "apcp" ? APCP : layer === "asnow" ? ASNOW : FRZ
 
   return {
     key: `hr|${model}|${layer}|${iso ? 1 : 0}|${pairs ? 1 : 0}`,
@@ -738,6 +745,8 @@ function hourlyView(model: string, entries: Record<string, FieldEntry>, layer: H
               if (!Number.isFinite(v)) return null
               if (layer === "t2m") return `${Math.round(v)}°F`
               if (layer === "gust") return `Gusts ${Math.round(v)} mph`
+              if (layer === "apcp") return v < 0.005 ? "No precipitation yet" : `${v.toFixed(2)} in so far`
+              if (layer === "asnow") return v < 0.05 ? "No snow yet" : `${v.toFixed(1)} in of snow so far`
               return `Freezing level ${(Math.round(v / 100) * 100).toLocaleString("en-US")} ft`
             }
           }
@@ -980,6 +989,8 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
   const hB = layerModels.find((m) => m.model === hOther && m.model !== hA)?.model ?? layerModels.find((m) => m.model !== hA)?.model
   const primA = hA ? HLAYERS.find((l) => l.id === layer)!.primary(byModel.get(hA)!.entries) : undefined
   const times = React.useMemo(() => primA?.times ?? [], [primA])
+  // accumulated layers count from the briefing start, 12Z on its first day
+  const accStart = timeLabel(`${data.dates[0]}T12:00:00Z`)
 
   // Keep the clock on one of the main model's steps when the model or layer changes.
   React.useEffect(() => {
@@ -1071,13 +1082,18 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
             </>
           ) : (
             <>
-              <Tabs value={layer} onValueChange={(v) => setLayer(v as HLayer)} className="max-w-full max-sm:w-full max-sm:overflow-x-auto">
-                <TabsList className="max-sm:min-w-full">
-                  {HLAYERS.filter((l) => [...byModel.values()].some((v) => l.primary(v.entries))).map((l) => (
-                    <TabsTrigger key={l.id} value={l.id}>{l.label}</TabsTrigger>
-                  ))}
-                </TabsList>
-              </Tabs>
+              <Select value={layer} onValueChange={(v) => setLayer(v as HLayer)}>
+                <SelectTrigger className="w-full sm:w-[230px]" aria-label="Layer"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {H_GROUPS.map((g) => [g, HLAYERS.filter((l) => l.group === g && [...byModel.values()].some((v) => l.primary(v.entries)))] as const)
+                    .filter(([, ls]) => ls.length).map(([g, ls]) => (
+                      <SelectGroup key={g}>
+                        <SelectLabel>{g}</SelectLabel>
+                        {ls.map((l) => <SelectItem key={l.id} value={l.id}>{l.label}</SelectItem>)}
+                      </SelectGroup>
+                    ))}
+                </SelectContent>
+              </Select>
               <div className="flex items-center gap-x-5 max-sm:w-full">
                 {hA && <ModelSelect options={layerModels} value={hA} onChange={setHModel} label="Model" />}
                 <Toggle id="compare-h" label="Compare" checked={compare} onChange={setCompare} />
@@ -1110,6 +1126,8 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
             {layer === "radar" && <RadarLegend withRefc={!!entriesA.refc} />}
             {smooth && layer === "radar" && !entriesA.refc && <p className="text-xs text-muted-foreground">Precipitation type is a category, so it isn't smoothed.</p>}
             {smooth && layer === "radar" && entriesA.refc && entriesA.ptype && <p className="text-xs text-muted-foreground">Reflectivity is smoothed; precipitation type keeps each model cell's category.</p>}
+            {layer === "apcp" && <RampLegend ramp={APCP} note={`Running total since ${accStart}, the start of the briefing.`} />}
+            {layer === "asnow" && <RampLegend ramp={ASNOW} note={`Running total since ${accStart}. NCEP models report their own snowfall; ECMWF snowfall is water equivalent at 10:1.`} />}
             {layer === "t2m" && <RampLegend ramp={TEMP} every={2} note="The dashed blue line marks 32°F." />}
             {layer === "gust" && <RampLegend ramp={GUST} />}
             {layer === "wind" && <RampLegend ramp={WIND} note={showParticles ? "Particles trace the 10 m wind; faster particles mean stronger wind." : "Arrows point the way the wind is blowing; longer arrows are stronger winds."} />}
