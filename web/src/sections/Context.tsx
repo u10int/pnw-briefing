@@ -12,6 +12,7 @@ import { dateRange, dayShort, inch } from "@/lib/format"
 import { pctCell } from "@/sections/Totals"
 import type { ArEvent, Avalanche, AvalancheDanger, Briefing, Gradient, Landslide, ModelSeries, N, PointOdds, Tier } from "@/types"
 import { GRAD_COLORS, gradLevel, pairName, seriesAt } from "@/lib/gradients"
+import { arEpisodes, type Episode } from "@/sections/Hazards"
 
 // ------------------------------------------------------------------ shared: multi-model time series
 
@@ -319,6 +320,30 @@ function ArBadge({ rank }: { rank: number }) {
   )
 }
 
+/** A location's AR summary: the rank every model reaches, then how far a model goes beyond it. */
+function PointAr({ ep }: { ep?: Episode }) {
+  if (!ep) return <span className="text-muted-foreground">no AR</span>
+  const above = ep.ranks.filter(([, r]) => r > ep.agreed)
+  const short = (m: string) => m.replace("ECMWF ", "")
+  const when = `${dayShort(new Date(ep.start).toISOString())}`
+  const tip = ep.ranks.map(([m, r]) => `${short(m)} ${r ? AR_SHORT[r] : "no AR"}`).join(" · ")
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="inline-flex cursor-default items-center gap-1.5">
+          {ep.agreed > 0 && <ArBadge rank={ep.agreed} />}
+          {above.length > 0 && (
+            <span className="text-xs text-muted-foreground">
+              {ep.agreed > 0 ? "up to " : ""}{AR_SHORT[ep.top].split(" ")[0]} in {above.filter(([, r]) => r === ep.top).map(([m]) => short(m)).join(", ")}{ep.agreed === 0 ? " only" : ""}
+            </span>
+          )}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>From {when}: {tip}</TooltipContent>
+    </Tooltip>
+  )
+}
+
 const AR_RANGE = "kg m⁻¹ s⁻¹"
 export const H = 36e5
 
@@ -540,7 +565,9 @@ export function ArCard({ data }: { data: Briefing }) {
   if (!ar) return null
   const series: ModelSeries[] = ar.models.map((m) => ({ model: m.model, tier: m.tier, times: m.times, values: m.ivt[point] ?? [] }))
   const events = ar.events.filter((e) => e.rank >= 1)
-  const peakAt = (p: string) => Math.max(0, ...events.filter((e) => e.point === p).map((e) => e.rank))
+  // per location, the episode the models agree on most: the rank both reach, and how far one goes beyond it
+  const eps = arEpisodes(data)
+  const bestAt = (p: string) => eps.filter((x) => x.point === p).sort((a, b) => b.agreed - a.agreed || b.top - a.top || a.start - b.start)[0]
   const arMax = Math.max(0, ...series.flatMap((s) => s.values).filter((v): v is number => v != null))
   const arTop = Math.max(750, Math.ceil((arMax + 50) / 250) * 250)
   return (
@@ -556,7 +583,7 @@ export function ArCard({ data }: { data: Briefing }) {
         <div className="flex flex-wrap gap-x-6 gap-y-2">
           {ar.points.map((p) => (
             <div key={p} className="flex items-center gap-2 text-sm"><span className="font-medium">{p}</span>
-              {peakAt(p) ? <ArBadge rank={peakAt(p)} /> : <span className="text-muted-foreground">no AR</span>}</div>
+              <PointAr ep={bestAt(p)} /></div>
           ))}
         </div>
         <div className="space-y-2">

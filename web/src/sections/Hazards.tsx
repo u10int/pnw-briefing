@@ -44,18 +44,62 @@ function precip(d: Briefing): Summary {
   return { tab: "precip", title: "Precip", icon: CloudRain, items, tone, lead }
 }
 
+export interface Episode { point: string; start: number; end: number; ranks: [string, number][]; agreed: number; top: number }
+/** AR events grouped into episodes: at one coastal point, events from any model that overlap in
+ *  time (within 12 h) are the same episode. Each model's peak rank over the episode (0 if it has
+ *  none), the rank every model reaches (the lowest of those), and the highest. */
+export function arEpisodes(d: Briefing): Episode[] {
+  const ar = d.ar
+  if (!ar) return []
+  const models = ar.models.map((m) => m.model)
+  const out: Episode[] = []
+  for (const pt of ar.points) {
+    const evs = ar.events.filter((e) => e.point === pt && e.rank >= 1)
+      .map((e) => ({ ...e, s: Date.parse(e.start), t: Date.parse(e.end) })).sort((a, b) => a.s - b.s)
+    let cur: (typeof evs)[number][] = [], curEnd = -Infinity
+    const flush = () => {
+      if (!cur.length) return
+      const ranks = models.map((m) => [m, Math.max(0, ...cur.filter((e) => e.model === m).map((e) => e.rank))] as [string, number])
+      const rs = ranks.map(([, r]) => r)
+      out.push({ point: pt, start: Math.min(...cur.map((e) => e.s)), end: Math.max(...cur.map((e) => e.t)), ranks,
+                 agreed: Math.min(...rs), top: Math.max(...rs) })
+      cur = []
+    }
+    for (const e of evs) {
+      if (e.s > curEnd + 12 * 36e5) { flush(); curEnd = -Infinity }
+      cur.push(e); curEnd = Math.max(curEnd, e.t)
+    }
+    flush()
+  }
+  return out
+}
+
 function flood(d: Briefing): Summary {
   const lines: Item[] = []
   let tone: Tone = "quiet"
   let lead: string | undefined
-  const evs = (d.ar?.events ?? []).filter((e) => e.rank >= 1)
-  if (evs.length) {
-    const top = Math.max(...evs.map((e) => e.rank))
-    const e = evs.filter((x) => x.rank === top).sort((a, b) => a.start.localeCompare(b.start))[0]
-    const models = new Set(evs.filter((x) => x.rank >= top - 1 && Math.abs(Date.parse(x.start) - Date.parse(e.start)) < 2 * 864e5).map((x) => x.model))
-    lines.push({ icon: Waves, text: `${AR_SHORT[top]} (${AR_WORD[top]}) atmospheric river at ${e.point}, ${day(e.start)}–${day(e.end)} (${[...models].join(", ")})` })
-    if (top >= 3) { tone = "watch"; lead = `${cap(AR_WORD[top])} atmospheric river at ${e.point} ${day(e.start)}–${day(e.end)}` }
-    if (top >= 4) tone = "alert"
+  const eps = arEpisodes(d)
+  if (eps.length) {
+    // lead with what the models agree on; a split never sets the severity
+    const best = [...eps].sort((a, b) => b.agreed - a.agreed || b.top - a.top || a.start - b.start)[0]
+    const split = eps.filter((x) => x.top - x.agreed >= 2 && x.top > best.agreed).sort((a, b) => b.top - a.top || a.start - b.start)[0]
+    const when = (x: Episode) => `${day(x.start)}–${day(x.end)}`
+    const byModel = (x: Episode) => x.ranks.map(([m, r]) => `${m.replace("ECMWF ", "")} ${r ? AR_SHORT[r] : "none"}`).join(", ")
+    if (best.agreed >= 1 && best.top - best.agreed <= 1) {
+      const rank = best.agreed === best.top ? `${AR_SHORT[best.agreed]} (${AR_WORD[best.agreed]})` : `${AR_SHORT[best.agreed]}–${AR_SHORT[best.top]} (${AR_WORD[best.agreed]} to ${AR_WORD[best.top]})`
+      lines.push({ icon: Waves, text: `${rank} atmospheric river at ${best.point}, ${when(best)}: ${best.ranks.length > 2 ? `all ${best.ranks.length}` : "both"} models` })
+      if (best.agreed >= 3) { tone = "watch"; lead = `${cap(AR_WORD[best.agreed])} atmospheric river at ${best.point} ${when(best)}` }
+      if (best.agreed >= 4) tone = "alert"
+    } else {
+      lines.push({ icon: Waves, text: `Atmospheric river at ${best.point}, ${when(best)}; models split on strength (${byModel(best)})` })
+    }
+    if (split && split !== best) lines.push({ icon: Waves, text: `Models split at ${split.point}, ${when(split)}: ${byModel(split)}` })
+    // one model alone at AR3+ is worth watching, but doesn't name a severity
+    const splitTop = Math.max(best.top, split?.top ?? 0)
+    if (tone === "quiet" && splitTop >= 3) {
+      tone = "watch"
+      lead ??= `Atmospheric river at ${(split ?? best).point} ${when(split ?? best)}, models split on strength`
+    }
   } else if (d.ar) lines.push({ icon: Waves, text: "No atmospheric river reaches the coast" })
   const ls = d.landslide
   if (ls) {
