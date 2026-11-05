@@ -4,7 +4,8 @@ import type { GeoJSONSource, MapMouseEvent, StyleSpecification } from "maplibre-
 import "maplibre-gl/dist/maplibre-gl.css"
 // MapLibre runs a web worker for vector/GeoJSON work; have Vite bundle it and tell MapLibre where it is.
 import workerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url"
-import { Pause, Play } from "lucide-react"
+import { Pause, Play, SlidersHorizontal } from "lucide-react"
+import { Popover } from "radix-ui"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -867,6 +868,44 @@ function Toggle({ id, label, checked, onChange }: { id: string; label: string; c
   )
 }
 
+/** One setting in the map options popover: label on the left, switch on the right. */
+function OptionRow({ id, label, checked, onChange }: { id: string; label: string; checked: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <div className="flex items-center justify-between gap-4 py-1">
+      <Label htmlFor={id} className="font-normal">{label}</Label>
+      <Switch id={id} checked={checked} onCheckedChange={onChange} />
+    </div>
+  )
+}
+
+/** Overlays and display settings, kept out of the main control row. */
+function MapOptions({ overlays, display, active }: { overlays: React.ReactNode[]; display: React.ReactNode; active: number }) {
+  return (
+    <Popover.Root>
+      <Popover.Trigger asChild>
+        <Button variant="outline" className="gap-2 font-normal max-sm:w-full">
+          <SlidersHorizontal className="size-4 text-muted-foreground" />
+          Map options
+          {active > 0 && <span className="rounded-full bg-muted px-1.5 text-xs tabular-nums text-muted-foreground">{active}</span>}
+        </Button>
+      </Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Content align="end" sideOffset={6} collisionPadding={16}
+          className="z-50 w-[min(280px,calc(100vw-32px))] rounded-lg border bg-popover p-4 text-popover-foreground shadow-md outline-hidden">
+          {overlays.length > 0 && (
+            <div className="mb-3 border-b pb-3">
+              <p className="mb-1 text-xs font-medium text-muted-foreground">Overlays</p>
+              {overlays}
+            </div>
+          )}
+          <p className="mb-1 text-xs font-medium text-muted-foreground">Display</p>
+          {display}
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
+  )
+}
+
 /** A boolean setting remembered in this browser (when storage is available). */
 function useStoredFlag(key: string, initial: boolean): [boolean, (v: boolean) => void] {
   const [v, setV] = React.useState(() => {
@@ -1099,18 +1138,25 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
                 <Toggle id="compare-h" label="Compare" checked={compare} onChange={setCompare} />
               </div>
               {compare && hB && <div className="flex max-sm:w-full"><ModelSelect options={layerModels.filter((m) => m.model !== hA)} value={hB} onChange={setHOther} label="Compare with" /></div>}
-              {entriesA.mslp && <Toggle id="isobars" label="Isobars" checked={isobars} onChange={setIsobars} />}
-              {pairList.length > 0 && <Toggle id="pairs" label="Gradient pairs" checked={showPairs} onChange={setShowPairs} />}
-              {hasWind && <Toggle id="particles" label={layer === "ivt" ? "Moisture particles" : "Wind particles"} checked={particles} onChange={setParticles} />}
             </>
           )}
-          <div className="flex flex-wrap items-center gap-x-5 gap-y-3 max-sm:w-full sm:ml-auto">
-            <Toggle id="terrain" label="Terrain" checked={terrain} onChange={setTerrain} />
-            <Toggle id="smooth" label="Smooth" checked={smooth} onChange={setSmooth} />
-            <div className="flex min-w-[140px] flex-1 items-center gap-3 sm:w-[180px] sm:flex-none">
-              <Label className="text-xs text-muted-foreground">Opacity</Label>
-              <Slider value={[opacity]} min={0.2} max={1} step={0.05} onValueChange={([v]) => setOpacity(v)} aria-label="Grid opacity" />
-            </div>
+          <div className="max-sm:w-full sm:ml-auto">
+            <MapOptions
+              overlays={mode === "hourly" ? [
+                entriesA.mslp && <OptionRow key="iso" id="isobars" label="Isobars" checked={isobars} onChange={setIsobars} />,
+                pairList.length > 0 && <OptionRow key="pairs" id="pairs" label="Gradient pairs" checked={showPairs} onChange={setShowPairs} />,
+                hasWind && <OptionRow key="part" id="particles" label={layer === "ivt" ? "Moisture particles" : "Wind particles"} checked={particles} onChange={setParticles} />,
+              ].filter(Boolean) : []}
+              active={mode === "hourly" ? [entriesA.mslp && isobars, pairList.length > 0 && showPairs, hasWind && particles].filter(Boolean).length : 0}
+              display={<>
+                <OptionRow id="terrain" label="Terrain" checked={terrain} onChange={setTerrain} />
+                <OptionRow id="smooth" label="Smooth" checked={smooth} onChange={setSmooth} />
+                <div className="flex items-center justify-between gap-4 py-1.5">
+                  <Label className="font-normal">Opacity</Label>
+                  <Slider className="w-[130px]" value={[opacity]} min={0.2} max={1} step={0.05} onValueChange={([v]) => setOpacity(v)} aria-label="Grid opacity" />
+                </div>
+              </>}
+            />
           </div>
         </div>
 
