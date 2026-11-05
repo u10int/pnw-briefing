@@ -11,6 +11,43 @@ import type { Briefing, ImpactEvent } from "@/types"
 /** Rain first, then winter hazards, then wind and heat (the order of impacts.HAZARDS); anything else after, by first date. */
 const HAZARD_ORDER = ["heavy_rain_24h", "heavy_rain_72h", "snow_24h", "freezing_precip", "hard_freeze", "wind", "heat"]
 
+/** What the chips' numbers are, said once per hazard in its header. */
+const UNIT_WORD: Record<string, string> = {
+  "in/24h": "peak 24-hour total", "in/72h": "peak 72-hour total", "mph": "peak gust",
+}
+/** A peak, short for a chip: 2.3″, 58 mph, 24°. */
+const short = (v: number, unit: string) =>
+  unit.startsWith("in") ? `${v.toFixed(1)}″` : unit === "mph" ? `${Math.round(v)} mph` : unit === "°F" ? `${Math.round(v)}°` : peak(v, unit)
+
+/** The event's locations as chips, worst first (the lowest for temperatures, the highest otherwise),
+ *  four shown and the rest in a "+N" chip with the full list on hover. */
+function Where({ e }: { e: ImpactEvent }) {
+  const low = e.unit === "°F"
+  const pts = [...e.points].sort((a, b) => (low ? a.peak - b.peak : b.peak - a.peak))
+  const shown = pts.slice(0, 4), rest = pts.slice(4)
+  const chip = "inline-flex items-baseline gap-1.5 rounded-md border bg-muted/40 px-2 py-0.5 text-[13px] whitespace-nowrap"
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {shown.map((p) => (
+        <span key={p.name} className={chip}>
+          <span>{p.name}</span>
+          <span className="font-semibold tabular-nums">{short(p.peak, e.unit)}</span>
+        </span>
+      ))}
+      {rest.length > 0 && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className={`${chip} cursor-default text-muted-foreground`} tabIndex={0}>+{rest.length}</span>
+          </TooltipTrigger>
+          <TooltipContent side="top">
+            {rest.map((p) => <p key={p.name}>{p.name} <span className="font-semibold tabular-nums">{short(p.peak, e.unit)}</span></p>)}
+          </TooltipContent>
+        </Tooltip>
+      )}
+    </div>
+  )
+}
+
 export function ImpactsTable({ data }: { data: Briefing }) {
   if (!data.events.length) {
     return (
@@ -39,7 +76,7 @@ export function ImpactsTable({ data }: { data: Briefing }) {
               <TableHead>When</TableHead>
               <TableHead>Confidence</TableHead>
               <TableHead>Models agreeing</TableHead>
-              <TableHead>Where, with peak value</TableHead>
+              <TableHead>Where, worst first</TableHead>
             </TableRow>
           </TableHeader>
           {ordered.map(([hazard, evs]) => (
@@ -47,7 +84,9 @@ export function ImpactsTable({ data }: { data: Briefing }) {
               <TableRow className="hover:bg-transparent">
                 <TableCell colSpan={4} className="pt-4 pb-1.5">
                   <span className="font-semibold">{evs[0].label}</span>
-                  <span className="ml-2 text-xs text-muted-foreground">{evs.length} {evs.length === 1 ? "period" : "periods"}</span>
+                  <span className="ml-2 text-xs text-muted-foreground">
+                    {evs.length} {evs.length === 1 ? "period" : "periods"} · {UNIT_WORD[evs[0].unit] ?? `peak, ${evs[0].unit}`}
+                  </span>
                 </TableCell>
               </TableRow>
               {evs.map((e, i) => (
@@ -66,17 +105,7 @@ export function ImpactsTable({ data }: { data: Briefing }) {
                       />
                     </div>
                   </TableCell>
-                  <TableCell className="whitespace-normal">
-                    {e.points.slice(0, 4).map((p, k) => (
-                      <React.Fragment key={p.name}>
-                        {k > 0 && ", "}
-                        <span className="whitespace-nowrap">
-                          {p.name} <span className="text-muted-foreground tabular-nums">{peak(p.peak, e.unit)}</span>
-                        </span>
-                      </React.Fragment>
-                    ))}{" "}
-                    {e.points.length > 4 && <span className="text-muted-foreground">and {e.points.length - 4} more</span>}
-                  </TableCell>
+                  <TableCell className="whitespace-normal"><Where e={e} /></TableCell>
                 </TableRow>
               ))}
             </TableBody>
