@@ -14,29 +14,58 @@ const KIND: Record<string, { label: string; variant: "likely" | "possible" | "se
 
 const levelName = (l: EventChange["level"]) => (l === "likely" ? "Likely" : l === "possible" ? "Possible" : "")
 
-/** Region totals now vs yesterday's briefing over the same days, plus hazard changes. */
-export function SinceYesterday({ data }: { data: Briefing }) {
+const since = (c: NonNullable<Briefing["change"]>) => (c.prevIssued ? issuedLabel(c.prevIssued) : "yesterday")
+
+/** Hazards added, upgraded, downgraded or dropped since yesterday's briefing (overview). */
+export function HazardChanges({ data }: { data: Briefing }) {
   const c = data.change
-  if (!c) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle>Since yesterday</CardTitle>
-          <CardDescription>No earlier briefing to compare with yet. This fills in from the second daily run.</CardDescription>
-        </CardHeader>
-      </Card>
-    )
-  }
-  const hazardRows = (["new", "upgraded", "downgraded", "dropped"] as const).flatMap((k) => c.events[k].map((e) => ({ k, e })))
+  const rows = c ? (["new", "upgraded", "downgraded", "dropped"] as const).flatMap((k) => c.events[k].map((e) => ({ k, e }))) : []
+  return (
+    <Card className="gap-3">
+      <CardHeader>
+        <CardTitle>What changed since yesterday</CardTitle>
+        <CardDescription>
+          {c ? <>Impacts compared with the briefing issued {since(c)}. Changes in rain totals are in the Precip tab.</>
+             : "No earlier briefing to compare with yet. This fills in from the second daily run."}
+        </CardDescription>
+      </CardHeader>
+      {c && (
+        <CardContent>
+          {rows.length ? (
+            <ul className="divide-y text-sm">
+              {rows.map(({ k, e }, i) => (
+                <li key={i} className="flex flex-wrap items-center gap-x-2 gap-y-1 py-2 first:pt-0 last:pb-0">
+                  <Badge variant={KIND[k].variant} className="w-[88px] justify-center">{KIND[k].label}</Badge>
+                  <span className="font-medium">{e.label}</span>
+                  <span className="text-muted-foreground">{dateRange(e.start, e.end)}</span>
+                  {(k === "upgraded" || k === "downgraded") && (
+                    <span className="text-muted-foreground">{levelName(e.prevLevel)} → {levelName(e.level)}</span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              No impacts added, upgraded or dropped.{c.events.same.length ? ` ${c.events.same.length} carried over unchanged.` : ""}
+            </p>
+          )}
+        </CardContent>
+      )}
+    </Card>
+  )
+}
+
+/** Region totals now vs yesterday's briefing over the same days (Precip tab). */
+export function TotalChanges({ data }: { data: Briefing }) {
+  const c = data.change
+  if (!c) return null
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Since yesterday</CardTitle>
-        <CardDescription>
-          Compared with the briefing issued {c.prevIssued ? issuedLabel(c.prevIssued) : "yesterday"}, over the days both cover.
-        </CardDescription>
+        <CardTitle>Totals since yesterday</CardTitle>
+        <CardDescription>Region medians compared with the briefing issued {since(c)}, over the days both cover.</CardDescription>
       </CardHeader>
-      <CardContent className="grid gap-6 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+      <CardContent>
         {c.windows.length === 0 ? (
           <p className="text-sm text-muted-foreground">
             No totals to compare: yesterday's briefing doesn't cover the same days or locations.
@@ -71,27 +100,6 @@ export function SinceYesterday({ data }: { data: Briefing }) {
           </TableBody>
         </Table>
         )}
-        <div>
-          <p className="mb-2 text-sm font-medium">Hazards</p>
-          {hazardRows.length ? (
-            <ul className="space-y-2 text-sm">
-              {hazardRows.map(({ k, e }, i) => (
-                <li key={i} className="flex flex-wrap items-center gap-2">
-                  <Badge variant={KIND[k].variant}>{KIND[k].label}</Badge>
-                  <span className="font-medium">{e.label}</span>
-                  <span className="text-muted-foreground">{dateRange(e.start, e.end)}</span>
-                  {(k === "upgraded" || k === "downgraded") && (
-                    <span className="text-muted-foreground">{levelName(e.prevLevel)} → {levelName(e.level)}</span>
-                  )}
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="text-sm text-muted-foreground">
-              No hazards added, upgraded or dropped. {c.events.same.length ? `${c.events.same.length} carried over unchanged.` : ""}
-            </p>
-          )}
-        </div>
       </CardContent>
     </Card>
   )

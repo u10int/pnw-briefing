@@ -1,6 +1,8 @@
 import * as React from "react"
 import { CartesianGrid, Line, LineChart, ReferenceArea, ReferenceLine, XAxis, YAxis } from "recharts"
+import { ChevronDown } from "lucide-react"
 
+import { Button } from "@/components/ui/button"
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { type ChartConfig, ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
@@ -963,44 +965,62 @@ export function SnowpackCard({ data }: { data: Briefing }) {
 const issuedAt = (iso: string | null) =>
   iso ? new Date(iso).toLocaleString("en-US", { weekday: "short", hour: "numeric", minute: "2-digit", timeZone: PT, timeZoneName: "short" }) : ""
 
+/** Collapsed to each office's key messages (or the synopsis's opening paragraph when there are
+ *  none); one toggle opens the full synopsis and hydrology for both offices. */
 export function DiscussionsCard({ data }: { data: Briefing }) {
   const ds = data.outlooks?.discussions ?? []
+  const [full, setFull] = React.useState(false)
   if (!ds.length) return null
+  const more = ds.some((d) => (d.keyMessages ? (d.synopsis?.length ?? 0) > 0 : (d.synopsis?.length ?? 0) > 1) || (d.hydrology?.length ?? 0) > 0)
+  const head = (t: string) => <p className="mb-1 text-xs font-medium text-muted-foreground uppercase">{t}</p>
   return (
     <Card>
       <CardHeader>
         <CardTitle>From the forecast discussions</CardTitle>
-        <CardDescription>The synopsis, key messages and hydrology notes from each NWS office's latest Area Forecast Discussion.</CardDescription>
+        <CardDescription>The key messages, or the start of the synopsis, from each NWS office's latest Area Forecast Discussion{more && "; the rest of the synopsis and the hydrology notes are a click away"}.</CardDescription>
+        {more && (
+          <CardAction>
+            <Button variant="outline" size="sm" onClick={() => setFull((x) => !x)} aria-expanded={full}>
+              {full ? "Show less" : "Show synopsis and hydrology"}
+              <ChevronDown className={`transition-transform ${full ? "rotate-180" : ""}`} />
+            </Button>
+          </CardAction>
+        )}
       </CardHeader>
       <CardContent className="grid gap-6 lg:grid-cols-2">
-        {ds.map((d) => (
-          <div key={d.office} className="space-y-3 text-sm">
-            <div className="flex flex-wrap items-baseline justify-between gap-2">
-              <span className="font-medium">{d.name}</span>
-              <a className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground" href={d.url} target="_blank" rel="noopener">
-                Issued {issuedAt(d.issued)} · full discussion
-              </a>
+        {ds.map((d) => {
+          const syn = d.synopsis ?? []
+          const showSyn = full ? syn : d.keyMessages ? [] : syn.slice(0, 1)
+          return (
+            <div key={d.office} className="space-y-3 text-sm">
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <span className="font-medium">{d.name}</span>
+                <a className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground" href={d.url} target="_blank" rel="noopener">
+                  Issued {issuedAt(d.issued)} · full discussion
+                </a>
+              </div>
+              {d.keyMessages && (
+                <div>
+                  {head("Key messages")}
+                  <ul className="list-disc space-y-1 pl-5">{d.keyMessages.map((k, i) => <li key={i}>{k.replace(/^\*\s*/, "")}</li>)}</ul>
+                </div>
+              )}
+              {showSyn.length > 0 && (
+                <div>
+                  {head("Synopsis")}
+                  <div className="space-y-2">{showSyn.map((p, i) => <p key={i} className="leading-relaxed">{p}</p>)}</div>
+                </div>
+              )}
+              {full && d.hydrology && (
+                <div>
+                  {head("Hydrology")}
+                  <div className="space-y-2">{d.hydrology.map((p, i) => <p key={i} className="leading-relaxed">{p}</p>)}</div>
+                </div>
+              )}
+              {!d.keyMessages && !syn.length && <p className="text-muted-foreground">No synopsis in the latest discussion.</p>}
             </div>
-            {d.keyMessages && (
-              <div>
-                <p className="mb-1 text-xs font-medium text-muted-foreground uppercase">Key messages</p>
-                <ul className="list-disc space-y-1 pl-5">{d.keyMessages.map((k, i) => <li key={i}>{k.replace(/^\*\s*/, "")}</li>)}</ul>
-              </div>
-            )}
-            {d.synopsis && (
-              <div>
-                <p className="mb-1 text-xs font-medium text-muted-foreground uppercase">Synopsis</p>
-                {d.synopsis.map((p, i) => <p key={i} className="leading-relaxed">{p}</p>)}
-              </div>
-            )}
-            {d.hydrology && (
-              <div>
-                <p className="mb-1 text-xs font-medium text-muted-foreground uppercase">Hydrology</p>
-                {d.hydrology.map((p, i) => <p key={i} className="leading-relaxed">{p}</p>)}
-              </div>
-            )}
-          </div>
-        ))}
+          )
+        })}
       </CardContent>
     </Card>
   )

@@ -1,7 +1,7 @@
 # PNW 14-day multi-model precipitation & impacts briefing — configuration
 # Everything you are likely to tune lives here.
 
-title: "PNW precipitation and impacts"
+title: "PNW weather briefing"
 timezone: America/Los_Angeles
 days: 14
 

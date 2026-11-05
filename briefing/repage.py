@@ -2,7 +2,7 @@
 
     python -m briefing.repage web/public/data/briefing.json
 
-Re-applies the labels that come straight from config.yaml (pressure-gradient station names,
+Re-applies the labels that come straight from config.yaml (the page title, pressure-gradient station names,
 codes, locations, meanings and thresholds), so a config tweak shows up without re-fetching anything, and
 prints the briefing's local date (YYYY-MM-DD) for the dated archive. Everything computed from
 model data stays as published.
@@ -21,6 +21,8 @@ ROOT = Path(__file__).resolve().parent
 
 
 def refresh(data: dict, cfg: dict) -> dict:
+    if cfg.get("title"):
+        data.setdefault("meta", {})["title"] = cfg["title"]
     by_id = {g["id"]: g for g in cfg.get("gradients", [])}
     for g in data.get("gradients") or []:
         c = by_id.get(g.get("id"))
