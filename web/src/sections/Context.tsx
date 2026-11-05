@@ -138,8 +138,8 @@ export function ObservedCard({ data }: { data: Briefing }) {
           against 1991–2020 normals. Wet ground turns the same rain into more runoff.
         </CardDescription>
       </CardHeader>
-      <CardContent className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)]">
-        <div className="space-y-3">
+      <CardContent className="grid grid-cols-[minmax(0,1fr)] gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)]">
+        <div className="min-w-0 space-y-3">
           <ul className="space-y-1 text-sm">
             {data.regions.map((r) => {
               const s = w30.regions[r.id]
@@ -151,9 +151,9 @@ export function ObservedCard({ data }: { data: Briefing }) {
           </ul>
           <div className="max-h-[420px] overflow-auto rounded-md border">
             <Table>
-              <TableHeader className="sticky top-0 bg-card">
+              <TableHeader className="sticky top-0 z-20 bg-card">
                 <TableRow>
-                  <TableHead>Location</TableHead>
+                  <TableHead className="sticky left-0 z-10 bg-card">Location</TableHead>
                   <TableHead className="text-right">7 days</TableHead>
                   <TableHead className="text-right">% normal</TableHead>
                   <TableHead className="text-right">30 days</TableHead>
@@ -163,7 +163,7 @@ export function ObservedCard({ data }: { data: Briefing }) {
               <TableBody>
                 {rows.map((r) => (
                   <TableRow key={r.name} className={r.group ? "bg-muted/40 font-medium" : ""}>
-                    <TableCell>{r.name}</TableCell>
+                    <TableCell className={`sticky left-0 z-10 ${r.group ? "bg-[color-mix(in_oklab,var(--muted)_40%,var(--card))]" : "bg-card"}`}>{r.name}</TableCell>
                     <TableCell className="text-right tabular-nums">{inch(r.s7?.obs ?? null, 2)}</TableCell>
                     <TableCell className="text-right tabular-nums" style={pctCell(r.s7?.pct ?? null)}>{r.s7?.pct == null ? "–" : Math.round(r.s7.pct)}</TableCell>
                     <TableCell className="text-right tabular-nums">{inch(r.s30?.obs ?? null, 2)}</TableCell>
