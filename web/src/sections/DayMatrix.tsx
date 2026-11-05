@@ -2,7 +2,7 @@ import * as React from "react"
 
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectSeparator, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import type { Ramp } from "@/lib/ramps"
+import { fmtLevel, legendBins, type Ramp } from "@/lib/ramps"
 import type { Briefing, DailyVars, Model, N } from "@/types"
 
 /** Location × day tables (rain and snow, temperatures, wind): the model picker, the per-model or
@@ -104,15 +104,16 @@ export function rampCell(v: N, ramp: Ramp, floor = false): React.CSSProperties {
   return { background: ramp.colors[i], color: inkOn(ramp.colors[i]) }
 }
 
-/** A compact strip of a ramp's colours between two labels. */
-export function RampStrip({ ramp, from, to, n = 8, start = 0, extra }: { ramp: Ramp; from: string; to: string; n?: number; start?: number; extra?: React.ReactNode }) {
-  const step = Math.max(1, Math.floor((ramp.colors.length - start) / n))
-  const cs = ramp.colors.slice(start).filter((_, i) => i % step === 0).slice(0, n)
+/** A compact strip of a ramp over `range`, labelled at its ends (the top end means "and up"). */
+export function RampStrip({ ramp, range, unit = "", from, extra }: { ramp: Ramp; range: [number, number]; unit?: string; from?: string; extra?: React.ReactNode }) {
+  const bins = legendBins(ramp, range)
   return (
-    <div className="flex items-center gap-1 text-xs text-muted-foreground">
-      <span>{from}</span>
-      {cs.map((c) => <span key={c} className="h-2.5 w-4 first:rounded-l-[3px] last:rounded-r-[3px]" style={{ background: c }} />)}
-      <span>{to}</span>
+    <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+      <span>{from ?? `${fmtLevel(range[0])}${unit}`}</span>
+      <span className="flex h-2.5 w-36 overflow-hidden rounded-[3px]">
+        {bins.map((b, i) => <span key={i} className="min-w-0 flex-1" style={{ background: b.color }} />)}
+      </span>
+      <span>{fmtLevel(range[1])}{unit}+</span>
       {extra}
     </div>
   )

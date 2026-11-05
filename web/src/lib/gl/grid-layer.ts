@@ -22,8 +22,10 @@ export interface GridDraw {
   auxB?: Float32Array | null
 }
 
-const MAX_LEVELS = 32
-const LUT_W = 32, LUT_H = 6
+// up to 256 levels: Maue's temperature table has 201 one-degree bands. The levels sit in a float
+// texture (a uniform array that long would run past some GPUs' uniform limits)
+const MAX_LEVELS = 256
+const LUT_W = MAX_LEVELS, LUT_H = 6
 
 const VS = /* glsl */ `#version 300 es
 layout(location = 0) in vec2 aPos;
@@ -40,11 +42,10 @@ precision highp float;
 precision highp int;
 precision highp sampler2D;
 ${GLSL_GRID}
-uniform sampler2D uA, uB, uAuxA, uAuxB, uLut;
+uniform sampler2D uA, uB, uAuxA, uAuxB, uLut, uLevelTex;
 uniform bool uHasB, uHasAux, uSmooth, uClampLow;
 uniform float uT, uOpacity;
 uniform int uMode, uNLevels, uNColors;
-uniform float uLevels[${MAX_LEVELS}];
 in vec2 vMerc;
 out vec4 fragColor;
 
@@ -97,14 +98,18 @@ float bicubic(vec2 f) {
 
 vec4 lut(int bin, int row) { return texelFetch(uLut, ivec2(clamp(bin, 0, uNColors - 1), row), 0); }
 
+float level(int k) { return texelFetch(uLevelTex, ivec2(k, 0), 0).r; }
+
 vec4 ramp(float v, int row) {
-  if (v < uLevels[0]) return uClampLow ? lut(0, row) : vec4(0.0);
-  int bin = 0;
-  for (int k = 1; k < ${MAX_LEVELS}; k++) {
-    if (k >= uNLevels) break;
-    if (v >= uLevels[k]) bin = k;
+  if (v < level(0)) return uClampLow ? lut(0, row) : vec4(0.0);
+  // the last level at or below v, by binary search (8 steps cover 256 levels)
+  int lo = 0, hi = uNLevels - 1;
+  for (int i = 0; i < 9; i++) {
+    if (lo >= hi) break;
+    int mid = (lo + hi + 1) / 2;
+    if (v >= level(mid)) lo = mid; else hi = mid - 1;
   }
-  return lut(bin, row);
+  return lut(lo, row);
 }
 
 void main() {
@@ -137,7 +142,7 @@ const rgb = (h: string) => {
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255]
 }
 
-/** Colour table for a paint: rows of up to 32 bins, plus the level boundaries. */
+/** Colour table for a paint: rows of up to MAX_LEVELS bins, plus the level boundaries. */
 function lutFor(p: Paint): { pixels: Uint8Array; levels: number[]; colors: number; clampLow: boolean } {
   const px = new Uint8Array(LUT_W * LUT_H * 4)
   const put = (row: number, bin: number, hex: string, alpha = 255) => {
@@ -172,6 +177,7 @@ export class GridLayer implements CustomLayerInterface {
   private prog?: Program
   private vao?: WebGLVertexArrayObject
   private lut?: WebGLTexture
+  private levelTex?: WebGLTexture
   private lutKey = ""
   private lutInfo?: ReturnType<typeof lutFor>
   private draw: GridDraw | null = null
@@ -187,12 +193,14 @@ export class GridLayer implements CustomLayerInterface {
     this.prog = program(gl, VS, FS)
     this.vao = unitQuad(gl)
     this.lut = texture(gl, gl.RGBA8, LUT_W, LUT_H, gl.RGBA, gl.UNSIGNED_BYTE, null)
+    this.levelTex = texture(gl, gl.R32F, MAX_LEVELS, 1, gl.RED, gl.FLOAT, null)
   }
 
   onRemove(_map: MlMap, gl: WebGL2RenderingContext) {
     if (this.prog) gl.deleteProgram(this.prog.program)
     if (this.vao) gl.deleteVertexArray(this.vao)
     if (this.lut) gl.deleteTexture(this.lut)
+    if (this.levelTex) gl.deleteTexture(this.levelTex)
   }
 
   setDraw(d: GridDraw | null, t = 0) {
@@ -216,7 +224,7 @@ export class GridLayer implements CustomLayerInterface {
 
   render(gl: WebGL2RenderingContext, args: CustomRenderMethodInput) {
     const d = this.draw
-    if (!d || !this.prog || !this.vao || !this.lut) return
+    if (!d || !this.prog || !this.vao || !this.lut || !this.levelTex) return
     const p = this.prog
     const tex = fieldTextures(gl)
     const key = paintKey(d.paint)
@@ -226,6 +234,10 @@ export class GridLayer implements CustomLayerInterface {
       gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false)
       gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false)
       gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, LUT_W, LUT_H, gl.RGBA, gl.UNSIGNED_BYTE, this.lutInfo.pixels)
+      const lv = new Float32Array(MAX_LEVELS).fill(3e38)
+      lv.set(this.lutInfo.levels.slice(0, MAX_LEVELS))
+      gl.bindTexture(gl.TEXTURE_2D, this.levelTex)
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, MAX_LEVELS, 1, gl.RED, gl.FLOAT, lv)
       this.lutKey = key
     }
     const info = this.lutInfo!
@@ -246,6 +258,7 @@ export class GridLayer implements CustomLayerInterface {
     bind(2, "uAuxA", tx)
     bind(3, "uAuxB", hasAux && d.auxB ? tex.get(g, d.auxB) : tx)
     bind(4, "uLut", this.lut)
+    bind(5, "uLevelTex", this.levelTex)
 
     gl.uniformMatrix4fv(p.u("uMatrix"), false, mercatorMatrix(args))
     gl.uniform4f(p.u("uBounds"), mercX(g.west), mercY(g.north), mercX(g.east), mercY(g.south))
@@ -259,9 +272,6 @@ export class GridLayer implements CustomLayerInterface {
     gl.uniform1i(p.u("uMode"), d.paint.kind === "ptype" ? 1 : d.paint.kind === "refc" ? 2 : 0)
     gl.uniform1i(p.u("uNLevels"), Math.min(info.levels.length, MAX_LEVELS))
     gl.uniform1i(p.u("uNColors"), info.colors)
-    const lv = new Float32Array(MAX_LEVELS).fill(3e38)
-    lv.set(info.levels.slice(0, MAX_LEVELS))
-    gl.uniform1fv(p.u("uLevels[0]"), lv)
 
     gl.enable(gl.BLEND)
     gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA)

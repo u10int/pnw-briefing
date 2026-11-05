@@ -70,7 +70,7 @@ export function RainByDayCard({ data }: { data: Briefing }) {
           )}
           <ModelPick models={models} value={pick} onChange={setPick} />
           <div className="sm:ml-auto">
-            <RampStrip ramp={ramp} from={`${ramp.levels[0]}″`} to={`${ramp.levels[7]}″+`} extra={<span className="ml-2">T = trace</span>} />
+            <RampStrip ramp={ramp} range={v === "precip" ? [0.01, 4] : [0.1, 24]} unit="″" extra={<span className="ml-2">T = trace</span>} />
           </div>
         </div>
         <DayMatrix dates={data.dates} rows={rows} leadHead="Total" leadSub={`${span} days`} dimFrom={model ? model.days : undefined}

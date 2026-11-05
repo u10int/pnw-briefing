@@ -2,7 +2,7 @@ import * as React from "react"
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { TEMP } from "@/lib/ramps"
+import { TDEP, TEMP } from "@/lib/ramps"
 import { DayMatrix, dayLabel, MEDIAN, type MatrixRow, ModelPick, modelDays, modelsWith, RampStrip, rampCell, regionDays, usePick } from "@/sections/DayMatrix"
 import type { Briefing, N } from "@/types"
 
@@ -11,16 +11,8 @@ type Show = "dep" | "actual"
 const WORD: Record<Var, string> = { tmax: "high", tmin: "low" }
 const KEY = { tmax: "temperature_2m_max", tmin: "temperature_2m_min" } as const
 
-// blue below normal, red above, white within ±2° (matches the map's ramp)
-const EDGES = [-15, -10, -5, -2, 2, 5, 10, 15]
-const COLORS = ["#2166ac", "#4393c3", "#92c5de", "#d1e5f0", "#f7f7f7", "#fddbc7", "#f4a582", "#d6604d", "#b2182b"]
-
-export function depCell(v: N): React.CSSProperties {
-  if (v == null) return { color: "var(--muted-foreground)" }
-  const i = EDGES.findIndex((e) => v < e)
-  const k = i === -1 ? COLORS.length - 1 : i
-  return { background: COLORS[k], color: k <= 1 || k >= 7 ? "#fff" : "#1b1f24" }
-}
+/** A departure cell on the map's departure ramp (Maue's temperature anomaly table). */
+export const depCell = (v: N): React.CSSProperties => rampCell(v, TDEP)
 export const signed = (v: N, d = 0) => {
   if (v == null) return "–"
   const r = Number(v.toFixed(d))
@@ -113,13 +105,7 @@ export function TempDepartureCard({ data }: { data: Briefing }) {
           <Tabs value={String(w.days)} onValueChange={(x) => setWin(Number(x))}>
             <TabsList>{td.windows.map((x) => <TabsTrigger key={x.days} value={String(x.days)}>{x.label}</TabsTrigger>)}</TabsList>
           </Tabs>
-          {show === "dep" ? (
-            <div className="flex items-center gap-1 text-xs text-muted-foreground">
-              <span>colder</span>
-              {COLORS.map((c) => <span key={c} className="h-2.5 w-4 first:rounded-l-[3px] last:rounded-r-[3px]" style={{ background: c }} />)}
-              <span>warmer</span>
-            </div>
-          ) : <RampStrip ramp={TEMP} from="20°" to="95°+" start={6} n={9} />}
+          {show === "dep" ? <RampStrip ramp={TDEP} range={[-20, 20]} unit="°" /> : <RampStrip ramp={TEMP} range={[20, 95]} unit="°" />}
         </div>
         <DayMatrix dates={td.dates} rows={rows} leadHead="Avg" leadSub={w.label} dimFrom={w.days}
           style={show === "dep" ? depCell : (x) => rampCell(x, TEMP)} fmt={show === "dep" ? (x) => signed(x) : deg} tip={tip} />

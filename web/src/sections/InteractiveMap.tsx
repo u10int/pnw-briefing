@@ -21,7 +21,7 @@ import type { MapRequest } from "@/lib/maplink"
 import { GridLayer, type GridDraw } from "@/lib/gl/grid-layer"
 import { ParticleLayer, type WindDraw } from "@/lib/gl/particle-layer"
 import { type Grid, sameGrid } from "@/lib/gl/util"
-import { FRZ, GUST, IVT, PCT, PGRAD, PRECIP, PROB, PTYPE_COLORS, PTYPE_NAMES, type Ramp, REFC, SNOW, SPREAD, TDEP, TEMP, WIND } from "@/lib/ramps"
+import { FRZ, GUST, IVT, legendBins, PCT, PGRAD, PRECIP, PROB, PTYPE_COLORS, PTYPE_NAMES, type Ramp, REFC, SNOW, SPREAD, TDEP, TEMP, WIND } from "@/lib/ramps"
 import type { Briefing, Cog, ExtremeVar, FieldEntry, FieldsManifest, FieldVar, Gradient } from "@/types"
 
 // ------------------------------------------------------------------ map plumbing
@@ -444,14 +444,15 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
 // ------------------------------------------------------------------ legends
 
 function RampLegend({ ramp, every = 1, note }: { ramp: Ramp; every?: number; note?: string }) {
+  const bins = legendBins(ramp, undefined, every)
   return (
     <div className="space-y-1.5">
       <div className="text-xs text-muted-foreground">{ramp.label} ({ramp.units})</div>
       <div className="flex">
-        {ramp.colors.map((c, i) => (
+        {bins.map((b, i) => (
           <div key={i} className="min-w-0 flex-1">
-            <div className="h-2.5" style={{ background: c, borderRadius: i === 0 ? "3px 0 0 3px" : i === ramp.colors.length - 1 ? "0 3px 3px 0" : 0 }} />
-            <div className="pt-1 text-[10.5px] tabular-nums text-muted-foreground">{i % every === 0 ? ramp.levels[i].toLocaleString("en-US") : ""}</div>
+            <div className="h-2.5" style={{ background: b.color, borderRadius: i === 0 ? "3px 0 0 3px" : i === bins.length - 1 ? "0 3px 3px 0" : 0 }} />
+            <div className="pt-1 text-[10.5px] whitespace-nowrap tabular-nums text-muted-foreground">{b.label}</div>
           </div>
         ))}
       </div>
@@ -477,12 +478,12 @@ function RadarLegend({ withRefc }: { withRefc: boolean }) {
       {Object.entries(REFC).map(([k, r]) => (
         <div key={k} className="grid grid-cols-[96px_1fr] items-center gap-2">
           <span className="text-xs">{r.label}</span>
-          <div className="flex h-2.5 overflow-hidden rounded-[3px]">{r.colors.map((c, i) => <div key={i} className="flex-1" style={{ background: c }} />)}</div>
+          <div className="flex h-2.5 overflow-hidden rounded-[3px]">{r.colors.map((c, i) => <div key={i} className="min-w-0 flex-1" style={{ background: c }} />)}</div>
         </div>
       ))}
       <div className="grid grid-cols-[96px_1fr] gap-2">
         <span />
-        <div className="flex text-[10.5px] tabular-nums text-muted-foreground">{REFC.rain.levels.map((l, i) => <div key={i} className="flex-1">{i % 2 === 0 ? l : ""}</div>)}</div>
+        <div className="flex text-[10.5px] tabular-nums text-muted-foreground">{legendBins(REFC.rain).map((b, i) => <div key={i} className="min-w-0 flex-1 whitespace-nowrap">{b.label}</div>)}</div>
       </div>
     </div>
   )
@@ -1167,14 +1168,14 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
           {showB && <MapPane data={data} view={viewB} clock={clock} opacity={opacity} smooth={smooth} particles={showParticles} particleColor={ink} sync={sync} terrain={terrain} />}
         </div>
 
-        {mode === "totals" ? <RampLegend ramp={totRamp} every={totRamp.levels.length > 16 ? 2 : 1} /> : (
+        {mode === "totals" ? <RampLegend ramp={totRamp} every={totRamp.ticks ? 1 : totRamp.levels.length > 16 ? 2 : 1} /> : (
           <div className="space-y-2">
             {layer === "radar" && <RadarLegend withRefc={!!entriesA.refc} />}
             {smooth && layer === "radar" && !entriesA.refc && <p className="text-xs text-muted-foreground">Precipitation type is a category, so it isn't smoothed.</p>}
             {smooth && layer === "radar" && entriesA.refc && entriesA.ptype && <p className="text-xs text-muted-foreground">Reflectivity is smoothed; precipitation type keeps each model cell's category.</p>}
             {layer === "apcp" && <RampLegend ramp={APCP} note={`Running total since ${accStart}, the start of the briefing.`} />}
             {layer === "asnow" && <RampLegend ramp={ASNOW} note={`Running total since ${accStart}. NCEP models report their own snowfall; ECMWF snowfall is water equivalent at 10:1.`} />}
-            {layer === "t2m" && <RampLegend ramp={TEMP} every={2} note="The dashed blue line marks 32°F." />}
+            {layer === "t2m" && <RampLegend ramp={TEMP} note="The dashed blue line marks 32°F." />}
             {layer === "gust" && <RampLegend ramp={GUST} />}
             {layer === "wind" && <RampLegend ramp={WIND} note={showParticles ? "Particles trace the 10 m wind; faster particles mean stronger wind." : "Arrows point the way the wind is blowing; longer arrows are stronger winds."} />}
             {layer === "frz" && <RampLegend ramp={FRZ} every={2} note="Snow usually reaches the ground about 1,000 ft below the freezing level." />}

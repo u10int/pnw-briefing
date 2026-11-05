@@ -1,21 +1,29 @@
-// Colour ramps for gridded fields. Precipitation, snowfall and spread match briefing/maps.py so the
-// interactive map and the PNG small multiples read the same way.
+// Colour ramps for gridded fields and the location tables. Precipitation, snowfall, temperature,
+// temperature departure, wind, reflectivity and water vapour transport use Ryan Maue's GrADS tables
+// (./ramps/maue.json, from forecasteagle.com/ramps); briefing/maps.py reads the same file, so the
+// interactive map, the tables and the PNG small multiples read the same way. Spread, odds, percent
+// of normal, pressure gradient and freezing level have no Maue table and keep their own.
 
-export interface Ramp { levels: number[]; colors: string[]; units: string; label: string; clampLow?: boolean }
+import maue from "./ramps/maue.json"
+
+/** `show`: the part of a long ramp worth drawing in a legend for this region; `ticks`: the levels
+ *  a legend labels (otherwise every few). */
+export interface Ramp {
+  levels: number[]; colors: string[]; units: string; label: string; clampLow?: boolean
+  show?: [number, number]; ticks?: number[]
+}
 // colors[i] fills [levels[i], levels[i+1]); the last colour fills >= the last level. Below levels[0] is clear.
 
-export const PRECIP: Ramp = {
-  label: "Precipitation, liquid equivalent", units: "in",
-  levels: [0.1, 0.25, 0.5, 1, 1.5, 2, 3, 4, 6, 8, 10, 15, 20, 30],
-  colors: ["#d3e2f8", "#bdd3f4", "#a2c1ef", "#86afea", "#6a9ce4", "#4f88dd", "#3474d5", "#1f5fd1", "#1a50b2",
-           "#164293", "#123576", "#0f2a5e", "#0b1f47", "#1c1240"],
+type MaueName = keyof typeof maue.ramps
+function fromMaue(name: MaueName, label: string, units: string, extra: Partial<Ramp> = {}): Ramp {
+  const stops = maue.ramps[name].stops as [number, string][]
+  return { label, units, levels: stops.map((s) => s[0]), colors: stops.map((s) => s[1]), ...extra }
 }
-export const SNOW: Ramp = {
-  label: "Snowfall", units: "in",
-  levels: [0.5, 1, 2, 4, 6, 8, 12, 18, 24, 36, 48, 72],
-  colors: ["#e3dff8", "#cdc6f2", "#b4aaeb", "#998de3", "#7f70da", "#6553cf", "#5040b6", "#3f3299", "#30267b",
-           "#221a5e", "#160f42", "#0d082c"],
-}
+
+export const PRECIP: Ramp = fromMaue("maue_precip_rgbset", "Precipitation, liquid equivalent", "in",
+  { show: [0.01, 20], ticks: [0.01, 0.1, 0.25, 0.5, 1, 2, 3, 4, 6, 8, 10, 16] })
+export const SNOW: Ramp = fromMaue("maue_snowfall", "Snowfall", "in",
+  { show: [0.1, 48], ticks: [0.1, 1, 2, 4, 6, 8, 12, 18, 24, 36, 48] })
 export const SPREAD: Ramp = {
   label: "Model spread, highest minus lowest", units: "in",
   levels: [0.25, 0.5, 1, 2, 3, 4, 6, 8, 12],
@@ -33,12 +41,9 @@ export const PCT: Ramp = {
   colors: ["#8c510a", "#bf812d", "#dfc27d", "#f6e8c3", "#f5f5f5", "#c7eae5", "#80cdc1", "#35978f", "#01665e", "#003c30"],
 }
 
-/** Integrated water vapor transport, with the AR threshold (250) and CW3E scale breaks marked. */
-export const IVT: Ramp = {
-  label: "Water vapor transport (IVT)", units: "kg m⁻¹ s⁻¹",
-  levels: [150, 250, 375, 500, 625, 750, 1000, 1250],
-  colors: ["#d7e8f4", "#8fc6e6", "#4f9fd8", "#3fae6a", "#9ccc3c", "#e9b625", "#f08a24", "#d9342b"],
-}
+/** Integrated water vapor transport; 250 and up is atmospheric-river conditions. */
+export const IVT: Ramp = fromMaue("maue_ivt", "Water vapor transport (IVT)", "kg m⁻¹ s⁻¹",
+  { show: [20, 1500], ticks: [20, 100, 250, 500, 800, 1000, 1500] })
 
 /** Sea-level pressure gradient strength. Synoptic gradients run 1–2 hPa per 100 km; 3+ is a
  *  windstorm-class gradient, and gap flows (Gorge, Fraser) pack even tighter. */
@@ -48,11 +53,23 @@ export const PGRAD: Ramp = {
   colors: ["#fdf0c4", "#fbd98a", "#f7b955", "#f19537", "#e5702b", "#cf4a2a", "#ad2a35", "#831a45", "#56124a"],
 }
 
-/** Departure from normal (°F): blue below, red above, white within ±2°. */
-export const TDEP: Ramp = {
-  label: "Departure from 1991–2020 normal", units: "°F", clampLow: true,
-  levels: [-20, -15, -10, -5, -2, 2, 5, 10, 15],
-  colors: ["#2166ac", "#4393c3", "#92c5de", "#d1e5f0", "#f7f7f7", "#fddbc7", "#f4a582", "#d6604d", "#b2182b"],
+/** Departure from normal (°F). */
+export const TDEP: Ramp = fromMaue("maue_temp_anomaly", "Departure from 1991–2020 normal", "°F",
+  { clampLow: true, show: [-30, 30], ticks: [-30, -20, -10, -5, 0, 5, 10, 20, 30] })
+
+/** A level as a legend label: whole numbers from 10 up, otherwise up to two decimals. */
+export const fmtLevel = (v: number) =>
+  Math.abs(v) >= 10 ? String(Math.round(v)) : String(Number(v.toFixed(Math.abs(v) >= 1 ? 1 : 2)))
+
+/** The bins a legend draws (those inside `show`, or `range`), each with its label or "". */
+export function legendBins(r: Ramp, range?: [number, number], every = 1) {
+  const [lo, hi] = range ?? r.show ?? [r.levels[0], r.levels[r.levels.length - 1]]
+  const idx = r.levels.map((_, i) => i).filter((i) => r.levels[i] >= lo - 1e-6 && r.levels[i] <= hi + 1e-6)
+  const ticked = (v: number) => r.ticks ? r.ticks.some((t) => Math.abs(t - v) < 1e-6) : null
+  return idx.map((i, k) => {
+    const t = ticked(r.levels[i])
+    return { color: r.colors[i], label: (t ?? k % every === 0) ? fmtLevel(r.levels[i]) : "" }
+  })
 }
 
 function hexToRgb(h: string): [number, number, number] {
@@ -79,19 +96,11 @@ export function colorizer(r: Ramp) {
 
 // ---- time-stepped fields
 
-export const TEMP: Ramp = {
-  label: "Temperature at 2 m", units: "°F", clampLow: true,
-  levels: [-10, -5, 0, 5, 10, 15, 20, 25, 30, 32, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100],
-  colors: ["#4b2c7f", "#5e3a9e", "#6b4bb8", "#5867c9", "#4a7fd4", "#3f97d9", "#43acd6", "#5cc0d2", "#8ad3d4",
-           "#b7e3cf", "#d6ecb4", "#e8ef9c", "#f4e98a", "#f7d872", "#f6c25e", "#f2a84f", "#ec8c45", "#e2703f",
-           "#d4543a", "#c13a36", "#a62533", "#87162d", "#661026", "#4a0b1d"],
-}
-export const WIND: Ramp = {
-  label: "Wind speed", units: "mph", clampLow: true,
-  levels: [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 60, 70, 80],
-  colors: ["#f2f4f7", "#dbe7f0", "#bcd7e6", "#95c3d8", "#6eaec9", "#4b98b8", "#3a8f8c", "#5a9f4f", "#a3b23a",
-           "#d9a72c", "#e47c2a", "#d9482b", "#b0203f", "#7a1258"],
-}
+export const TEMP: Ramp = fromMaue("maue_weather_us_temp", "Temperature at 2 m", "°F",
+  { clampLow: true, show: [-10, 110], ticks: [-10, 0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110] })
+// Maue's wind table is in knots (6, 7, 8, 10, 12 … 135 kt), here on a miles-per-hour axis
+export const WIND: Ramp = fromMaue("maue_wind10m_mph", "Wind speed", "mph",
+  { show: [6.9, 103.6], ticks: [6.904674, 11.50779, 23.01558, 34.52337, 43.729602, 57.53895, 69.04674, 92.06232] })
 export const GUST: Ramp = { ...WIND, label: "Wind gust" }
 export const FRZ: Ramp = {
   label: "Freezing level, above sea level", units: "ft", clampLow: true,
@@ -100,24 +109,24 @@ export const FRZ: Ramp = {
            "#f6e29a", "#f6cb7a", "#f2ad5d", "#e88b47", "#d9663a", "#c03f33"],
 }
 
-/** Simulated reflectivity, coloured by precipitation type (rain/snow/mix/freezing rain/sleet). */
+/** Simulated reflectivity, coloured by precipitation type. Rain uses Maue's radar table; the other
+ *  types keep their own hues, sampled onto the same dBZ levels so one set of levels serves every row. */
+const RADAR = fromMaue("maue_radar", "Rain", "dBZ", { ticks: [9, 15, 21, 30, 39, 45, 51, 60, 69] })
 const DBZ = [5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65]
+const onRadar = (label: string, colors: string[]): Ramp => ({
+  label, units: "dBZ", levels: RADAR.levels,
+  colors: RADAR.levels.map((v) => { let i = DBZ.length - 1; while (i > 0 && v < DBZ[i]) i--; return colors[i] }),
+})
 export const REFC: Record<string, Ramp> = {
-  rain: { label: "Rain", units: "dBZ", levels: DBZ,
-    colors: ["#b9ecbd", "#7fd88a", "#45bf5a", "#22993b", "#f2e33a", "#e8c22b", "#f0962a", "#e85d26", "#d6262a",
-             "#b0122d", "#c21d8e", "#8f2fbf", "#f5e9ff"] },
-  snow: { label: "Snow", units: "dBZ", levels: DBZ,
-    colors: ["#d9e9fc", "#b4d3f8", "#8dbcf3", "#67a5ed", "#468ce3", "#2f73d2", "#215cb8", "#18479d", "#133883",
-             "#0f2c6a", "#0b2154", "#081840", "#050f2c"] },
-  mix: { label: "Mix", units: "dBZ", levels: DBZ,
-    colors: ["#f1d6f0", "#e7b6e3", "#dd95d6", "#d273c9", "#c654bb", "#b53caa", "#9f2a97", "#881c84", "#701371",
-             "#590d5e", "#43084b", "#310538", "#220326"] },
-  "freezing rain": { label: "Freezing rain", units: "dBZ", levels: DBZ,
-    colors: ["#fbd3de", "#f7aac1", "#f281a4", "#ea5888", "#dd356f", "#c7205c", "#ad164d", "#921040", "#770c34",
-             "#5e0828", "#46061e", "#320415", "#22020d"] },
-  sleet: { label: "Sleet", units: "dBZ", levels: DBZ,
-    colors: ["#fde2c4", "#fbc993", "#f8ae63", "#f39237", "#e97a1f", "#d86514", "#c1540f", "#a7450c", "#8c380a",
-             "#712c08", "#572106", "#401804", "#2c1003"] },
+  rain: RADAR,
+  snow: onRadar("Snow", ["#d9e9fc", "#b4d3f8", "#8dbcf3", "#67a5ed", "#468ce3", "#2f73d2", "#215cb8", "#18479d", "#133883",
+                        "#0f2c6a", "#0b2154", "#081840", "#050f2c"]),
+  mix: onRadar("Mix", ["#f1d6f0", "#e7b6e3", "#dd95d6", "#d273c9", "#c654bb", "#b53caa", "#9f2a97", "#881c84", "#701371",
+                      "#590d5e", "#43084b", "#310538", "#220326"]),
+  "freezing rain": onRadar("Freezing rain", ["#fbd3de", "#f7aac1", "#f281a4", "#ea5888", "#dd356f", "#c7205c", "#ad164d", "#921040",
+                                            "#770c34", "#5e0828", "#46061e", "#320415", "#22020d"]),
+  sleet: onRadar("Sleet", ["#fde2c4", "#fbc993", "#f8ae63", "#f39237", "#e97a1f", "#d86514", "#c1540f", "#a7450c", "#8c380a",
+                          "#712c08", "#572106", "#401804", "#2c1003"]),
 }
 export const PTYPE_NAMES = ["none", "rain", "snow", "freezing rain", "sleet", "mix"] as const
 /** Flat colours for precipitation type where a model has no reflectivity (global models). */
