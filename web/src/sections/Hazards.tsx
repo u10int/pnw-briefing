@@ -229,33 +229,37 @@ export function HazardStrip({ data, onOpen }: { data: Briefing; onOpen: (tab: Ha
   const items = React.useMemo(() => summarize(data), [data])
   const vis = React.useMemo(() => hazardVisuals(data), [data])
   return (
-    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+    // each card spans five shared rows (header, badge, figure, chart, notes) through subgrid, so the
+    // charts and notes line up across a row of cards whatever the caption lengths
+    <div className="grid gap-x-3 gap-y-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
       {items.map((h) => {
         const tone = TONE[h.tone]
         const Icon = h.icon, ToneIcon = tone.icon
         const v = vis[h.tab]
         return (
           <button key={h.tab} type="button" onClick={() => onOpen(h.tab)} aria-label={`${h.title}: ${tone.label}. Open the ${h.title} tab`}
-                  className="group flex flex-col rounded-xl border bg-card p-4 text-left shadow-xs transition-[background-color,box-shadow] hover:bg-muted/30 hover:shadow-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
+                  className="group row-span-5 grid grid-rows-subgrid gap-y-0 rounded-xl border bg-card p-4 text-left shadow-xs transition-[background-color,box-shadow] hover:bg-muted/30 hover:shadow-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
             <div className="flex items-center gap-2">
               <Icon className="size-[18px] shrink-0 text-foreground" strokeWidth={1.75} />
               <span className="min-w-0 flex-1 font-medium leading-tight">{h.title}</span>
               <ChevronRight className="size-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-foreground" />
             </div>
-            <Badge variant={tone.badge} className="mt-2.5 gap-1"><ToneIcon />{tone.label}</Badge>
-            {v && (
-              <div className="mt-4">
-                <div className="flex items-baseline gap-1.5">
-                  <span className="text-[2rem] leading-none font-semibold tracking-tight tabular-nums">{v.value}</span>
-                  {v.unit && <span className="text-sm font-medium text-muted-foreground">{v.unit}</span>}
-                </div>
-                <p className="mt-1.5 text-xs leading-snug text-muted-foreground">
-                  <span className="text-foreground">{v.caption}</span>{v.aside && <span className="block">{v.aside}</span>}
-                </p>
-                {v.spark && <SparkBars spark={v.spark} dates={data.dates} />}
-              </div>
-            )}
-            <ul className="mt-4 space-y-2 border-t pt-3 text-sm">
+            <div className="mt-2.5"><Badge variant={tone.badge} className="gap-1"><ToneIcon />{tone.label}</Badge></div>
+            <div className="mt-4">
+              {v && (
+                <>
+                  <div className="flex items-baseline gap-1.5">
+                    <span className="text-[2rem] leading-none font-semibold tracking-tight tabular-nums">{v.value}</span>
+                    {v.unit && <span className="text-sm font-medium text-muted-foreground">{v.unit}</span>}
+                  </div>
+                  <p className="mt-1.5 text-xs leading-snug text-muted-foreground">
+                    <span className="text-foreground">{v.caption}</span>{v.aside && <span className="block">{v.aside}</span>}
+                  </p>
+                </>
+              )}
+            </div>
+            <div>{v?.spark && <SparkBars spark={v.spark} dates={data.dates} />}</div>
+            <ul className="mt-4 space-y-2 self-start border-t pt-3 text-sm">
               {h.items.slice(0, v ? 2 : 3).map((it, k) => {
                 const ItIcon = it.icon
                 return (
