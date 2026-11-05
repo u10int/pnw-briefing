@@ -23,6 +23,7 @@ export interface DailyVars {
   precipitation_sum: N[]; rain_sum: N[]; snowfall_sum: N[]
   temperature_2m_max: N[]; temperature_2m_min: N[]; wind_gusts_10m_max: N[]
   wind_speed_10m_max?: N[]            // absent in briefings built before it was added
+  relative_humidity_2m_min?: N[]; hdw_max?: N[]; smoke_max?: N[]    // fire weather; absent in older briefings
 }
 
 export interface Model {
@@ -150,6 +151,32 @@ export interface Briefing {
   landslide?: Landslide | null
   avalanche?: Avalanche | null
   tempDeparture?: TempDeparture | null
+  wildfire?: Wildfire | null
+}
+
+export interface FireAlert {
+  id: string; event: string; headline: string | null; onset: string | null; ends: string | null
+  sender: string | null; areaDesc: string | null; points: string[]; description?: string; url: string | null
+}
+export interface SpcArea { kind: "windrh" | "dryt"; dn: number; label: string; probability: boolean; points: string[]; geometry: GeoJSON.MultiPolygon }
+export interface SpcDay { day: number; valid: string | null; expire: string | null; date: string | null; areas: SpcArea[] }
+/** NWCC 7-day level: 0 none, 1 moist, 2 dry, 3 very dry, 4 high-risk day. */
+export interface PsaDay { code: number; short: string; label: string; level: number }
+export interface PsaArea { code: string; name: string; points: string[]; days: (PsaDay | null)[]; geometry: GeoJSON.MultiPolygon }
+export interface Incident {
+  id: string | null; name: string; type: "Wildfire" | "Prescribed fire" | "Complex"; acres: N; contained: N
+  discovered: string | null; updated: string | null; cause: string | null; state: string; county: string | null
+  lon: number; lat: number
+}
+export interface DroughtCategory { dm: number; label: string; geometry: GeoJSON.MultiPolygon }
+export interface Wildfire {
+  fetched: string; demo?: boolean; sources: Record<string, boolean>
+  alerts: FireAlert[] | null
+  spc: SpcDay[] | null
+  psa: { dates: string[]; areas: PsaArea[] } | null
+  incidents: Incident[] | null
+  perimeters: GeoJSON.FeatureCollection | null
+  drought: { released: string | null; mapDate: string | null; validEnd: string | null; points: Record<string, number | null>; categories: DroughtCategory[] } | null
 }
 
 export interface TempDepartureVar { forecast: N[]; low: N[]; high: N[]; models: number[]; departure: N[] }
@@ -198,7 +225,7 @@ export interface Outlooks {
 }
 
 /** data/fields.json: time-stepped grids for the interactive map (latest briefing only). */
-export type FieldVar = "t2m" | "gust" | "u10" | "v10" | "mslp" | "frz" | "refc" | "ptype" | "ivtu" | "ivtv" | "apcp" | "asnow"
+export type FieldVar = "t2m" | "gust" | "u10" | "v10" | "mslp" | "frz" | "refc" | "ptype" | "ivtu" | "ivtv" | "apcp" | "asnow" | "rh" | "smoke"
 export interface FieldEntry {
   path: string; model: string; tier: string; var: FieldVar; units: string
   scale: number; nodata: number; times: string[]; run: string; init: string

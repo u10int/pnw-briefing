@@ -42,13 +42,13 @@ export function dayStats(data: Briefing, key: DailyKey): Record<string, DayStat[
   return out
 }
 
-/** Mean (or max) across a region's locations, per day. */
-export function regionDays(data: Briefing, region: string, byPoint: Record<string, N[]>, how: "mean" | "max" = "mean"): N[] {
+/** Mean (or max, or min) across a region's locations, per day. */
+export function regionDays(data: Briefing, region: string, byPoint: Record<string, N[]>, how: "mean" | "max" | "min" = "mean"): N[] {
   const names = data.points.filter((p) => p.region === region).map((p) => p.name)
   return data.dates.map((_, k) => {
     const xs = names.map((n) => byPoint[n]?.[k]).filter(finite)
     if (!xs.length) return null
-    return how === "max" ? Math.max(...xs) : xs.reduce((a, b) => a + b, 0) / xs.length
+    return how === "max" ? Math.max(...xs) : how === "min" ? Math.min(...xs) : xs.reduce((a, b) => a + b, 0) / xs.length
   })
 }
 

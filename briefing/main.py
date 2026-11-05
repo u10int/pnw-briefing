@@ -16,8 +16,8 @@ from zoneinfo import ZoneInfo
 import numpy as np
 import yaml
 
-from . import (alerts, analysis, avalanche, change, cogs, context, extremes, fields, impacts, landslide, maps, normals,
-               observed, odds, outlooks, report, snowpack, tempdep)
+from . import (alerts, analysis, avalanche, change, cogs, context, extremes, fields, impacts, landslide,
+               maps, normals, observed, odds, outlooks, report, snowpack, tempdep, wildfire)
 from .grib import day0
 
 ROOT = Path(__file__).resolve().parent
@@ -175,6 +175,8 @@ def collect(cfg: dict, out: Path, demo: bool = False, products: bool = True) -> 
                         "dates": e["dates"][: len(next(iter(pts.values()))["p50"])], "points": pts})
 
     tz = ZoneInfo(cfg["timezone"])
+    # alerts first: the wildfire tab reuses their resolved fire weather zones
+    nws_alerts = safe("NWS alerts", lambda: alerts.fetch(cfg, demo)) if products else None
     data = {
         "meta": {"title": cfg["title"], "issued": datetime.now(tz), "demo": demo, "days": cfg["days"],
                  "minAgreement": cfg["impacts"]["min_agreement"],
@@ -206,7 +208,8 @@ def collect(cfg: dict, out: Path, demo: bool = False, products: bool = True) -> 
         "domain": cfg["domain"],
         "normals": norm,
         "tempDeparture": tdep,
-        "alerts": safe("NWS alerts", lambda: alerts.fetch(cfg, demo)) if products else None,
+        "alerts": nws_alerts,
+        "wildfire": safe("wildfire", lambda: wildfire.fetch(cfg, (nws_alerts or {}).get("zones"), demo)) if products else None,
         "ar": ar,
         "gradients": grads,
         "snowLevel": snow_lvl,

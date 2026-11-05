@@ -66,3 +66,29 @@ def test_daily_wind_from_map_fields(monkeypatch):
     monkeypatch.setattr(fields, "fetch", ffetch)
     m = grib.fetch_model(SPEC, CFG, datetime(2026, 11, 5, 12), [{"name": "A", "lat": 47.0, "lon": -123.0}])
     assert m["data"]["A"]["wind_speed_10m_max"][0] == 40.0
+
+
+def test_fire_points_from_map_fields(monkeypatch):
+    """Daily min humidity, surface HDW and smoke at points from the map fields."""
+    hrs = [9, 12, 15, 18]
+    full = lambda vals: np.stack([np.full(LAT.shape, x, dtype="float32") for x in vals])
+
+    def ffetch(*a, **k):
+        return {"t2m": {"hours": hrs, "data": full([68, 77, 86, 77])},
+                "rh": {"hours": hrs, "data": full([60, 40, 20, 35])},
+                "u10": {"hours": hrs, "data": full([10, 10, 20, 10])}, "v10": {"hours": hrs, "data": full([0, 0, 0, 0])},
+                "smoke": {"hours": hrs, "data": full([5, 40, 12, 3])}}
+    _run(monkeypatch)
+    monkeypatch.setattr(fields, "fetch", ffetch)
+    m = grib.fetch_model(SPEC, CFG, datetime(2026, 11, 5, 12), [{"name": "A", "lat": 47.0, "lon": -123.0}])
+    d = m["data"]["A"]
+    assert d["relative_humidity_2m_min"][0] == 20
+    assert d["smoke_max"][0] == 40
+    # hour 15: 30 °C, RH 20 %, 20 mph -> es 42.4 hPa, VPD 33.9 hPa, wind 8.94 m/s
+    np.testing.assert_allclose(d["hdw_max"][0], grib.hdw_surface(86, 20, 20), rtol=1e-5)
+    assert 290 < d["hdw_max"][0] < 315
+
+
+def test_rh_from_dewpoint():
+    np.testing.assert_allclose(fields.rh_from_dewpoint(68.0, 293.15), 100, rtol=1e-6)   # Td = T
+    assert 35 < fields.rh_from_dewpoint(86.0, 287.15) < 40                                # 30 °C, Td 14 °C

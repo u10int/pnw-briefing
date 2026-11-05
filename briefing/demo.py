@@ -91,11 +91,19 @@ def grib(cfg):
             tmin = tmax - RNG.uniform(7, 11, nd) - (2.5 if p["kind"] == "lowland" else 0) * (d >= 11)
             gust = 18 + 22 * np.exp(-((d - 4) / 0.8) ** 2) * (1.5 if p["kind"] == "coast" else 1) + RNG.normal(0, 3, nd)
             wind = 0.62 * gust + RNG.normal(0, 1.5, nd)
+            # drier and windier mid-period (an offshore push), humid at the coast
+            rhmin = np.clip(62 - 22 * np.exp(-((d - 6) / 1.5) ** 2) - (8 if p["kind"] == "pass" else 0)
+                            + (12 if p["kind"] == "coast" else 0) + RNG.normal(0, 4, nd), 8, 100)
+            vpd = 6.112 * np.exp(17.67 * ((tmax - 32) * 5 / 9) / ((tmax - 32) * 5 / 9 + 243.5)) * (1 - rhmin / 100)
+            hdw = vpd * wind / 2.237
+            smoke = np.where(np.arange(nd) < 2, np.clip(8 + 30 * np.exp(-((d - 1) / 0.7) ** 2) + RNG.normal(0, 3, nd), 0, None),
+                             np.nan) if spec.get("tier") == "regional" else np.full(nd, np.nan)
             if spec.get("gust") is False:
                 gust = np.full(nd, np.nan)
             row = {"precipitation_sum": pr, "rain_sum": np.clip(pr - np.nan_to_num(sn) / 10, 0, None),
                    "snowfall_sum": sn, "temperature_2m_max": tmax, "temperature_2m_min": tmin,
-                   "wind_gusts_10m_max": gust, "wind_speed_10m_max": wind}
+                   "wind_gusts_10m_max": gust, "wind_speed_10m_max": wind,
+                   "relative_humidity_2m_min": rhmin, "hdw_max": hdw, "smoke_max": smoke}
             data[p["name"]] = {k: list(np.concatenate([v, np.full(n - nd, np.nan)])) for k, v in row.items()}
         run = start - timedelta(hours=0 if spec.get("tier") != "global" else 12)
         lead0 = int((start - run).total_seconds() // 3600)
@@ -189,8 +197,11 @@ def _fields(spec, la, lo, lead0, nd, sites=()):
         pt[wet & (t2m <= 35)] = 5
         pt[wet & (t2m <= 33)] = 2
         pt[wet & (gorge > 0.4) & (t2m < 32)] = 3
+        rh = np.clip(95 - 2.4 * (t2m - 40) + 30 * band - 25 * behind * (lo > -122.3), 5, 100)
+        smoke = 60 * np.exp(-(((lo + 121.9) / 0.35) ** 2 + ((la - 45.7 - 0.08 * ((h - lead0) % 24)) / 0.5) ** 2)) * (lo < -121.2) \
+            + 4 * np.exp(-((lo + 121.9) ** 2 + (la - 45.7) ** 2) / 4)
         return {"t2m": t2m, "gust": np.hypot(u, v) * 1.45 + 6, "u10": u, "v10": v, "mslp": mslp,
-                "frz": frz, "refc": np.where(refc >= 5, refc, np.nan), "ptype": pt}
+                "frz": frz, "refc": np.where(refc >= 5, refc, np.nan), "ptype": pt, "rh": rh, "smoke": smoke}
 
     out = {}
     names = ["t2m"] + (["gust"] if spec.get("gust", True) else []) + stepped
