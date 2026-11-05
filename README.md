@@ -64,8 +64,11 @@ below are described in that order of content, not page order.
   badge naming any model that's missing.
 - **Window cards** (Precip tab). The 48 h, 7 d and 14 d medians per region, with the model range
   drawn as a bar, percent of normal, and the change since yesterday's briefing.
-- **Since yesterday.** Impacts that are new, upgraded, downgraded or dropped sit in the overview;
-  region totals now and in yesterday's briefing, compared over the *same dates* (today's 14-day
+- **Since yesterday.** The overview's timeline shows each impact on the forecast's day axis, marked
+  new, upgraded, downgraded or moved; yesterday's dates for anything that moved, and impacts that
+  dropped out, sit in a muted, dashed row beneath. Events are matched one to one by hazard,
+  overlapping dates first and then within a day, so a move isn't reported as dropped plus new.
+  Region totals now and in yesterday's briefing, compared over the *same dates* (today's 14-day
   window overlaps yesterday's for 13 days), sit in the Precip tab.
 - **NWS alerts.** Active watches, warnings and advisories for the forecast locations, beside the
   automated flags. The list is captured at build time and refreshed live in the browser.

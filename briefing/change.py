@@ -10,6 +10,8 @@ briefings are compared, so adding or removing a location doesn't blank the compa
 """
 from __future__ import annotations
 
+from datetime import date
+
 import numpy as np
 
 
@@ -38,10 +40,6 @@ def _region_stats(doc, dates, regions, points):
     med = {r["id"]: float(np.median([v[r["id"]] for v in per_model_region.values()])) for r in regions}
     pts = {p: (float(np.median(v)) if v else None) for p, v in point_vals.items()}
     return {"median": med, "models": per_model_region, "points": pts}
-
-
-def _overlaps(a, b):
-    return a["start"] <= b["end"] and b["start"] <= a["end"]
 
 
 def compare(now: dict, prev: dict | None, windows: list[dict]):
@@ -76,24 +74,61 @@ def compare(now: dict, prev: dict | None, windows: list[dict]):
     return {"prevIssued": prev.get("meta", {}).get("issued"), "windows": out_w, "events": _events(now, prev)}
 
 
+MAX_GAP = 1   # days between yesterday's event and today's for a move to count as the same event
+
+
+def _d(x):
+    return date.fromisoformat(x)
+
+
+def _rel(p, e):
+    """(gap in days, overlap in days) between two date ranges; gap 0 means overlapping or touching."""
+    lo, hi = max(_d(p["start"]), _d(e["start"])), min(_d(p["end"]), _d(e["end"]))
+    n = (hi - lo).days
+    return (0, n + 1) if n >= 0 else (-n - 1, 0)
+
+
+def _where(e):
+    return [{"name": q["name"], "peak": q.get("peak")} for q in e.get("points", [])]
+
+
 def _events(now, prev):
-    """Hazards: new, upgraded, downgraded, dropped (only for dates both briefings cover)."""
+    """Hazards today against yesterday's, matched one to one by hazard: overlapping dates first,
+    then the nearest within MAX_GAP days, so an event that moved is reported as moved rather
+    than as one dropped and one new. Each record keeps yesterday's dates (clipped to today's
+    first day, since earlier days have simply passed) and whether they changed."""
     first = now["dates"][0]
     ev_now = now.get("events", [])
-    ev_prev = [e for e in prev.get("events", []) if e["end"] >= first]
+    ev_prev = [dict(e, start=max(e["start"], first)) for e in prev.get("events", []) if e["end"] >= first]
+    pairs = []
+    for i, e in enumerate(ev_now):
+        for j, p in enumerate(ev_prev):
+            if p["hazard"] != e["hazard"]:
+                continue
+            gap, over = _rel(p, e)
+            if gap <= MAX_GAP:
+                pairs.append((gap, -over, abs((_d(p["start"]) - _d(e["start"])).days), i, j))
+    match, used = {}, set()
+    for *_, i, j in sorted(pairs):
+        if i not in match and j not in used:
+            match[i] = j
+            used.add(j)
     changes = {"new": [], "upgraded": [], "downgraded": [], "dropped": [], "same": []}
-    for e in ev_now:
-        match = next((p for p in ev_prev if p["hazard"] == e["hazard"] and _overlaps(p, e)), None)
-        rec = {"label": e["label"], "start": e["start"], "end": e["end"], "level": e["level"],
-               "prevLevel": match["level"] if match else None}
-        if not match:
+    for i, e in enumerate(ev_now):
+        p = ev_prev[match[i]] if i in match else None
+        rec = {"hazard": e["hazard"], "label": e["label"], "start": e["start"], "end": e["end"], "level": e["level"],
+               "prevLevel": p["level"] if p else None, "prevStart": p["start"] if p else None, "prevEnd": p["end"] if p else None,
+               "shifted": bool(p) and (p["start"], p["end"]) != (e["start"], e["end"]),
+               "agreement": e.get("agreement"), "where": _where(e), "unit": e.get("unit")}
+        if not p:
             changes["new"].append(rec)
-        elif match["level"] != e["level"]:
+        elif p["level"] != e["level"]:
             changes["upgraded" if e["level"] == "likely" else "downgraded"].append(rec)
         else:
             changes["same"].append(rec)
-    for p in ev_prev:
-        if not any(p["hazard"] == e["hazard"] and _overlaps(p, e) for e in ev_now):
-            changes["dropped"].append({"label": p["label"], "start": p["start"], "end": p["end"],
-                                       "level": None, "prevLevel": p["level"]})
+    for j, p in enumerate(ev_prev):
+        if j not in used:
+            changes["dropped"].append({"hazard": p["hazard"], "label": p["label"], "start": p["start"], "end": p["end"],
+                                       "level": None, "prevLevel": p["level"], "prevStart": p["start"], "prevEnd": p["end"],
+                                       "shifted": False, "agreement": p.get("agreement"), "where": _where(p), "unit": p.get("unit")})
     return changes

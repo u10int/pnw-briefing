@@ -40,7 +40,12 @@ export interface ChangeWindow {
   points: Record<string, { now: N; prev: N; delta: N }>
   models: Record<string, Record<string, number>>
 }
-export interface EventChange { label: string; start: string; end: string; level: "likely" | "possible" | null; prevLevel: "likely" | "possible" | null }
+export interface EventChange {
+  label: string; start: string; end: string; level: "likely" | "possible" | null; prevLevel: "likely" | "possible" | null
+  // added with the timeline; absent in briefings built before it
+  hazard?: string; prevStart?: string | null; prevEnd?: string | null; shifted?: boolean
+  agreement?: number | null; where?: { name: string; peak: number | null }[]; unit?: string | null
+}
 export interface Change {
   prevIssued: string | null
   windows: ChangeWindow[]
