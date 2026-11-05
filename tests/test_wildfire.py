@@ -85,3 +85,11 @@ def test_contains_respects_holes():
 def test_demo_is_complete():
     d = wildfire.fetch(CFG, demo=True)
     assert d["alerts"] and d["spc"] and d["psa"]["areas"] and d["incidents"] and d["drought"]["categories"]
+
+
+def test_alert_url_uses_zone_page():
+    from briefing import alerts
+    zs = ["https://api.weather.gov/zones/county/WAC033", "https://api.weather.gov/zones/forecast/WAZ558",
+          "https://api.weather.gov/zones/fire/WAZ654"]
+    assert alerts.alert_url(zs) == "https://forecast.weather.gov/showsigwx.php?warnzone=WAZ558&warncounty=WAC033"
+    assert alerts.alert_url([]) is None

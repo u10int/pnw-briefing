@@ -7,6 +7,12 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import type { Alert, Briefing } from "@/types"
 
 const zoneId = (u: string) => u.replace(/\/$/, "").split("/").pop()!
+/** weather.gov's hazards page for the alert's first forecast zone and county (same as briefing/alerts.py). */
+const alertUrl = (ids: string[]) => {
+  const zone = ids.find((z) => /^[A-Z]{2}Z\d{3}$/.test(z)), county = ids.find((z) => /^[A-Z]{2}C\d{3}$/.test(z))
+  if (!zone && !county) return null
+  return `https://forecast.weather.gov/showsigwx.php?warnzone=${zone ?? county}${county ? `&warncounty=${county}` : ""}`
+}
 
 /** Warning red, watch amber, advisory blue, statements gray: the usual NWS reading order. */
 function variantFor(event: string): "likely" | "possible" | "regional" | "secondary" {
@@ -47,7 +53,7 @@ export function NwsAlerts({ data }: { data: Briefing }) {
           if (!pts.length) continue
           out.push({ id: p.id, event: p.event, severity: p.severity, certainty: p.certainty, urgency: p.urgency,
             headline: p.headline, onset: p.onset ?? p.effective, ends: p.ends ?? p.expires, sender: p.senderName,
-            areaDesc: p.areaDesc, points: pts, url: p.id ? `https://alerts.weather.gov/search?id=${p.id}` : null })
+            areaDesc: p.areaDesc, points: pts, url: alertUrl([...affected]) })
         }
         const rank = (e: string) => (/warning/i.test(e) ? 0 : /watch/i.test(e) ? 1 : /advisory/i.test(e) ? 2 : 3)
         out.sort((a, b) => rank(a.event) - rank(b.event) || (a.onset ?? "").localeCompare(b.onset ?? ""))
