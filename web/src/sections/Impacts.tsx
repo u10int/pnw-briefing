@@ -83,17 +83,17 @@ export function AgreementGrid({ data }: { data: Briefing }) {
       </CardHeader>
       <CardContent>
         <Table className="min-w-[760px] table-fixed border-separate border-spacing-[2px]">
-          <colgroup><col className="w-[200px]" />{dates.map((d) => <col key={d} />)}</colgroup>
+          <colgroup><col className="w-[124px] sm:w-[200px]" />{dates.map((d) => <col key={d} />)}</colgroup>
           <TableHeader>
             <TableRow className="hover:bg-transparent border-0">
-              <TableHead />
+              <TableHead className="sticky left-0 z-10 bg-card" />
               {dates.map((d) => <TableHead key={d} className="h-7 px-0 text-center text-xs font-normal">{dayShort(d)}</TableHead>)}
             </TableRow>
           </TableHeader>
           <TableBody>
             {labels.map((lab, i) => (
               <TableRow key={lab} className="hover:bg-transparent border-0">
-                <TableCell className="py-0 pr-3 text-[13px]">{lab}</TableCell>
+                <TableCell className="sticky left-0 z-10 bg-card py-0 pr-3 text-[13px] whitespace-normal leading-tight">{lab}</TableCell>
                 {matrix[i].map((v, j) => {
                   const c = redCell(v)
                   return (

@@ -382,7 +382,10 @@ function TimelineBarView({ e, left, w, label }: { e: TimelineBar; left: number; 
 }
 
 /** Groups (a place) with child rows (a model, an outlook), each row a track of bars placed by
- *  start and duration on a shared day axis. Hover or focus a bar for its tooltip. */
+ *  start and duration on a shared day axis. Hover or focus a bar for its tooltip.
+ *  Each day keeps at least MIN_DAY px: on a narrow screen the track scrolls sideways under labels
+ *  pinned to the left, rather than squeezing two weeks into the width of a phone. */
+const MIN_DAY = 48
 export function Timeline({ t0, t1, groups, groupW = 96, rowW = 88 }: {
   t0: number; t1: number; groups: TimelineGroup[]; groupW?: number; rowW?: number
 }) {
@@ -396,10 +399,21 @@ export function Timeline({ t0, t1, groups, groupW = 96, rowW = 88 }: {
   const days = midnights(t0, t1)
   const pxPerDay = width ? (width * 24 * H) / span : 60
   const labelEvery = pxPerDay >= 46 ? 1 : pxPerDay >= 24 ? 2 : 3
-  const labelW = gW + rowW
+  const rW = rowW
+  // fade the right edge while there's more timeline to scroll to
+  const [more, setMore] = React.useState(false)
+  const onScroll = React.useCallback(() => {
+    const el = outerRef.current
+    if (el) setMore(el.scrollLeft + el.clientWidth < el.scrollWidth - 2)
+  }, [outerRef])
+  React.useEffect(onScroll, [onScroll, outerW, groups])
+  const labelW = gW + rW
+  const nDays = Math.max(1, Math.round(span / (24 * H)))
+  const sticky = "sticky left-0 z-10 bg-card"
   return (
-    <div ref={outerRef}>
-      <div className="relative text-xs">
+    <div className="relative">
+    <div ref={outerRef} onScroll={onScroll} className="overflow-x-auto overscroll-x-contain">
+      <div className="relative text-xs" style={{ minWidth: labelW + nDays * MIN_DAY }}>
         {/* day shading and midnight lines behind every row */}
         <div ref={trackRef} className="pointer-events-none absolute inset-y-0 right-0" style={{ left: labelW }}>
           {days.map((d, i) => (
@@ -414,7 +428,7 @@ export function Timeline({ t0, t1, groups, groupW = 96, rowW = 88 }: {
         </div>
 
         <div className="relative flex h-7 items-end border-b">
-          <div style={{ width: labelW }} className="shrink-0" />
+          <div style={{ width: labelW }} className={`shrink-0 self-stretch ${sticky}`} />
           <div className="relative h-full flex-1">
             {days.map((d, i) => i % labelEvery === 0 && x(d) < 96 && (
               <span key={d} className="absolute bottom-1.5 whitespace-nowrap pl-1 text-muted-foreground" style={{ left: `${x(d)}%` }}>
@@ -427,20 +441,20 @@ export function Timeline({ t0, t1, groups, groupW = 96, rowW = 88 }: {
         {groups.map((g) => (
           <div key={g.key} className={`relative border-b last:border-b-0 ${compact ? "" : "flex"}`}>
             {compact ? (
-              <div className="relative pt-1.5 text-sm font-medium">
+              <div className={`relative w-fit pt-1.5 pr-2 text-sm font-medium ${sticky}`}>
                 {g.onClick ? <button type="button" onClick={g.onClick} className={`hover:underline ${g.selected ? "underline decoration-2 underline-offset-4" : ""}`}>{g.label}</button> : g.label}
               </div>
             ) : g.onClick ? (
               <button type="button" onClick={g.onClick} title={g.title}
-                      className={`shrink-0 py-1.5 pr-2 text-left text-sm font-medium hover:underline ${g.selected ? "underline decoration-2 underline-offset-4" : ""}`}
+                      className={`shrink-0 py-1.5 pr-2 text-left text-sm font-medium hover:underline ${sticky} ${g.selected ? "underline decoration-2 underline-offset-4" : ""}`}
                       style={{ width: groupW }}>
                 {g.label}
               </button>
-            ) : <div className="shrink-0 py-1.5 pr-2 text-sm font-medium" style={{ width: groupW }}>{g.label}</div>}
+            ) : <div className={`shrink-0 py-1.5 pr-2 text-sm font-medium ${sticky}`} style={{ width: groupW }}>{g.label}</div>}
             <div className="flex-1">
               {g.rows.map((r) => (
                 <div key={r.key} className="flex h-7 items-center">
-                  <span className="flex shrink-0 items-center gap-1.5 truncate pr-2 text-muted-foreground" style={{ width: rowW }}>{r.label}</span>
+                  <span className={`flex shrink-0 items-center gap-1.5 self-stretch truncate pr-2 text-muted-foreground ${sticky}`} style={{ width: rW, left: gW }}>{r.label}</span>
                   <div className="relative h-full flex-1">
                     {r.bars.map((e) => {
                       const a = Math.max(t0, e.start), b = Math.min(t1, e.end)
@@ -458,6 +472,8 @@ export function Timeline({ t0, t1, groups, groupW = 96, rowW = 88 }: {
           </div>
         ))}
       </div>
+    </div>
+    <div aria-hidden className={`pointer-events-none absolute inset-y-0 right-0 w-10 bg-gradient-to-l from-card to-transparent transition-opacity ${more ? "opacity-100" : "opacity-0"}`} />
     </div>
   )
 }
