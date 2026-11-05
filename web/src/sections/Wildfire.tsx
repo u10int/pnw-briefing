@@ -1,4 +1,5 @@
 import * as React from "react"
+import { AlertBadge } from "@/sections/Alerts"
 import { ExternalLink, Flame } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
@@ -49,7 +50,7 @@ export function FireAlertsCard({ wf }: { wf: Wildfire }) {
             {items.map((a) => (
               <li key={a.id} className="space-y-1">
                 <div className="flex flex-wrap items-center gap-2">
-                  <Badge variant={a.event === "Red Flag Warning" ? "likely" : "possible"}>{a.event}</Badge>
+                  <AlertBadge event={a.event} />
                   <span className="text-sm tabular-nums text-muted-foreground">{when(a.onset)} – {when(a.ends)}</span>
                   {a.url && !a.url.includes("alerts.weather.gov") && <a href={a.url} target="_blank" rel="noopener" aria-label="Open on weather.gov" className="text-muted-foreground hover:text-foreground"><ExternalLink className="size-3.5" /></a>}
                 </div>

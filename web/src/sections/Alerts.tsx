@@ -4,6 +4,7 @@ import { ExternalLink, RefreshCw, ShieldCheck } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { alertColor } from "@/lib/nwsColors"
 import type { Alert, Alerts, Briefing } from "@/types"
 
 const zoneId = (u: string) => u.replace(/\/$/, "").split("/").pop()!
@@ -25,15 +26,6 @@ const alertUrl = (snap: Alerts | null | undefined, points: string[], ids: string
   return zone ? `https://forecast.weather.gov/showsigwx.php?warnzone=${zone}` : null
 }
 
-/** Warning red, watch amber, advisory blue, statements gray: the usual NWS reading order. */
-function variantFor(event: string): "likely" | "possible" | "regional" | "secondary" {
-  const e = event.toLowerCase()
-  if (e.includes("warning")) return "likely"
-  if (e.includes("watch")) return "possible"
-  if (e.includes("advisory")) return "regional"
-  return "secondary"
-}
-
 const PT = "America/Los_Angeles"
 const HOUR = 3600e3, DAY = 24 * HOUR
 const parts = (t: number) => Object.fromEntries(new Intl.DateTimeFormat("en-US", {
@@ -50,12 +42,10 @@ const dayMD = (t: number) => { const p = parts(t + 12 * HOUR); return `${new Dat
 const hour = (t: number) => new Date(t).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: PT }).replace(":00", "")
 const full = (t: number) => `${dayMD(midnight(t))} ${hour(t)}`
 
-/** Bar colours follow the badges: warning red, watch amber, advisory blue, statement gray. */
-const BAR: Record<ReturnType<typeof variantFor>, { bg: string; edge: string; text: string }> = {
-  likely: { bg: "var(--likely-bg)", edge: "var(--likely-bar)", text: "var(--likely)" },
-  possible: { bg: "var(--possible-bg)", edge: "var(--possible-bar)", text: "var(--possible)" },
-  regional: { bg: "var(--tier-regional-bg)", edge: "var(--tier-regional)", text: "var(--tier-regional)" },
-  secondary: { bg: "var(--secondary)", edge: "var(--muted-foreground)", text: "var(--secondary-foreground)" },
+/** The badge in the official NWS colour for the event. */
+export function AlertBadge({ event }: { event: string }) {
+  const c = alertColor(event)
+  return <Badge className="border-black/10 font-semibold" style={{ background: c.bg, color: c.fg }}>{event}</Badge>
 }
 
 /** Each alert as a bar on a shared Pacific-time axis: whole days from today (or the earliest
@@ -106,17 +96,19 @@ function AlertTimeline({ items, snap }: { items: Alert[]; snap: Alerts }) {
         </div>
       </div>
       {span.map(({ a, s, e }) => {
-        const v = variantFor(a.event), c = BAR[v]
+        const c = alertColor(a.event)
         const l = pct(s), r = e != null ? pct(e) : 100, w = Math.max(r - l, 0.8)
         const cut = e == null || e > t1
         const sameDay = e != null && midnight(s) === midnight(e)
-        const label = e == null ? `${full(s)} onward` : sameDay ? `${hour(s)} – ${hour(e)}` : `${full(s)} – ${full(e)}`
-        const inside = (w / 100) * px > label.length * 6 + 18
+        const label = e == null ? `${full(s)} onward` : sameDay ? `${dayMD(midnight(s))} ${hour(s)} – ${hour(e)}` : `${full(s)} – ${full(e)}`
+        const a0 = hour(s), a1 = e == null ? "no end" : hour(e)
+        const fits = (w / 100) * px >= (a0.length + a1.length) * 6.5 + 32     // both ends, else just the start
+        const fitsOne = (w / 100) * px >= a0.length * 6.5 + 18
         return (
           <div key={a.id} className="grid grid-cols-1 items-center gap-x-4 gap-y-1.5 border-t py-3 sm:grid-cols-[minmax(0,15rem)_1fr]">
             <div className="min-w-0">
               <div className="flex items-center gap-2">
-                <Badge variant={v}>{a.event}</Badge>
+                <AlertBadge event={a.event} />
                 {a.url && (
                   <a href={a.url} target="_blank" rel="noopener" className="text-muted-foreground hover:text-foreground" aria-label={`Open ${a.event} on weather.gov`}>
                     <ExternalLink className="size-3.5" />
@@ -124,7 +116,7 @@ function AlertTimeline({ items, snap }: { items: Alert[]; snap: Alerts }) {
                 )}
               </div>
               <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
-                {a.points.join(", ")}{a.sender && <> · {a.sender.replace(/^NWS /, "")}</>}
+                {a.points.join(", ")}
               </p>
               <p className="mt-1 text-xs font-medium tabular-nums sm:hidden">{label}</p>
             </div>
@@ -133,21 +125,20 @@ function AlertTimeline({ items, snap }: { items: Alert[]; snap: Alerts }) {
               <Tooltip>
                 <TooltipTrigger asChild>
                   <div tabIndex={0} aria-label={`${a.event}: ${label}`}
-                    className={`absolute top-1/2 flex h-7 -translate-y-1/2 items-center overflow-hidden border px-2 text-xs font-medium whitespace-nowrap tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-ring ${cut ? "rounded-l-md" : "rounded-md"}`}
-                    style={{ left: `${l}%`, width: `${w}%`, background: c.bg, borderColor: c.edge, color: c.text }}>
-                    {inside && <span className="max-sm:hidden">{label}</span>}
+                    className={`absolute top-1/2 flex h-7 -translate-y-1/2 items-center justify-between gap-2 overflow-hidden border border-black/15 px-2 text-xs font-semibold whitespace-nowrap tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-ring ${cut ? "rounded-l-md" : "rounded-md"}`}
+                    style={{ left: `${l}%`, width: `${w}%`, background: c.bg, color: c.fg }}>
+                    {(fits || fitsOne) && <span>{a0}</span>}
+                    {fits && <span>{a1}</span>}
                   </div>
                 </TooltipTrigger>
-                <TooltipContent className="max-w-xs">
+                <TooltipContent className="max-w-xs space-y-1">
                   <p className="font-semibold">{a.event}</p>
-                  <p>{e == null ? `From ${full(s)}, no end time given` : `${full(s)} to ${full(e)}`}</p>
-                  {a.headline && <p className="mt-1 opacity-80">{a.headline}</p>}
+                  <p>{e == null ? `From ${full(s)}, no end time given` : `${full(s)} to ${full(e)} Pacific`}</p>
+                  {a.sender && <p>Issued by {a.sender}</p>}
+                  <p>Covers {a.points.join(", ")}</p>
+                  {a.headline && <p className="opacity-80">{a.headline}</p>}
                 </TooltipContent>
               </Tooltip>
-              {!inside && (
-                <span className="absolute top-1/2 -translate-y-1/2 text-xs max-sm:hidden whitespace-nowrap text-muted-foreground tabular-nums"
-                  style={l + w > 60 ? { right: `${100 - l + 1}%` } : { left: `calc(${l + w}% + 6px)` }}>{label}</span>
-              )}
             </div>
           </div>
         )
@@ -220,7 +211,7 @@ export function NwsAlerts({ data }: { data: Briefing }) {
       <CardHeader>
         <CardTitle>NWS watches, warnings and advisories</CardTitle>
         <CardDescription>
-          Official alerts covering the forecast locations, alongside the automated flags below. Times are Pacific; hover a bar for the full headline.
+          Official alerts covering the forecast locations, alongside the automated flags below. Times are Pacific; hover a bar for the details and issuing office.
         </CardDescription>
         <CardAction className="flex items-center gap-1.5 text-xs text-muted-foreground">
           <RefreshCw className="size-3" aria-hidden />
