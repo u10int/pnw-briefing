@@ -1,4 +1,7 @@
 import * as React from "react"
+import { contrastTextColor } from "@/lib/contrast"
+import { DayHead } from "@/components/DayHead"
+import { AlertBadge } from "@/sections/Alerts"
 import { ExternalLink, Flame } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
@@ -19,11 +22,7 @@ const WildfireMap = React.lazy(() => import("@/sections/WildfireMap"))
 const when = (iso: string | null) =>
   iso ? new Date(iso).toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", timeZone: "America/Los_Angeles" }) : "–"
 const shortDate = (iso: string) => new Date(`${iso}T12:00:00`).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })
-const ink = (hex: string) => {
-  if (!hex.startsWith("#")) return "inherit"
-  const n = parseInt(hex.slice(1), 16), l = 0.2126 * ((n >> 16) & 255) + 0.7152 * ((n >> 8) & 255) + 0.0722 * (n & 255)
-  return l < 110 ? "#fff" : "#1b1f24"
-}
+const ink = (hex: string) => (hex.startsWith("#") ? contrastTextColor(hex) : "inherit")
 const unavailable = (what: string) => <p className="text-sm text-muted-foreground">The {what} service didn't answer when this briefing was built.</p>
 
 /** A one-line "nothing here" note in the card's place, so a quiet season stays readable. */
@@ -49,7 +48,7 @@ export function FireAlertsCard({ wf }: { wf: Wildfire }) {
             {items.map((a) => (
               <li key={a.id} className="space-y-1">
                 <div className="flex flex-wrap items-center gap-2">
-                  <Badge variant={a.event === "Red Flag Warning" ? "likely" : "possible"}>{a.event}</Badge>
+                  <AlertBadge event={a.event} />
                   <span className="text-sm tabular-nums text-muted-foreground">{when(a.onset)} – {when(a.ends)}</span>
                   {a.url && !a.url.includes("alerts.weather.gov") && <a href={a.url} target="_blank" rel="noopener" aria-label="Open on weather.gov" className="text-muted-foreground hover:text-foreground"><ExternalLink className="size-3.5" /></a>}
                 </div>
@@ -73,7 +72,7 @@ function FuelCell({ d }: { d: PsaDay | null }) {
   if (!d) return <td className="px-1 py-1 text-center text-muted-foreground">–</td>
   const bg = FUEL[d.level] ?? "transparent"
   const cell = (
-    <td className="px-1 py-1 text-center text-[11px] font-medium" style={{ background: bg, color: d.level === 4 ? "#fff" : "#1b1f24" }}>
+    <td className="px-1 py-1 text-center text-[11px] font-medium" style={{ background: bg, color: bg.startsWith("#") ? contrastTextColor(bg) : undefined }}>
       {d.level === 4 ? d.short : ""}
     </td>
   )
@@ -109,10 +108,7 @@ export function FirePotentialCard({ wf }: { wf: Wildfire }) {
                 <thead>
                   <tr className="border-b">
                     <th className="sticky left-0 z-10 bg-card px-2 py-1.5 text-left font-medium">Area</th>
-                    {psa.dates.map((d) => {
-                      const t = new Date(`${d}T12:00:00`)
-                      return <th key={d} className="min-w-10 px-1 py-1.5 text-center font-medium">{t.toLocaleDateString("en-US", { weekday: "short" })}<span className="block font-normal text-muted-foreground">{t.getDate()}</span></th>
-                    })}
+                    {psa.dates.map((d) => <th key={d} className="min-w-10 px-1 py-1.5 text-center font-medium"><DayHead day={d} /></th>)}
                   </tr>
                 </thead>
                 {GROUPS.map(([g, label]) => {
@@ -170,8 +166,7 @@ export function SpcFireCard({ wf }: { wf: Wildfire }) {
                 {days.map((d) => (
                   <TableRow key={d.day}>
                     <TableCell className="align-top">
-                      <span className="font-medium">Day {d.day}</span>
-                      {d.date && <span className="block text-xs text-muted-foreground">{shortDate(d.date)}</span>}
+                      {d.date ? <span className="font-medium"><DayHead day={d.date} /></span> : <span className="font-medium">Day {d.day}</span>}
                     </TableCell>
                     <TableCell className="whitespace-normal">
                       {d.areas.length ? (

@@ -1,4 +1,5 @@
 import * as React from "react"
+import { DayHead } from "@/components/DayHead"
 import { CartesianGrid, Line, LineChart, ReferenceArea, ReferenceLine, XAxis, YAxis } from "recharts"
 import { ChevronDown } from "lucide-react"
 
@@ -13,6 +14,7 @@ import { pctCell } from "@/sections/Totals"
 import type { ArEvent, Avalanche, AvalancheDanger, Briefing, Gradient, Landslide, ModelSeries, N, PointOdds, Tier } from "@/types"
 import { GRAD_COLORS, gradLevel, pairName, seriesAt } from "@/lib/gradients"
 import { arEpisodes, type Episode } from "@/sections/Hazards"
+import { contrastTextColor } from "@/lib/contrast"
 
 // ------------------------------------------------------------------ shared: multi-model time series
 
@@ -316,7 +318,7 @@ const AR_SHORT = ["Below scale", "AR1 Weak", "AR2 Moderate", "AR3 Strong", "AR4 
 function ArBadge({ rank }: { rank: number }) {
   return (
     <span className="inline-flex items-center rounded-md px-1.5 py-0.5 text-xs font-medium"
-          style={{ background: AR_COLORS[rank], color: rank >= 3 ? "#1b1f24" : "#fff" }}>{AR_SHORT[rank]}</span>
+          style={{ background: AR_COLORS[rank], color: contrastTextColor(AR_COLORS[rank]) }}>{AR_SHORT[rank]}</span>
   )
 }
 
@@ -467,12 +469,12 @@ export function Timeline({ t0, t1, groups, groupW = 96, rowW = 88 }: {
           ))}
         </div>
 
-        <div className="relative flex h-7 items-end border-b">
+        <div className="relative flex h-10 items-end border-b">
           <div style={{ width: labelW }} className={`shrink-0 self-stretch ${sticky}`} />
           <div className="relative h-full flex-1">
             {days.map((d, i) => i % labelEvery === 0 && x(d) < 96 && (
-              <span key={d} className="absolute bottom-1.5 whitespace-nowrap pl-1 text-muted-foreground" style={{ left: `${x(d)}%` }}>
-                {tickDay(d)}
+              <span key={d} className="absolute bottom-1.5 whitespace-nowrap pl-1 font-medium leading-tight" style={{ left: `${x(d)}%` }}>
+                <DayHead day={d + 12 * H} />
               </span>
             ))}
           </div>
@@ -551,7 +553,7 @@ function ArTimeline({ ar, onPick, picked }: {
         const [a, b] = span(e)
         const note = rankNote(e, ar.breaks)
         return {
-          key: e.start, start: a, end: b, color: AR_COLORS[e.rank], text: e.rank >= 3 ? "#1b1f24" : "#fff",
+          key: e.start, start: a, end: b, color: AR_COLORS[e.rank], text: contrastTextColor(AR_COLORS[e.rank]),
           label: AR_SHORT[e.rank], short: AR_SHORT[e.rank].split(" ")[0], onClick: () => onPick(p),
           aria: `${AR_SHORT[e.rank]} at ${p} in ${m.model}, ${tipTime(Date.parse(e.start))} for ${e.hours} hours`,
           tip: <>
@@ -650,7 +652,7 @@ function probCell(v: N) {
   if (v == null) return { background: "transparent", color: "var(--muted-foreground)" }
   if (v < 5) return { background: "transparent", color: "var(--muted-foreground)" }
   const i = Math.min(PROB.length - 1, Math.floor(v / 15))
-  return { background: PROB[i], color: i >= 4 ? "#fff" : "var(--foreground)" }
+  return { background: PROB[i], color: contrastTextColor(PROB[i]) }
 }
 
 export function OddsCard({ data }: { data: Briefing }) {
@@ -684,7 +686,7 @@ export function OddsCard({ data }: { data: Briefing }) {
             <TableRow>
               <TableHead>Location</TableHead>
               <TableHead className="text-right">Threshold</TableHead>
-              {o.dates.map((d) => <TableHead key={d} className="px-1 text-center text-xs">{dayShort(d)}</TableHead>)}
+              {o.dates.map((d) => <TableHead key={d} className="h-auto px-1 py-1.5 text-center text-xs"><DayHead day={d} /></TableHead>)}
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -884,7 +886,7 @@ export function SnowLevelCard({ data }: { data: Briefing }) {
 /** North American Public Avalanche Danger Scale colours. */
 const AVY = ["#9ca3af", "#50b848", "#fff200", "#f7941e", "#ed1c24", "#231f20"]
 const AVY_LABEL = ["No rating", "Low", "Moderate", "Considerable", "High", "Extreme"]
-const avyText = (l: number) => (l >= 4 ? "#fff" : "#1b1f24")
+const avyText = (l: number) => contrastTextColor(AVY[l] ?? AVY[0])
 
 function AvyCell({ level }: { level: number | null }) {
   const l = level ?? 0
@@ -1137,10 +1139,10 @@ export function OutlooksCard({ data }: { data: Briefing }) {
     { name: "Other locations", pts: data.points.filter((p) => !data.regions.some((r) => r.id === p.region)).map((p) => p.name) },
   ].filter((g) => g.pts.length)
   const today = data.dates[0]
-  const dayLabel = (d: number) => {
+  const dayIso = (d: number) => {
     const t = new Date(`${today}T12:00:00`)
     t.setDate(t.getDate() + d - 1)
-    return dayShort(t.toISOString())
+    return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}-${String(t.getDate()).padStart(2, "0")}`
   }
   const eroDays = (o.ero?.days ?? []).filter(Boolean) as { day: number; points: Record<string, number> }[]
   const anyEro = eroDays.some((d) => Object.values(d.points).some((v) => v > 0))
@@ -1213,7 +1215,7 @@ export function OutlooksCard({ data }: { data: Briefing }) {
             <p className="text-sm font-medium">Excessive rainfall risk</p>
             {anyEro ? (
               <Table>
-                <TableHeader><TableRow><TableHead>Location</TableHead>{eroDays.map((d) => <TableHead key={d.day} className="text-center text-xs">Day {d.day}<span className="block font-normal text-muted-foreground">{dayLabel(d.day)}</span></TableHead>)}</TableRow></TableHeader>
+                <TableHeader><TableRow><TableHead>Location</TableHead>{eroDays.map((d) => <TableHead key={d.day} className="h-auto py-1.5 text-center text-xs"><DayHead day={dayIso(d.day)} /></TableHead>)}</TableRow></TableHeader>
                 <TableBody>
                   {data.points.filter((p) => eroDays.some((d) => (d.points[p.name] ?? 0) > 0)).map((p) => (
                     <TableRow key={p.name}>

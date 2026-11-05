@@ -7,6 +7,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { blueCell, inch, median } from "@/lib/format"
 import type { Briefing, N, Tier } from "@/types"
+import { contrastTextColor } from "@/lib/contrast"
 
 const REGION_VAR: Record<string, string> = { wwa: "var(--wwa)", nwor: "var(--nwor)" }
 
@@ -234,7 +235,7 @@ export function pctCell(v: N) {
   if (v == null) return { background: "transparent", color: "var(--muted-foreground)" }
   const i = BRBG_EDGES.findIndex((e) => v < e)
   const k = i === -1 ? BRBG.length - 1 : i
-  return { background: BRBG[k], color: k <= 1 || k >= 7 ? "#fff" : "var(--foreground)" }
+  return { background: BRBG[k], color: contrastTextColor(BRBG[k]) }
 }
 
 export function GribAreaMeans({ data }: { data: Briefing }) {

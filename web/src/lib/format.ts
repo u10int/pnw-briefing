@@ -1,4 +1,5 @@
 import type { N } from "@/types"
+import { contrastTextColor } from "@/lib/contrast"
 
 // Dates arrive as YYYY-MM-DD local calendar days; anchor at noon so no timezone shifts the day.
 const d = (iso: string) => new Date(`${iso.slice(0, 10)}T12:00:00`)
@@ -11,13 +12,14 @@ export const dayMonth = (iso: string) =>
 export const dayLong = (iso: string) =>
   d(iso).toLocaleDateString("en-US", { weekday: "short", month: "long", day: "numeric" })
 
-const month = (iso: string) => d(iso).toLocaleDateString("en-US", { month: "short" })
+/** "Sat 11/7" */
+export const dayMD = (iso: string) =>
+  `${d(iso).toLocaleDateString("en-US", { weekday: "short" })} ${d(iso).getMonth() + 1}/${d(iso).getDate()}`
 
-/** "Fri 6 Nov", "Fri 6–Sat 7 Nov", or "Mon 30 Nov–Tue 1 Dec". */
+/** "Sat 11/7", or "Sat 11/7 – Sun 11/8". */
 export function dateRange(a: string, b: string) {
-  if (a.slice(0, 10) === b.slice(0, 10)) return `${dayShort(a)} ${month(a)}`
-  if (a.slice(5, 7) === b.slice(5, 7)) return `${dayShort(a)}–${dayShort(b)} ${month(b)}`
-  return `${dayShort(a)} ${month(a)}–${dayShort(b)} ${month(b)}`
+  if (a.slice(0, 10) === b.slice(0, 10)) return dayMD(a)
+  return `${dayMD(a)} – ${dayMD(b)}`
 }
 
 export const issuedLabel = (iso: string) =>
@@ -38,7 +40,7 @@ export function blueCell(v: N, max: number) {
   if (v == null) return { background: "transparent", color: "var(--muted-foreground)" }
   const t = Math.max(0, Math.min(1, v / (max || 1)))
   const i = Math.min(BLUES.length - 1, Math.round(t * (BLUES.length - 1)))
-  return { background: BLUES[i], color: i >= 5 ? "#fff" : "var(--foreground)" }
+  return { background: BLUES[i], color: contrastTextColor(BLUES[i]) }
 }
 
 /** Sequential red for hazard agreement (0–1). */
@@ -46,7 +48,7 @@ const REDS = ["#fdf0ef", "#fbd9d6", "#f6b3ad", "#ee867d", "#e25a4f", "#c8322a", 
 export function redCell(v: number) {
   if (!v || v < 0.1) return { background: "transparent", color: "transparent" }
   const i = Math.min(REDS.length - 1, Math.floor(v * REDS.length))
-  return { background: REDS[i], color: i >= 4 ? "#fff" : "var(--foreground)" }
+  return { background: REDS[i], color: contrastTextColor(REDS[i]) }
 }
 
 export function median(xs: N[]): number | null {
