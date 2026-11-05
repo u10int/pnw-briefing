@@ -103,7 +103,8 @@ points:
 #
 # `fields` adds time-stepped grids to the interactive map. Temperature and gusts come from the
 # samples above for free (listing them under `hourly` adds the hours in between). `stepped` fields
-# are taken every `sample_hours`; `hourly` fields every hour for the first `hourly_hours`. Names: wind (10 m u and v), mslp, frz (freezing level),
+# are taken every `sample_hours`; `hourly` fields every hour for the first `hourly_hours`. A regional
+# model's map runs to its `max_hours` (the daily values use only whole 12Z-12Z days). Names: wind (10 m u and v), mslp, frz (freezing level),
 # refc (simulated composite reflectivity), ptype (precipitation type), rh (2 m relative humidity;
 # ECMWF from dewpoint), smoke (near-surface smoke, HRRR/RRFS). A field a model doesn't publish is
 # skipped and logged.
@@ -118,12 +119,14 @@ grib_models:
      herbie: {model: rrfs, product: 2dfld, domain: conus},   # operational RRFS: deterministic = no member
      cycles: [0, 6, 12, 18], max_hours: 84, range_days: 3, sample_hours: 3, chain_step: 1,
      extremes: {step: 1, temp: maxmin, wind: max},
-     fields: {hourly: [refc, ptype, t2m, gust, wind, mslp, frz, rh, smoke], hourly_hours: 48, stepped: [wind, mslp, frz, rh]}}
+     fields: {hourly: [refc, ptype, t2m, gust, wind, mslp, frz, rh, smoke], hourly_hours: 48,
+              stepped: [wind, mslp, frz, rh, refc, ptype, smoke]}}           # every 3 h from 48 h to 84 h
   - {id: namnest, label: NAM 3 km, tier: regional, family: ncep,
      herbie: {model: nam, product: conusnest.hiresf},
      cycles: [0, 6, 12, 18], max_hours: 60, range_days: 2, sample_hours: 3, chain_step: 1,
      extremes: {step: 1, temp: maxmin, wind: maxuv},          # max wind as components
-     fields: {hourly: [refc, ptype, t2m, gust, wind, mslp, frz, rh], hourly_hours: 48, stepped: [wind, mslp, frz, rh]}}
+     fields: {hourly: [refc, ptype, t2m, gust, wind, mslp, frz, rh], hourly_hours: 48,
+              stepped: [wind, mslp, frz, rh, refc, ptype]}}                  # every 3 h from 48 h to 60 h
   # blend
   - {id: nbm, label: NBM, tier: blend, family: ncep, herbie: {model: nbm, product: co},
      cycles: [0, 6, 12, 18], max_hours: 264, range_days: 11, sample_hours: 6, chain_step: 6,
