@@ -596,25 +596,44 @@ def fetch_model(spec, cfg, start, points):
         log.info("%s: %s run, %d days", spec["label"], run.strftime("%Y-%m-%d %HZ"), ndays)
 
         fam = spec["family"]
-        if fam == "ncep":
-            lat, lon, cum = _accum_ncep(spec, run, "APCP", targets, dom)
-        else:
-            lat, lon, cum = _accum_ecmwf(spec, run, "tp", targets, dom)
-        cum = np.maximum(cum - cum[0], 0)  # from today's 12Z
+        step = spec.get("sample_hours", 6)
+        hours = list(range(lead0, targets[-1] + 1, step))
+        from . import fields
+        fhours = fields.field_hours(spec, lead0, targets[-1], hours)
+
+        def accum(var):
+            """Cumulative-from-init grids at the daily targets and, for the map, at every field hour.
+            If the extra hours can't be read, the daily targets alone (no accumulated map layer)."""
+            fn = (lambda t: _accum_ncep(spec, run, var, t, dom)) if fam == "ncep" else \
+                 (lambda t: _accum_ecmwf(spec, run, var, t, dom))
+            if fhours:
+                allh = sorted(set(targets) | set(fhours))
+                try:
+                    la, lo, a = fn(allh)
+                    pos = {h: i for i, h in enumerate(allh)}
+                    return la, lo, a[[pos[h] for h in targets]], a[[pos[h] for h in fhours]]
+                except Exception as e:
+                    log.info("%s: no hourly %s accumulation for the map (%s)", spec["label"], var, report.short(e))
+            la, lo, a = fn(targets)
+            return la, lo, a, None
+
+        lat, lon, cum_all, cum_f = accum("APCP" if fam == "ncep" else "tp")
+        cum = np.maximum(cum_all - cum_all[0], 0)  # from today's 12Z
+        acc_fields = {}
+        if cum_f is not None:
+            acc_fields["apcp"] = {"hours": fhours, "data": (np.maximum(cum_f - cum_all[0], 0) / 25.4).astype("float32")}
 
         snow, snow_method = None, None
         try:
-            if fam == "ncep":
-                _, _, s = _accum_ncep(spec, run, "ASNOW", targets, dom)
-                snow, snow_method = np.maximum(s - s[0], 0) * 39.37, "model snowfall (ASNOW)"
-            else:
-                _, _, s = _accum_ecmwf(spec, run, "sf", targets, dom)
-                snow, snow_method = np.maximum(s - s[0], 0) / 25.4 * 10, "snowfall water equivalent at 10:1"
+            _, _, s, s_f = accum("ASNOW" if fam == "ncep" else "sf")
+            # NCEP ASNOW is snow depth in metres; ECMWF sf is water equivalent in mm, shown at 10:1
+            to_in = (lambda x: x * 39.37) if fam == "ncep" else (lambda x: x / 25.4 * 10)
+            snow = to_in(np.maximum(s - s[0], 0))
+            snow_method = "model snowfall (ASNOW)" if fam == "ncep" else "snowfall water equivalent at 10:1"
+            if s_f is not None:
+                acc_fields["asnow"] = {"hours": fhours, "data": to_in(np.maximum(s_f - s[0], 0)).astype("float32")}
         except Exception as e:
             log.info("%s: no snowfall field (%s)", spec["label"], e)
-
-        step = spec.get("sample_hours", 6)
-        hours = list(range(lead0, targets[-1] + 1, step))
         t2m = _samples(spec, run, hours, FIELDS[fam]["t2m"], dom)
         gust = _samples(spec, run, hours, FIELDS[fam]["gust"], dom) if spec.get("gust", True) else {}
 
@@ -624,7 +643,6 @@ def fetch_model(spec, cfg, start, points):
 
         # time-stepped fields for the interactive map; optional, never fails the model
         try:
-            from . import fields
             model_fields = fields.fetch(spec, run, lead0, targets[-1], hours, {"t2m": t2m, "gust": gust}, dom,
                                         sites=outside_sites(cfg))
         except Exception as e:
@@ -648,6 +666,7 @@ def fetch_model(spec, cfg, start, points):
                 ivt = fetch_ivt(spec, run, lead0, targets[-1], dom)
             except Exception as e:
                 log.warning("%s: IVT skipped (%s)", spec["label"], report.short(e))
+        model_fields.update(acc_fields)     # added after the extremes, which read only t2m, gust and wind
         daily_s = (np.diff(np.stack([[c[i, j] for i, j in idx] for c in snow]), axis=0).T
                    if snow is not None else np.full_like(daily_p, np.nan))
         def at_points(var, fallback):

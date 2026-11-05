@@ -2,7 +2,7 @@
  *  layer. The page listens, switches tabs, and hands the request to the map. */
 export interface MapRequest {
   mode: "totals" | "hourly"
-  layer?: "radar" | "t2m" | "gust" | "wind" | "frz" | "ivt" | "pgrad"
+  layer?: "radar" | "apcp" | "asnow" | "t2m" | "gust" | "wind" | "frz" | "ivt" | "pgrad"
   variable?: string
   days?: number
   isobars?: boolean

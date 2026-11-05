@@ -2,7 +2,8 @@
 pressure, freezing level, simulated composite reflectivity and precipitation type.
 
 Temperature and gusts reuse the samples fetch_model already downloads for daily highs, lows and
-peak gusts (an `hourly` request adds only the hours those lack). The rest are fetched here, one GRIB message at a time (anchored regex, as elsewhere),
+peak gusts (an `hourly` request adds only the hours those lack). Accumulated precipitation and
+snowfall come from the same accumulation reads as the daily totals (grib.fetch_model). The rest are fetched here, one GRIB message at a time (anchored regex, as elsewhere),
 in parallel over forecast hours.
 
 Each model's fields are exported as one multi-band Cloud-Optimized GeoTIFF per variable, one
@@ -38,6 +39,9 @@ VARS = {
     # water vapour transport (from the AR computation), kg m-1 s-1; the magnitude is drawn from these
     "ivtu":  {"label": "Water vapor transport (east component)",  "units": "kg/m/s", "scale": 0.1},
     "ivtv":  {"label": "Water vapor transport (north component)", "units": "kg/m/s", "scale": 0.1},
+    # running totals from the start of the briefing (today's 12Z), from the model's own accumulations
+    "apcp":  {"label": "Accumulated precipitation", "units": "in",  "scale": 0.01},
+    "asnow": {"label": "Accumulated snowfall",      "units": "in",  "scale": 0.01},
     "ptype": {"label": "Precipitation type",        "units": "",    "scale": 1.0,
               "categories": {0: "none", 1: "rain", 2: "snow", 3: "freezing rain", 4: "sleet", 5: "mix"}},
 }
@@ -108,6 +112,18 @@ def _wanted(spec):
     hourly = list(f.get("hourly", []))
     expand = lambda vs: [x for v in vs for x in (("u10", "v10") if v == "wind" else (v,))]
     return expand(stepped), expand(hourly), int(f.get("hourly_hours", 48))
+
+
+def field_hours(spec, lead0, last_hour, stepped_hours):
+    """Every forecast hour on this model's map time axis after the briefing start: the stepped
+    hours plus the hourly ones. Empty for a model with no map fields."""
+    if not spec.get("fields"):
+        return []
+    _, hourly, hourly_hours = _wanted(spec)
+    hrs = set(stepped_hours)
+    if hourly:
+        hrs |= set(range(lead0 + 1, min(last_hour, lead0 + hourly_hours) + 1))
+    return sorted(h for h in hrs if lead0 < h <= last_hour)
 
 
 def fetch(spec, run, lead0, last_hour, stepped_hours, samples, dom, sites=None):
