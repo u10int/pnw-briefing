@@ -20,6 +20,10 @@ on:
         description: "Rebuild the page only: reuse the published data with the current code (no downloads)"
         type: boolean
         default: false
+      skip_if_published:
+        description: "Skip if today's briefing is already published (for external schedulers)"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -40,7 +44,7 @@ jobs:
         run: |
           # Manual runs always go ahead. A scheduled run stops if today's briefing is already archived.
           TODAY=$(TZ=America/Los_Angeles date +%Y-%m-%d)
-          if [ "${{ github.event_name }}" = "schedule" ] &&
+          if { [ "${{ github.event_name }}" = "schedule" ] || [ "${{ inputs.skip_if_published }}" = "true" ]; } &&
              gh api "repos/${GITHUB_REPOSITORY}/contents/archive/${TODAY}?ref=gh-pages" --silent 2>/dev/null; then
             echo "briefing for $TODAY already published; skipping"
             echo "run=false" >> "$GITHUB_OUTPUT"
