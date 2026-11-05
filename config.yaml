@@ -12,11 +12,12 @@ windows:
   - {days: 14, label: Next 14 days}
 
 # Map / GRIB subset box (degrees, lon in -180..180). Wider than the comparison regions so the
-# maps show the Lower Mainland of B.C. and central Washington and Oregon for context.
+# maps show southern B.C. (to Whistler), central Washington and Oregon, and a few hundred km of
+# the Pacific, where the wind, rain and pressure systems come from.
 domain:
   lat_min: 43.0
-  lat_max: 50.0
-  lon_min: -125.8
+  lat_max: 51.0
+  lon_min: -128.3
   lon_max: -118.5
 
 # Comparison regions, west of the Cascade crest. Coarse hand-drawn polygons
@@ -86,6 +87,7 @@ points:
   - {name: Government Camp,  lat: 45.30, lon: -121.75, kind: pass,    region: nwor, plume: true, elev_ft: 3980}
   # outside the comparison regions (no PRISM normals or NWS alerts in Canada)
   - {name: Vancouver BC,     lat: 49.28, lon: -123.12, kind: lowland}
+  - {name: Whistler BC,      lat: 50.12, lon: -122.95, kind: pass,    elev_ft: 2214}   # village; pass thresholds for snow
 
 # ----------------------------------------------------------------------------
 # GRIB models — the primary source. NOAA models come from NODD (AWS, with

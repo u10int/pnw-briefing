@@ -101,6 +101,20 @@ def _full_width(fig):
     fig.patches.append(Rectangle((0, 0), 1, 1, transform=fig.transFigure, fill=False, edgecolor="none", linewidth=0))
 
 
+def _aspect(dom):
+    mid = np.deg2rad((dom["lat_min"] + dom["lat_max"]) / 2)
+    return (dom["lon_max"] - dom["lon_min"]) * np.cos(mid) / (dom["lat_max"] - dom["lat_min"])
+
+
+# a 2.45 x 3.5 in panel suited the original 43-50 N, 125.8-118.5 W box; other boxes scale from it
+_REF = {"lat_min": 43.0, "lat_max": 50.0, "lon_min": -125.8, "lon_max": -118.5}
+
+
+def _panel_h(dom, pw):
+    """Panel height for width `pw`, so a panel keeps the map area's shape."""
+    return round(3.5 * (pw / 2.45) * _aspect(_REF) / _aspect(dom), 2)
+
+
 def _axes(fig, gs, n, dom):
     import cartopy.crs as ccrs
     proj = ccrs.LambertConformal(central_longitude=-122.5, standard_parallels=(45, 48))
@@ -159,7 +173,8 @@ def _figure(panels, cfg, out_path, levels, colors, label, spread=None, clamp=Fal
     n = len(panels) + (1 if spread is not None else 0)
     ncols = COLS                      # rows of four; extra panels wrap to the next row
     rows = (n + ncols - 1) // ncols
-    PW, PH, LEG = 2.45, 3.5, 0.75   # panel width/height and legend band, inches
+    PW, LEG = 2.45, 0.75            # panel width and legend band, inches; height follows the map area
+    PH = _panel_h(cfg["domain"], PW)
     fig = plt.figure(figsize=(PW * ncols, PH * rows + LEG), facecolor=PAPER, dpi=160)
     gs = fig.add_gridspec(rows, ncols, left=0.01, right=0.99, top=1 - 0.32 / (PH * rows + LEG),
                           bottom=LEG / (PH * rows + LEG), wspace=0.07, hspace=0.24)
@@ -289,7 +304,8 @@ def observed(grids, cfg, out_path):
     if grids.get("pct30") is not None:
         panels.append((grids["pct30"], "Past 30 days", "Percent of 1991–2020 normal", PCT_LEVELS, PCT_COLORS, True))
     n = len(panels)
-    PW, PH, LEG = 2.45, 3.5, 0.8
+    PW, LEG = 2.45, 0.8
+    PH = _panel_h(cfg["domain"], PW)
     fig = plt.figure(figsize=(PW * COLS, PH + LEG), facecolor=PAPER, dpi=160)
     gs = fig.add_gridspec(1, COLS, left=0.01, right=0.99, top=1 - 0.32 / (PH + LEG), bottom=LEG / (PH + LEG), wspace=0.07)
     axes, tr = _axes(fig, gs, n, cfg["domain"])
