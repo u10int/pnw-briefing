@@ -20,8 +20,10 @@ const amt = (v: N, ramp: Ramp) => {
 }
 const total = (xs: N[]) => (xs.some((x) => x != null) ? xs.reduce<number>((a, b) => a + (b ?? 0), 0) : null)
 
-export function RainByDayCard({ data }: { data: Briefing }) {
-  const [v, setV] = React.useState<Var>("precip")
+/** `only` pins the card to one variable and hides the Rain/Snow switch (the Snow tab's copy). */
+export function RainByDayCard({ data, only }: { data: Briefing; only?: Var }) {
+  const [sel, setV] = React.useState<Var>(only ?? "precip")
+  const v = only ?? sel
   const nd = data.dates.length
   const ramp = RAMP[v]
   const models = React.useMemo(() => modelsWith(data, KEY[v]), [data, v])
@@ -63,7 +65,7 @@ export function RainByDayCard({ data }: { data: Briefing }) {
       </CardHeader>
       <CardContent className="space-y-3">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
-          {hasSnow && (
+          {hasSnow && !only && (
             <Tabs value={v} onValueChange={(x) => setV(x as Var)}>
               <TabsList><TabsTrigger value="precip">Rain</TabsTrigger><TabsTrigger value="snow">Snow</TabsTrigger></TabsList>
             </Tabs>
