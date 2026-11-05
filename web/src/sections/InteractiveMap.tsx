@@ -836,7 +836,7 @@ const TIERS = [["consensus", "Consensus"], ["regional", "Regional"], ["blend", "
 function ModelSelect({ options, value, onChange, label }: { options: { model: string; tier: string }[]; value: string; onChange: (v: string) => void; label: string }) {
   return (
     <Select value={value} onValueChange={onChange}>
-      <SelectTrigger className="w-[170px]" aria-label={label}><SelectValue /></SelectTrigger>
+      <SelectTrigger className="min-w-0 flex-1 sm:w-[170px] sm:flex-none" aria-label={label}><SelectValue /></SelectTrigger>
       <SelectContent>
         {TIERS.map(([t, name]) => [name, options.filter((o) => o.tier === t)] as const).filter(([, o]) => o.length).map(([name, o]) => (
           <SelectGroup key={name}>
@@ -886,10 +886,10 @@ function TimeBar({ times, clock, playing, setPlaying }: { times: string[]; clock
               aria-label={playing ? "Pause" : "Play through time"}>
         {playing ? <Pause className="size-4" /> : <Play className="size-4" />}
       </Button>
-      <Slider className="min-w-[200px] flex-1" value={[pos]} min={0} max={times.length - 1} step={1}
+      <Slider className="min-w-[200px] flex-1 max-sm:order-2 max-sm:min-w-0 max-sm:basis-full" value={[pos]} min={0} max={times.length - 1} step={1}
               onValueChange={([i]) => { setPlaying(false); clock.set(ms[Math.round(i)], false) }} aria-label="Forecast time"
               getAriaValueText={(i) => (times[Math.round(i)] ? timeLabel(times[Math.round(i)]) : "")} />
-      <div className="w-[190px] text-right text-sm tabular-nums">{label ? timeLabel(label) : ""}</div>
+      <div className="text-sm tabular-nums max-sm:order-1 max-sm:flex-1 sm:w-[190px] sm:text-right">{label ? timeLabel(label) : ""}</div>
     </div>
   )
 }
@@ -1038,8 +1038,8 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
       <CardContent className="space-y-4">
         <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
           {hasHourly && (
-            <Tabs value={mode} onValueChange={(v) => { setMode(v as "totals" | "hourly"); setPlaying(false) }}>
-              <TabsList>
+            <Tabs value={mode} onValueChange={(v) => { setMode(v as "totals" | "hourly"); setPlaying(false) }} className="max-sm:w-full">
+              <TabsList className="max-sm:w-full">
                 <TabsTrigger value="totals">Summary</TabsTrigger>
                 <TabsTrigger value="hourly">Through time</TabsTrigger>
               </TabsList>
@@ -1048,7 +1048,7 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
           {mode === "totals" ? (
             <>
               <Select value={variable} onValueChange={(v) => setVariable(v as TotVar)}>
-                <SelectTrigger className="w-[190px]" aria-label="Variable"><SelectValue /></SelectTrigger>
+                <SelectTrigger className="w-full sm:w-[190px]" aria-label="Variable"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {(["Totals", "Extremes", "Vs normal", "Odds", "Observed"] as const).map((g) => [g, totAvail.filter((v) => v.group === g)] as const).filter(([, vs]) => vs.length).map(([g, vs]) => (
                     <SelectGroup key={g}>
@@ -1058,34 +1058,40 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
                   ))}
                 </SelectContent>
               </Select>
-              <Tabs value={String(d)} onValueChange={(v) => setDays(Number(v))}>
-                <TabsList>{windows.map((w) => <TabsTrigger key={w} value={String(w)}>{winLabel(w).replace("next ", "").replace("past ", "")}</TabsTrigger>)}</TabsList>
+              <Tabs value={String(d)} onValueChange={(v) => setDays(Number(v))} className="max-sm:w-full">
+                <TabsList className="max-sm:w-full">{windows.map((w) => <TabsTrigger key={w} value={String(w)}>{winLabel(w).replace("next ", "").replace("past ", "")}</TabsTrigger>)}</TabsList>
               </Tabs>
-              {perModel && <ModelSelect options={options} value={pick(model)?.model ?? ""} onChange={setModel} label="Model" />}
-              {perModel && <Toggle id="compare-t" label="Compare" checked={compare} onChange={setCompare} />}
-              {perModel && compare && <ModelSelect options={options.filter((o) => o.model !== pick(model)?.model)} value={pickOther(other)?.model ?? ""} onChange={setOther} label="Compare with" />}
+              {perModel && (
+                <div className="flex items-center gap-x-5 max-sm:w-full">
+                  <ModelSelect options={options} value={pick(model)?.model ?? ""} onChange={setModel} label="Model" />
+                  <Toggle id="compare-t" label="Compare" checked={compare} onChange={setCompare} />
+                </div>
+              )}
+              {perModel && compare && <div className="flex max-sm:w-full"><ModelSelect options={options.filter((o) => o.model !== pick(model)?.model)} value={pickOther(other)?.model ?? ""} onChange={setOther} label="Compare with" /></div>}
             </>
           ) : (
             <>
-              <Tabs value={layer} onValueChange={(v) => setLayer(v as HLayer)}>
-                <TabsList>
+              <Tabs value={layer} onValueChange={(v) => setLayer(v as HLayer)} className="max-w-full max-sm:w-full max-sm:overflow-x-auto">
+                <TabsList className="max-sm:min-w-full">
                   {HLAYERS.filter((l) => [...byModel.values()].some((v) => l.primary(v.entries))).map((l) => (
                     <TabsTrigger key={l.id} value={l.id}>{l.label}</TabsTrigger>
                   ))}
                 </TabsList>
               </Tabs>
-              {hA && <ModelSelect options={layerModels} value={hA} onChange={setHModel} label="Model" />}
-              <Toggle id="compare-h" label="Compare" checked={compare} onChange={setCompare} />
-              {compare && hB && <ModelSelect options={layerModels.filter((m) => m.model !== hA)} value={hB} onChange={setHOther} label="Compare with" />}
+              <div className="flex items-center gap-x-5 max-sm:w-full">
+                {hA && <ModelSelect options={layerModels} value={hA} onChange={setHModel} label="Model" />}
+                <Toggle id="compare-h" label="Compare" checked={compare} onChange={setCompare} />
+              </div>
+              {compare && hB && <div className="flex max-sm:w-full"><ModelSelect options={layerModels.filter((m) => m.model !== hA)} value={hB} onChange={setHOther} label="Compare with" /></div>}
               {entriesA.mslp && <Toggle id="isobars" label="Isobars" checked={isobars} onChange={setIsobars} />}
               {pairList.length > 0 && <Toggle id="pairs" label="Gradient pairs" checked={showPairs} onChange={setShowPairs} />}
               {hasWind && <Toggle id="particles" label={layer === "ivt" ? "Moisture particles" : "Wind particles"} checked={particles} onChange={setParticles} />}
             </>
           )}
-          <div className="ml-auto flex items-center gap-5">
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-3 max-sm:w-full sm:ml-auto">
             <Toggle id="terrain" label="Terrain" checked={terrain} onChange={setTerrain} />
             <Toggle id="smooth" label="Smooth" checked={smooth} onChange={setSmooth} />
-            <div className="flex w-[180px] items-center gap-3">
+            <div className="flex min-w-[140px] flex-1 items-center gap-3 sm:w-[180px] sm:flex-none">
               <Label className="text-xs text-muted-foreground">Opacity</Label>
               <Slider value={[opacity]} min={0.2} max={1} step={0.05} onValueChange={([v]) => setOpacity(v)} aria-label="Grid opacity" />
             </div>

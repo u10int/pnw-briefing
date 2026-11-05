@@ -157,7 +157,7 @@ export function WindowCard({ w, data }: { w: Window; data: Briefing }) {
           </div>
         ))}
       </CardContent>
-      <CardDescription className="px-6 text-xs">
+      <CardDescription className="px-(--card-pad) text-xs">
         Bar spans the range across models; the mark is the median. Scale 0–{w.scale} in.
         {chg && <> Arrows compare the same {chg.overlapDays} days with yesterday's briefing.</>}
       </CardDescription>
