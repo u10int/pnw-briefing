@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import time
 from datetime import datetime, timezone
 
@@ -49,6 +50,19 @@ def resolve_zones(points, ua):
     return zones
 
 
+def alert_url(affected_zones):
+    """The public page for an alert: weather.gov's hazards page for its first forecast zone (and
+    county), which lists every active watch, warning and advisory there with full text. NWS
+    retired alerts.weather.gov's per-alert search, and the API's alert URL is raw JSON."""
+    ids = [_zone_id(z) for z in affected_zones or []]
+    zone = next((z for z in ids if re.fullmatch(r"[A-Z]{2}Z\d{3}", z)), None)
+    county = next((z for z in ids if re.fullmatch(r"[A-Z]{2}C\d{3}", z)), None)
+    if not zone and not county:
+        return None
+    url = f"https://forecast.weather.gov/showsigwx.php?warnzone={zone or county}"
+    return url + (f"&warncounty={county}" if county else "")
+
+
 def match(features, zones):
     """Turn alert features into compact records, keeping those that touch a forecast location."""
     out = []
@@ -63,7 +77,7 @@ def match(features, zones):
             "certainty": pr.get("certainty"), "urgency": pr.get("urgency"), "headline": pr.get("headline"),
             "onset": pr.get("onset") or pr.get("effective"), "ends": pr.get("ends") or pr.get("expires"),
             "sender": pr.get("senderName"), "areaDesc": pr.get("areaDesc"), "points": hit,
-            "url": f"https://alerts.weather.gov/search?id={pr.get('id')}" if pr.get("id") else None,
+            "url": alert_url(pr.get("affectedZones")),
         })
     out.sort(key=lambda a: (_rank(a["event"]), a["onset"] or ""))
     return out

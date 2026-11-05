@@ -152,7 +152,7 @@ def fire_alerts(cfg, zones):
             "sender": pr.get("senderName"), "areaDesc": pr.get("areaDesc"),
             "points": [n for n, zs in (zones or {}).items() if affected & set(zs)],
             "description": (pr.get("description") or "")[:1200],
-            "url": f"https://alerts.weather.gov/search?id={pr.get('id')}" if pr.get("id") else None,
+            "url": nws.alert_url(pr.get("affectedZones")),
         })
     out.sort(key=lambda a: (a["event"] != "Red Flag Warning", a["onset"] or ""))
     return out
