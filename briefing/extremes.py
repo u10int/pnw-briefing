@@ -8,7 +8,7 @@ between output times are caught. Each entry is (start, end, field): an interval 
 whose interval read failed) the time-stepped map fields are used as instantaneous values.
 
 `compute(m)` returns {var: ndarray[days, y, x]}, where index d-1 holds the extreme over the
-first d 12Z–12Z days, so any window up to the model's range is one lookup.
+first d 12Z – 12Z days, so any window up to the model's range is one lookup.
 """
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ VARS = {
 
 
 def _in_day(start, end, a, b, kind):
-    """Whether an entry belongs to the 12Z–12Z day (a, b]. Intervals go by their end; an
+    """Whether an entry belongs to the 12Z – 12Z day (a, b]. Intervals go by their end; an
     instantaneous value at exactly 12Z counts toward the following day's low (as before)."""
     if start < end:
         return a < end <= b

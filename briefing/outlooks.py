@@ -1,6 +1,6 @@
 """What NWS forecasters are saying: the latest Area Forecast Discussion synopsis (and key messages
-and hydrology, when present) from each office, WPC's Excessive Rainfall Outlook for days 1–5, and
-CPC's 6–10 and 8–14 day temperature and precipitation outlooks, all at the forecast locations.
+and hydrology, when present) from each office, WPC's Excessive Rainfall Outlook for days 1 – 5, and
+CPC's 6 – 10 and 8 – 14 day temperature and precipitation outlooks, all at the forecast locations.
 
 The outlooks are read from NOAA's public map services: one query per layer for the polygons over
 the domain, then point-in-polygon locally, so 9 small requests cover every location.

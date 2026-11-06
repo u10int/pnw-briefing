@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils"
 
 /** Change in inches, with direction carried by icon and sign as well as colour. */
 export function Delta({ value, digits = 1, className, unit = "in" }: { value: number | null | undefined; digits?: number; className?: string; unit?: string }) {
-  if (value == null) return <span className={cn("text-muted-foreground", className)}>–</span>
+  if (value == null) return <span className={cn("text-muted-foreground", className)}> – </span>
   // Under 0.02 in is noise; small changes keep two decimals so "0.3 → 0.4" never reads as "no change".
   const flat = Math.abs(value) < 0.02
   const d = Math.abs(value) < 0.1 ? 2 : digits

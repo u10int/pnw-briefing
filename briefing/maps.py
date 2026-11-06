@@ -165,7 +165,7 @@ def _legend(fig, rect, levels, colors, label, clamp=False):
 
 
 def _run(m):
-    return f"{m['run']:%HZ %a %-d %b} run" if m.get("run") is not None else ""
+    return f"{m['run']:%HZ %a %-m/%-d} run" if m.get("run") is not None else ""
 
 
 def _figure(panels, cfg, out_path, levels, colors, label, spread=None, clamp=False):
@@ -302,7 +302,7 @@ def observed(grids, cfg, out_path):
     panels = [(grids["obs7"], "Past 7 days", "Observed precipitation (in)", PRECIP_LEVELS, PRECIP_COLORS, False),
               (grids["obs30"], "Past 30 days", "Observed precipitation (in)", PRECIP_LEVELS, PRECIP_COLORS, False)]
     if grids.get("pct30") is not None:
-        panels.append((grids["pct30"], "Past 30 days", "Percent of 1991–2020 normal", PCT_LEVELS, PCT_COLORS, True))
+        panels.append((grids["pct30"], "Past 30 days", "Percent of 1991 – 2020 normal", PCT_LEVELS, PCT_COLORS, True))
     n = len(panels)
     PW, LEG = 2.45, 0.8
     PH = _panel_h(cfg["domain"], PW)

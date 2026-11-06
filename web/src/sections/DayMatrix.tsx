@@ -6,6 +6,7 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectSepa
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { fmtLevel, legendBins, type Ramp } from "@/lib/ramps"
 import type { Briefing, DailyVars, Model, N } from "@/types"
+import { dayMD } from "@/lib/format"
 
 /** Location × day tables (rain and snow, temperatures, wind): the model picker, the per-model or
  *  multi-model values behind them, cell colouring and the table itself. */
@@ -116,7 +117,7 @@ export function RampStrip({ ramp, range, unit = "", from, extra }: { ramp: Ramp;
 
 export interface MatrixRow { name: string; group?: boolean; point?: string; days: N[]; lead: N }
 
-export const dayLabel = (iso: string) => new Date(`${iso}T12:00:00`).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })
+export const dayLabel = (iso: string) => dayMD(iso)
 
 /** Locations down the side, days across, a summary column first. Region rows are shaded. Cells
  *  for locations get a tooltip from `tip`. Days at or past `dimFrom` get a muted header. */

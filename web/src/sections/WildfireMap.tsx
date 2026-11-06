@@ -10,10 +10,11 @@ import { FALLBACK, STYLE_URL, withKey } from "@/lib/basemap"
 import { isActive } from "@/lib/fire"
 import { FUEL, spcColor, USDM } from "@/lib/ramps"
 import type { Briefing, Wildfire } from "@/types"
+import { dayMD } from "@/lib/format"
 
 type FC = GeoJSON.FeatureCollection
 const fc = (features: GeoJSON.Feature[]): FC => ({ type: "FeatureCollection", features })
-const shortDate = (iso: string) => new Date(`${iso}T12:00:00`).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })
+const shortDate = (iso: string) => dayMD(iso)
 
 /** The day's outlook layers: NWCC fuel dryness by area (dry and worse; moist is left clear), and SPC areas (the lowest day number that
  *  covers the date, since days 2 and 3 can share a date). */

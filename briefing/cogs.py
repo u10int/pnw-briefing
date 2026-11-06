@@ -84,7 +84,7 @@ def export(grib_models, cfg, out_dir: Path, normals_grid=None):
         n = w["days"]
         covering = [m for m in grib_models if m["range_days"] >= n]
         for m in covering:
-            run = m["run"].strftime("%HZ %-d %b") if m.get("run") else None
+            run = m["run"].strftime("%HZ %a %-m/%-d") if m.get("run") else None
             lat, lon, f = _regular(m, m["precip_mm"][n] / 25.4)
             rel = f"{m['id']}_precip_{n}d.tif"
             write_cog(out_dir / rel, lat, lon, f, "in", f"{m['label']} precipitation, {w['label'].lower()}")
@@ -111,7 +111,7 @@ def export(grib_models, cfg, out_dir: Path, normals_grid=None):
                 with np.errstate(all="ignore"):
                     pct = np.where(normal > 0.05, 100 * mean / normal, np.nan)
                 write_cog(out_dir / f"pctnormal_precip_{n}d.tif", glat, glon, pct, "%",
-                          f"Model mean as percent of 1991–2020 normal, {w['label'].lower()}")
+                          f"Model mean as percent of 1991 – 2020 normal, {w['label'].lower()}")
                 add(f"pctnormal_precip_{n}d.tif", model="Percent of normal", tier="consensus", var="pct", days=n,
                     units="%", members=members)
         # window extremes: each model that covers the window, and their mean
@@ -120,7 +120,7 @@ def export(grib_models, cfg, out_dir: Path, normals_grid=None):
             have = [(m, window(m, var, n)) for m in covering]
             have = [(m, f) for m, f in have if f is not None]
             for m, f in have:
-                run = m["run"].strftime("%HZ %-d %b") if m.get("run") else None
+                run = m["run"].strftime("%HZ %a %-m/%-d") if m.get("run") else None
                 lat, lon, g = _regular(m, f)
                 rel = f"{m['id']}_{var}_{n}d.tif"
                 write_cog(out_dir / rel, lat, lon, g, meta["units"], f"{m['label']} {meta['label'].lower()}, {w['label'].lower()}")

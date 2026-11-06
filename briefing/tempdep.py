@@ -1,8 +1,8 @@
 """Departure from normal of the daily high and low: each location's multi-model median against
-PRISM 1991–2020 normals, by day and averaged over each forecast window, and gridded maps of the
+PRISM 1991 – 2020 normals, by day and averaged over each forecast window, and gridded maps of the
 model-mean departure per window.
 
-PRISM normals are for calendar days; the models' days run 12Z–12Z (4 AM to 4 AM Pacific in
+PRISM normals are for calendar days; the models' days run 12Z – 12Z (4 AM to 4 AM Pacific in
 winter), which still holds the afternoon high and the early-morning low of the same date.
 PRISM covers the US only, so B.C. locations have no normal.
 """
@@ -76,7 +76,7 @@ def summarize(models, cfg, cache: Path, demo: bool = False):
                         "points": {name: {var: mean(r[var]["departure"][:n]) for var in VARS} for name, r in points.items()},
                         "regions": {rid: {var: mean(r[var][:n]) for var in VARS} for rid, r in regions.items()}})
     log.info("temperature departures: %d locations, %d days", len(points), nd)
-    summary = {"source": "PRISM 1991–2020 monthly normals, 4 km, interpolated to each day" + (" (synthetic in demo)" if demo else ""),
+    summary = {"source": "PRISM 1991 – 2020 monthly normals, 4 km, interpolated to each day" + (" (synthetic in demo)" if demo else ""),
                "dates": dates, "normals": normals, "points": points, "regions": regions, "windows": windows}
     return summary, {"lat": lat, "lon": lon, **nrm}
 
@@ -126,7 +126,7 @@ def grids(grib_models, cfg, normal_grid, out_dir: Path):
                 mean = np.nanmean(np.stack([g for _, g in per]), 0)
             rel = f"departure_{var}_{n}d.tif"
             write_cog(out_dir / rel, glat, glon, mean, "°F",
-                      f"Daily {word.lower()} temperature, model-mean departure from 1991–2020 normal, {w['label'].lower()}")
+                      f"Daily {word.lower()} temperature, model-mean departure from 1991 – 2020 normal, {w['label'].lower()}")
             manifest.append({"path": f"cogs/{rel}", "model": "Departure from normal", "tier": "consensus",
                              "var": f"{var}dep", "days": n, "units": "°F", "members": [l for l, _ in per]})
     log.info("temperature departure maps: %d", len(manifest))

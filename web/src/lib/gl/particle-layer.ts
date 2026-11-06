@@ -214,7 +214,7 @@ export class ParticleLayer implements CustomLayerInterface {
     this.enabled = on
     this.map?.triggerRepaint()
   }
-  /** Line colour, straight (not premultiplied) RGB 0–255 and alpha 0–1. */
+  /** Line colour, straight (not premultiplied) RGB 0 – 255 and alpha 0 – 1. */
   setColor(c: [number, number, number, number]) { this.color = c }
 
   private active() { return this.supported && this.enabled && !!this.wind && !!this.update }

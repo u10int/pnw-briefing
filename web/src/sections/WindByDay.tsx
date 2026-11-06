@@ -40,8 +40,8 @@ export function WindByDayCard({ data }: { data: Briefing }) {
     return <>
       <p className="font-semibold">{r.name} · {dayLabel(data.dates[k])}</p>
       {model
-        ? <p>{model.label} {Math.round(x)} mph (model median {mph(s.med)}, range {mph(s.lo)}–{mph(s.hi)} mph)</p>
-        : <p>Median {Math.round(x)} mph of {s.n} models (range {mph(s.lo)}–{mph(s.hi)} mph)</p>}
+        ? <p>{model.label} {Math.round(x)} mph (model median {mph(s.med)}, range {mph(s.lo)} – {mph(s.hi)} mph)</p>
+        : <p>Median {Math.round(x)} mph of {s.n} models (range {mph(s.lo)} – {mph(s.hi)} mph)</p>}
     </>
   }
 
@@ -50,7 +50,7 @@ export function WindByDayCard({ data }: { data: Briefing }) {
       <CardHeader>
         <CardTitle>{v === "gust" ? "Gusts by day" : "Wind by day"}</CardTitle>
         <CardDescription>
-          {model ? `${model.label}'s` : "Each location's multi-model median"} {WORD[v]} for each 12Z–12Z day, in mph
+          {model ? `${model.label}'s` : "Each location's multi-model median"} {WORD[v]} for each 12Z – 12Z day, in mph
           {model && `, out to day ${model.days}`}. Region rows show their windiest location.
         </CardDescription>
       </CardHeader>

@@ -4,17 +4,30 @@ import { contrastTextColor } from "@/lib/contrast"
 // Dates arrive as YYYY-MM-DD local calendar days; anchor at noon so no timezone shifts the day.
 const d = (iso: string) => new Date(`${iso.slice(0, 10)}T12:00:00`)
 
-// Built by hand: Intl orders weekday+day as "6 Fri" in some engines; we want "Fri 6".
-export const dayShort = (iso: string) =>
-  `${d(iso).toLocaleDateString("en-US", { weekday: "short" })} ${d(iso).getDate()}`
-export const dayMonth = (iso: string) =>
-  d(iso).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })
-export const dayLong = (iso: string) =>
-  d(iso).toLocaleDateString("en-US", { weekday: "short", month: "long", day: "numeric" })
+// Every date in the page reads "Thu 11/5" (built by hand: Intl orders weekday and day
+// differently across engines).
 
-/** "Sat 11/7" */
+/** A YYYY-MM-DD calendar day: "Sat 11/7". */
 export const dayMD = (iso: string) =>
   `${d(iso).toLocaleDateString("en-US", { weekday: "short" })} ${d(iso).getMonth() + 1}/${d(iso).getDate()}`
+export const dayShort = dayMD
+export const dayMonth = dayMD
+export const dayLong = dayMD
+
+const PT = "America/Los_Angeles"
+const ptParts = (t: number | string) => {
+  const x = new Date(typeof t === "string" ? Date.parse(t) : t)
+  const md = x.toLocaleDateString("en-US", { month: "numeric", day: "numeric", timeZone: PT })
+  return { wd: x.toLocaleDateString("en-US", { weekday: "short", timeZone: PT }), md, x }
+}
+/** A moment's Pacific calendar day: "Thu 11/5". */
+export const ptDay = (t: number | string) => { const p = ptParts(t); return `${p.wd} ${p.md}` }
+/** A moment in Pacific time to the hour: "Thu 11/5 4 PM" (minutes when they aren't :00; `zone` adds "PST"). */
+export function ptDayHour(t: number | string, zone = false) {
+  const p = ptParts(t)
+  const hm = p.x.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: PT, ...(zone ? { timeZoneName: "short" } : {}) }).replace(":00", "")
+  return `${p.wd} ${p.md} ${hm}`
+}
 
 /** "Sat 11/7", or "Sat 11/7 – Sun 11/8". */
 export function dateRange(a: string, b: string) {
@@ -22,11 +35,10 @@ export function dateRange(a: string, b: string) {
   return `${dayMD(a)} – ${dayMD(b)}`
 }
 
-export const issuedLabel = (iso: string) =>
-  new Date(iso).toLocaleString("en-US", {
-    weekday: "long", month: "long", day: "numeric", hour: "numeric", minute: "2-digit",
-    timeZone: "America/Los_Angeles", timeZoneName: "short",
-  })
+export const issuedLabel = (iso: string) => {
+  const x = new Date(iso)
+  return `${ptDay(iso)} ${x.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: PT, timeZoneName: "short" })}`
+}
 
 export const inch = (v: N, digits = 1) => (v == null ? "–" : v.toFixed(digits))
 
@@ -43,7 +55,7 @@ export function blueCell(v: N, max: number) {
   return { background: BLUES[i], color: contrastTextColor(BLUES[i]) }
 }
 
-/** Sequential red for hazard agreement (0–1). */
+/** Sequential red for hazard agreement (0 – 1). */
 const REDS = ["#fdf0ef", "#fbd9d6", "#f6b3ad", "#ee867d", "#e25a4f", "#c8322a", "#962019"]
 export function redCell(v: number) {
   if (!v || v < 0.1) return { background: "transparent", color: "transparent" }

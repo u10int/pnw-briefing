@@ -3,6 +3,7 @@ import * as React from "react"
 import { dayStats } from "@/sections/DayMatrix"
 import type { Briefing, N } from "@/types"
 import { arEpisodes, type HazardTab } from "@/sections/Hazards"
+import { ptDay } from "@/lib/format"
 
 /** The figure and 14-day sketch at the top of each hazard card. Colours are the data's own (rain
  *  blue, snow violet, warm red / cool blue); severity stays in the badge. */
@@ -16,11 +17,7 @@ export interface Spark {
 export interface Visual { value: string; unit?: string; caption: string; aside?: string; spark?: Spark }
 
 const PT = "America/Los_Angeles"
-// "Thu 5", built by hand: Intl orders weekday and day differently across engines
-const day = (t: number) => {
-  const d = new Date(t)
-  return `${d.toLocaleDateString("en-US", { weekday: "short", timeZone: PT })} ${d.toLocaleDateString("en-US", { day: "numeric", timeZone: PT })}`
-}
+const day = (t: number) => ptDay(t)
 const dayOf = (d: Briefing, k: number) => new Date(`${d.dates[k]}T20:00:00Z`).getTime()
 const fin = (x: N): x is number => x != null && Number.isFinite(x)
 const maxOf = (xs: N[]) => { const ys = xs.filter(fin); return ys.length ? Math.max(...ys) : null }
@@ -66,10 +63,10 @@ export function hazardVisuals(d: Briefing): Partial<Record<HazardTab, Visual>> {
   // flooding: the atmospheric river the models agree on, else the wettest 3 days at one place
   const eps = arEpisodes(d).filter((e) => e.agreed >= 1).sort((a, b) => b.agreed - a.agreed || a.start - b.start)
   const daily = across(d, rain, names, "max")
-  const sparkFlood: Spark = { unit: "in", series: [{ values: daily, color: "var(--wwa)" }], threshold: { value: 1.25, label: "1.25″ heavy rain" } }
+  const sparkFlood: Spark = { unit: "in", series: [{ values: daily, color: "var(--wwa)" }], threshold: { value: 1.25, label: "1.25″" } }
   if (eps.length) {
     const e = eps[0]
-    out.flood = { value: `AR${e.agreed}`, caption: `${e.point}, ${day(e.start)}–${day(e.end)}`, aside: "Atmospheric river both models reach", spark: sparkFlood }
+    out.flood = { value: `AR${e.agreed}`, caption: `${e.point}, ${day(e.start)} – ${day(e.end)}`, aside: "Atmospheric river both models reach", spark: sparkFlood }
   } else {
     let best: { v: number; name: string; k: number } | null = null
     for (const n of names) for (let k = 0; k + 2 < d.dates.length; k++) {
@@ -150,15 +147,15 @@ export function SparkBars({ spark, dates }: { spark: Spark; dates: string[] }) {
       bars.push(<line key="t" x1={0} x2={W} y1={y} y2={y} stroke="var(--muted-foreground)" strokeWidth={1} strokeDasharray="3 2" vectorEffect="non-scaling-stroke" opacity={0.7} />)
     }
   }
-  const lab = (iso: string) => day(Date.parse(`${iso}T20:00:00Z`))
+  const lab = (iso: string) => `${Number(iso.slice(5, 7))}/${Number(iso.slice(8, 10))}`   // just "11/5"
   return (
     <div className="mt-3">
       <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="h-9 w-full overflow-visible" aria-hidden>{bars}</svg>
-      <div className="mt-1 flex justify-between text-[11px] tabular-nums text-muted-foreground">
+      <div className="mt-1 flex justify-between gap-2 text-[11px] whitespace-nowrap tabular-nums text-muted-foreground">
         <span>{lab(dates[0])}</span>
         {spark.threshold && <span className="flex items-center gap-1"><span className="w-3 border-t border-dashed border-muted-foreground/70" />{spark.threshold.label}</span>}
         {spark.series.length > 1 && (
-          <span className="flex items-center gap-2">
+          <span className="flex items-center gap-1.5">
             {spark.series.map((s) => <span key={s.label} className="flex items-center gap-1"><span className="size-2 rounded-[2px]" style={{ background: s.color }} />{s.label}</span>)}
           </span>
         )}

@@ -1,4 +1,4 @@
-"""1991–2020 precipitation and temperature normals from PRISM, for departure-from-normal.
+"""1991 – 2020 precipitation and temperature normals from PRISM, for departure-from-normal.
 
 PRISM publishes monthly normals as one grid per month (4 km here). Monthly totals are
 spread into daily normals by interpolating between mid-month daily rates, so a window
@@ -151,7 +151,7 @@ def _demo_month(month, dom):
     lat = np.arange(dom["lat_min"], dom["lat_max"], 0.04)
     lon = np.arange(dom["lon_min"], dom["lon_max"], 0.04)
     la, lo = np.meshgrid(lat, lon, indexing="ij")
-    season = 0.55 + 0.45 * np.cos((month - 12) / 12 * 2 * np.pi)   # wettest Nov–Jan
+    season = 0.55 + 0.45 * np.cos((month - 12) / 12 * 2 * np.pi)   # wettest Nov – Jan
     return lat, lon, (_terrain(la, lo) * 175 * season).astype("float32")  # mm/month
 
 
@@ -187,5 +187,5 @@ def summarize(models, cfg, cache: Path, demo: bool = False):
         windows.append({"days": n, "label": w["label"], "regions": region, "points": points})
 
     grid = {"lat": lat, "lon": lon, "daily": daily}
-    return {"source": "PRISM 1991–2020 monthly normals, 4 km" + (" (synthetic in demo)" if demo else ""),
+    return {"source": "PRISM 1991 – 2020 monthly normals, 4 km" + (" (synthetic in demo)" if demo else ""),
             "points": pts, "windows": windows}, grid
