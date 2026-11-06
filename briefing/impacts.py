@@ -24,6 +24,30 @@ def _arr(m, p, v):
     return np.array(m["data"][p].get(v, []), dtype=float)
 
 
+def in_leaf_season(date, imp):
+    """Whether a YYYY-MM-DD date falls in the leaf-on season (`leaf_season`, MM-DD bounds)."""
+    lo, hi = imp.get("leaf_season") or (None, None)
+    return bool(lo and hi and lo <= str(date)[5:10] <= hi)
+
+
+def gust_thresholds(imp, kind, dates, r72):
+    """Per-day gust threshold for one location and model: the base level, the leaf-on level in
+    season, less `wind_wet_soil_drop_mph` on a multi-day-rain day and the two days after."""
+    base = imp["wind_gust_mph"][kind]
+    if base is None:
+        return None
+    leaf = (imp.get("wind_gust_leaf_mph") or {}).get(kind, base)
+    thr = np.array([float(leaf if in_leaf_season(d, imp) else base) for d in dates[: len(r72)]])
+    drop, wet_at = imp.get("wind_wet_soil_drop_mph", 0), imp["heavy_rain_72h"].get(kind)
+    if drop and wet_at is not None and len(thr):
+        wet = np.nan_to_num(r72[: len(thr)]) >= wet_at
+        recent = wet.copy()
+        for lag in (1, 2):
+            recent[lag:] |= wet[:-lag]
+        thr = thr - drop * recent
+    return thr
+
+
 def detect(point_models, cfg):
     imp = cfg["impacts"]
     ndays = cfg["days"]
@@ -57,7 +81,9 @@ def detect(point_models, cfg):
             per["heavy_rain_72h"].append(flag(r72, imp["heavy_rain_72h"][kind]))
             per["snow_24h"].append(flag(sn, imp["snow_24h"][kind]))
             per["hard_freeze"].append(flag(tmin, imp["hard_freeze_f"][kind], ge=False))
-            per["wind"].append(flag(gust, imp["wind_gust_mph"][kind]))
+            gthr = gust_thresholds(imp, kind, dates, r72)
+            ng = min(len(gust), len(gthr)) if gthr is not None else 0
+            per["wind"].append(flag(gust[:ng], gthr[:ng]) if ng else None)
             per["heat"].append(flag(tmax, imp["heat_f"][kind]))
             if kind != "pass":
                 fz = ((tmin <= imp["freezing_precip_f"]) & (tmax <= imp["freezing_precip_f"] + 4)

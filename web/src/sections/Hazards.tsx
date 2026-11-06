@@ -6,8 +6,9 @@ import { ArrowLeftRight, CalendarDays, ChevronRight, CircleCheck, CloudRain, Clo
 import { Badge } from "@/components/ui/badge"
 import { gradLevel, pairName } from "@/lib/gradients"
 import { hazardVisuals, SparkBars } from "@/sections/HazardVisuals"
-import type { Briefing } from "@/types"
-import { ptDay } from "@/lib/format"
+import type { Briefing, Point, WindLevels } from "@/types"
+import { dateRange, ptDay } from "@/lib/format"
+import { dayStats } from "@/sections/DayMatrix"
 
 export type HazardTab = "precip" | "flood" | "wind" | "snow" | "temp"
 export type Tone = "quiet" | "watch" | "alert"
@@ -121,7 +122,69 @@ function flood(d: Briefing): Summary {
   return { tab: "flood", title: "Flooding", icon: Waves, items: lines, tone, lead }
 }
 
+/** Gust levels (config.yaml `impacts`; these defaults match it, for briefings built before the
+ *  page carried them): worth watching where scattered outages start, significant at NWS High
+ *  Wind Warning strength, or advisory strength at several lowland locations at once. */
+const WIND_DEFAULT: WindLevels = {
+  wind_gust_mph: { lowland: 40, coast: 50, pass: 60 },
+  wind_gust_leaf_mph: { lowland: 35, coast: 50, pass: 60 },
+  wind_gust_severe_mph: { lowland: 58, coast: 65, pass: 75 },
+  wind_widespread_mph: 45, wind_widespread_points: 3,
+  leaf_season: ["09-01", "11-15"], wind_wet_soil_drop_mph: 5,
+}
+export const windLevels = (d: Briefing): WindLevels => ({ ...WIND_DEFAULT, ...(d.windLevels ?? {}) })
+const inLeaf = (L: WindLevels, iso: string) => !!L.leaf_season && L.leaf_season[0] <= iso.slice(5, 10) && iso.slice(5, 10) <= L.leaf_season[1]
+/** The "worth watching" gust for a kind of location on a day (the leaf-on level in season). */
+export const watchGust = (L: WindLevels, kind: Point["kind"], iso: string) =>
+  (inLeaf(L, iso) ? L.wind_gust_leaf_mph ?? L.wind_gust_mph : L.wind_gust_mph)[kind]
+
+/** Wind: the gust events the models agree on (these catch strong lows passing offshore into BC
+ *  as well as gradient-driven wind), any location whose median gust reaches outage strength,
+ *  and the pressure gradients. Gusts lead; the gradients explain the pattern. */
 function wind(d: Briefing): Summary {
+  const items: Item[] = []
+  let tone = "quiet" as Tone, lead: string | undefined
+  const raise = (t: Tone) => { if (t === "alert" || (t === "watch" && tone === "quiet")) tone = t }
+
+  // 1. gust events with model agreement, likely first, then the strongest
+  const L = windLevels(d)
+  const kindOf = Object.fromEntries(d.points.map((p) => [p.name, p.kind])) as Record<string, Point["kind"]>
+  const ev = (d.events ?? []).filter((e) => e.hazard === "wind" && e.points.length)
+    .sort((a, b) => (a.level === b.level ? 0 : a.level === "likely" ? -1 : 1) || b.points[0].peak - a.points[0].peak || a.start.localeCompare(b.start))
+  for (const e of ev.slice(0, 2)) {
+    const p = e.points[0], more = e.points.length - 1
+    const where = `${p.name}${more ? ` and ${more} more` : ""}`
+    items.push({ icon: Wind, text: `Gusts to ${Math.round(p.peak)} mph at ${where}, ${dateRange(e.start, e.end)}: ${Math.round(100 * e.agreement)}% of ${e.n_models} models` })
+  }
+  if (ev.length) {
+    // significant: a likely event at warning strength somewhere, or at advisory strength at
+    // several lowland locations at once (widespread outages rather than scattered ones)
+    const severe = (e: (typeof ev)[number]) => e.level === "likely" && (
+      e.points.some((x) => kindOf[x.name] && x.peak >= L.wind_gust_severe_mph[kindOf[x.name]]) ||
+      e.points.filter((x) => kindOf[x.name] === "lowland" && x.peak >= L.wind_widespread_mph).length >= L.wind_widespread_points)
+    const e = ev.find(severe) ?? ev[0], p = e.points[0]
+    raise(severe(e) ? "alert" : "watch")
+    lead = `Gusts to ${Math.round(p.peak)} mph at ${p.name} ${dateRange(e.start, e.end)}`
+  }
+
+  // 2. the median alone reaching outage strength (when fewer models agree than an event needs)
+  const gust = dayStats(d, "wind_gusts_10m_max")
+  let best: { name: string; v: number; k: number } | null = null
+  let bestOver = 0
+  for (const p of d.points) {
+    gust[p.name]?.forEach((s, k) => {
+      const over = s.med == null ? -1 : s.med - watchGust(L, p.kind, d.dates[k])
+      if (over >= 0 && (!best || over > bestOver)) { best = { name: p.name, v: s.med!, k }; bestOver = over }
+    })
+  }
+  const b = best as { name: string; v: number; k: number } | null
+  if (b && !ev.length) {
+    items.push({ icon: Wind, text: `Median gust ${Math.round(b.v)} mph at ${b.name}, ${day(midday(d.dates[b.k]))}, strong enough for scattered outages` })
+    raise("watch")
+    lead ??= `Gusts near ${Math.round(b.v)} mph at ${b.name} ${day(midday(d.dates[b.k]))}`
+  }
+
+  // 3. pressure gradients
   const gs = (d.gradients ?? []).filter((g) => g.series.length)
   type Hit = { g: (typeof gs)[number]; level: number; label: string; t: number; models: Set<string>; n: number }
   const hits: Hit[] = []
@@ -141,12 +204,16 @@ function wind(d: Briefing): Summary {
     if (h) hits.push(h)
   }
   hits.sort((a, b) => b.level - a.level || a.t - b.t)
-  const lines: Item[] = hits.slice(0, 2).map((h) => ({ icon: ArrowLeftRight, text: `${h.label} (${pairName(h.g)}), ${day(h.t)}: ${h.models.size} of ${h.n} models` }))
-  if (!lines.length) lines.push({ icon: ArrowLeftRight, text: gs.length ? "No pressure gradient reaches its threshold" : "No gradient data" })
+  for (const h of hits.slice(0, items.length >= 2 ? 1 : 2))
+    items.push({ icon: ArrowLeftRight, text: `${h.label} (${pairName(h.g)}), ${day(h.t)}: ${h.models.size} of ${h.n} models` })
   const top = hits[0]?.level ?? 0
+  if (top) raise(top >= 2 ? "alert" : "watch")
   const h0 = hits[0]
-  const lead = h0 ? `${cap(h0.label)} ${day(h0.t)} (${h0.g.codes?.length === 2 && h0.g.codes.every(Boolean) ? h0.g.codes.join("–") : pairName(h0.g)})` : undefined
-  return { tab: "wind", title: "Wind", icon: Wind, items: lines, tone: top >= 2 ? "alert" : top ? "watch" : "quiet", lead }
+  if (h0 && (!lead || (top >= 2 && tone === "alert" && !ev.some((e) => e.level === "likely"))))
+    lead = `${cap(h0.label)} ${day(h0.t)} (${h0.g.codes?.length === 2 && h0.g.codes.every(Boolean) ? h0.g.codes.join("–") : pairName(h0.g)})`
+
+  if (!items.length) items.push({ icon: Wind, text: `No location's gusts reach outage strength (${watchGust(L, "lowland", d.dates[0] ?? "")} mph in the lowlands)` })
+  return { tab: "wind", title: "Wind", icon: Wind, items, tone, lead }
 }
 
 function snow(d: Briefing): Summary {
