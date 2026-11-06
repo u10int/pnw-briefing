@@ -152,7 +152,7 @@ def _legend(fig, rect, levels, colors, label, clamp=False):
     if ticks is not None:       # long tables: tick and label only the chosen levels
         shown = [v for v in levels if any(abs(v - t) < 1e-6 for t in ticks)]
         cb.set_ticks(shown)
-        cb.ax.set_xticklabels([f"{v:.0f}" if abs(v) >= 10 else f"{v:g}" if abs(v) >= 1 else f"{v:.2g}" for v in shown],
+        cb.ax.set_xticklabels([f"{v:.0f}" if abs(v) >= 10 else f"{round(v, 1):g}" if abs(v) >= 1 else f"{v:.2g}" for v in shown],
                               fontproperties=REG, fontsize=7.5, color=BLACK)
     else:
         every = 2 if len(levels) > 16 else 1

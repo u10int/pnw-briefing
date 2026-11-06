@@ -180,7 +180,7 @@ impacts:
   snow_24h:         {lowland: 1.0,  coast: 1.0, pass: 8.0}
   hard_freeze_f:    {lowland: 27,   coast: 27,  pass: null}
   freezing_precip_f: 32      # min temp <= this AND precip >= 0.05" -> frozen/icing precip possible
-  wind_gust_mph:    {lowland: 45,   coast: 60,  pass: 60}
+  wind_gust_mph:    {lowland: 40,   coast: 50,  pass: 60}   # scattered power outages start near 40 mph in the lowlands
   heat_f:           {lowland: 90,   coast: 85,  pass: null}
 
 # ----------------------------------------------------------------------------
