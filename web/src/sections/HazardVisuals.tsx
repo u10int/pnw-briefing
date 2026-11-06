@@ -126,6 +126,7 @@ export function SparkBars({ spark, dates }: { spark: Spark; dates: string[] }) {
   const slot = W / n, gap = slot * 0.22, bw = (slot - gap) / ns
   let bars: React.ReactNode[] = []
   if (spark.diverging) {
+    // above normal grows up from a zero line through the middle, below normal down from it
     const m = Math.max(4, ...all.map(Math.abs))
     const y0 = H / 2
     bars = spark.series[0].values.map((v, k) => {
@@ -134,7 +135,7 @@ export function SparkBars({ spark, dates }: { spark: Spark; dates: string[] }) {
       return <rect key={k} x={k * slot + gap / 2} y={v >= 0 ? y0 - h : y0} width={slot - gap} height={h} rx={0.6}
                    fill={v >= 0 ? "#d6604d" : "#4393c3"} opacity={Math.abs(v) < 2 ? 0.45 : 0.9} />
     })
-    bars.push(<line key="z" x1={0} x2={W} y1={y0} y2={y0} stroke="var(--border)" strokeWidth={0.5} vectorEffect="non-scaling-stroke" />)
+    bars.push(<line key="z" x1={0} x2={W} y1={y0} y2={y0} stroke="var(--muted-foreground)" strokeOpacity={0.45} strokeWidth={1} vectorEffect="non-scaling-stroke" />)
   } else {
     const top = Math.max(...all, spark.threshold ? spark.threshold.value * 1.15 : 0) || 1
     bars = spark.series.flatMap((s, i) => s.values.map((v, k) => {
@@ -142,6 +143,8 @@ export function SparkBars({ spark, dates }: { spark: Spark; dates: string[] }) {
       const h = Math.max(v > 0 ? 0.8 : 0, (v / top) * (H - 1))
       return <rect key={`${i}-${k}`} x={k * slot + gap / 2 + i * bw} y={H - h} width={bw} height={h} rx={0.6} fill={s.color} />
     }))
+    // the same muted zero line as the temperature chart, so dry or calm days still sit on something
+    bars.push(<line key="z" x1={0} x2={W} y1={H} y2={H} stroke="var(--muted-foreground)" strokeOpacity={0.45} strokeWidth={1} vectorEffect="non-scaling-stroke" />)
     if (spark.threshold) {
       const y = H - (spark.threshold.value / top) * (H - 1)
       bars.push(<line key="t" x1={0} x2={W} y1={y} y2={y} stroke="var(--muted-foreground)" strokeWidth={1} strokeDasharray="3 2" vectorEffect="non-scaling-stroke" opacity={0.7} />)
