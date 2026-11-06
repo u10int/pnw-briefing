@@ -126,18 +126,16 @@ export function SparkBars({ spark, dates }: { spark: Spark; dates: string[] }) {
   const slot = W / n, gap = slot * 0.22, bw = (slot - gap) / ns
   let bars: React.ReactNode[] = []
   if (spark.diverging) {
-    // zero sits where the data needs it: at the bottom when nothing is below normal (so the bars
-    // stand on the same baseline as the other cards'), in the middle when it's split evenly
-    const up = Math.max(0, ...all), down = Math.max(0, ...all.map((v) => -v))
-    const m = Math.max(4, up + down)                  // the span drawn, top to bottom
-    const y0 = (H * (m - down)) / m                    // zero: the bottom edge when nothing is below normal
+    // above normal grows up from a zero line through the middle, below normal down from it
+    const m = Math.max(4, ...all.map(Math.abs))
+    const y0 = H / 2
     bars = spark.series[0].values.map((v, k) => {
       if (!fin(v)) return null
-      const h = Math.max(0.6, (Math.abs(v) / m) * (H - 1))
+      const h = Math.max(0.6, (Math.abs(v) / m) * (H / 2 - 1))
       return <rect key={k} x={k * slot + gap / 2} y={v >= 0 ? y0 - h : y0} width={slot - gap} height={h} rx={0.6}
                    fill={v >= 0 ? "#d6604d" : "#4393c3"} opacity={Math.abs(v) < 2 ? 0.45 : 0.9} />
     })
-    bars.push(<line key="z" x1={0} x2={W} y1={y0} y2={y0} stroke="var(--border)" strokeWidth={0.5} vectorEffect="non-scaling-stroke" />)
+    bars.push(<line key="z" x1={0} x2={W} y1={y0} y2={y0} stroke="var(--muted-foreground)" strokeOpacity={0.45} strokeWidth={1} vectorEffect="non-scaling-stroke" />)
   } else {
     const top = Math.max(...all, spark.threshold ? spark.threshold.value * 1.15 : 0) || 1
     bars = spark.series.flatMap((s, i) => s.values.map((v, k) => {
