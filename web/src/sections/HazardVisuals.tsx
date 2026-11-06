@@ -147,7 +147,7 @@ export function SparkBars({ spark, dates }: { spark: Spark; dates: string[] }) {
       bars.push(<line key="t" x1={0} x2={W} y1={y} y2={y} stroke="var(--muted-foreground)" strokeWidth={1} strokeDasharray="3 2" vectorEffect="non-scaling-stroke" opacity={0.7} />)
     }
   }
-  const lab = (iso: string) => day(Date.parse(`${iso}T20:00:00Z`))
+  const lab = (iso: string) => `${Number(iso.slice(5, 7))}/${Number(iso.slice(8, 10))}`   // just "11/5"
   return (
     <div className="mt-3">
       <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="h-9 w-full overflow-visible" aria-hidden>{bars}</svg>
