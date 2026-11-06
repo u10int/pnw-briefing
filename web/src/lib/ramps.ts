@@ -36,7 +36,7 @@ export const PROB: Ramp = {
   colors: ["#e2daf5", "#c9b9ec", "#a993df", "#8a6fd0", "#6b4fbc", "#4f3799", "#35226f"],
 }
 export const PCT: Ramp = {
-  label: "Model mean, percent of 1991–2020 normal", units: "%",
+  label: "Model mean, percent of 1991 – 2020 normal", units: "%",
   levels: [0, 25, 50, 70, 90, 110, 130, 160, 200, 300],
   colors: ["#8c510a", "#bf812d", "#dfc27d", "#f6e8c3", "#f5f5f5", "#c7eae5", "#80cdc1", "#35978f", "#01665e", "#003c30"],
 }
@@ -45,7 +45,7 @@ export const PCT: Ramp = {
 export const IVT: Ramp = fromMaue("maue_ivt", "Water vapor transport (IVT)", "kg m⁻¹ s⁻¹",
   { show: [20, 1500], ticks: [20, 100, 250, 500, 800, 1000, 1500] })
 
-/** Sea-level pressure gradient strength. Synoptic gradients run 1–2 hPa per 100 km; 3+ is a
+/** Sea-level pressure gradient strength. Synoptic gradients run 1 – 2 hPa per 100 km; 3+ is a
  *  windstorm-class gradient, and gap flows (Gorge, Fraser) pack even tighter. */
 export const PGRAD: Ramp = {
   label: "Pressure gradient", units: "hPa per 100 km",
@@ -54,7 +54,7 @@ export const PGRAD: Ramp = {
 }
 
 /** Departure from normal (°F). */
-export const TDEP: Ramp = fromMaue("maue_temp_anomaly", "Departure from 1991–2020 normal", "°F",
+export const TDEP: Ramp = fromMaue("maue_temp_anomaly", "Departure from 1991 – 2020 normal", "°F",
   { clampLow: true, show: [-30, 30], ticks: [-30, -20, -10, -5, 0, 5, 10, 20, 30] })
 
 /** A level as a legend label: whole numbers from 10 up, otherwise up to two decimals. */

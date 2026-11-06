@@ -93,7 +93,7 @@ def collect(cfg: dict, out: Path, demo: bool = False, products: bool = True) -> 
         hit = next((x for x in models + ensembles if x["label"] == label), None)
         status.append({"label": label, "kind": kind, "ok": hit is not None, "reason": report.REASONS.get(label),
                        "source": (hit or {}).get("source", "grib"),
-                       "run": hit["run"].strftime("%HZ %-d %b") if hit is not None and hit.get("run") else None})
+                       "run": hit["run"].strftime("%HZ %a %-m/%-d") if hit is not None and hit.get("run") else None})
 
     # ---- analysis
     wins = analysis.windows(cfg)
@@ -159,7 +159,7 @@ def collect(cfg: dict, out: Path, demo: bool = False, products: bool = True) -> 
     ordered_grib = model_order(grib_models)
     grib_rows = []
     for r, m in zip(analysis.grib_region_series(ordered_grib, cfg), ordered_grib):
-        grib_rows.append({"model": r["label"], "tier": m.get("tier"), "run": m["run"].strftime("%HZ %-d %b"),
+        grib_rows.append({"model": r["label"], "tier": m.get("tier"), "run": m["run"].strftime("%HZ %a %-m/%-d"),
                           "windows": [{rid: (r["series"][rid][w["days"] - 1] if len(r["series"][rid]) >= w["days"] else None)
                                        for rid in cfg["regions"]} for w in wins]})
 
@@ -197,7 +197,7 @@ def collect(cfg: dict, out: Path, demo: bool = False, products: bool = True) -> 
         "gribAreaMeans": grib_rows,
         "dates": models[0]["dates"],
         "models": [{"label": m["label"], "tier": m.get("tier"), "source": m.get("source"),
-                    "run": m["run"].strftime("%HZ %-d %b") if m.get("run") else None,
+                    "run": m["run"].strftime("%HZ %a %-m/%-d") if m.get("run") else None,
                     "days": analysis.coverage(m), "data": m["data"]} for m in models],
         "ensembles": ens_out,
         "maps": {k: (v.name if v else None)

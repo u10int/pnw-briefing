@@ -9,7 +9,7 @@ import { type ChartConfig, ChartContainer, ChartTooltip, ChartTooltipContent } f
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { dateRange, dayShort, inch } from "@/lib/format"
+import { dateRange, dayShort, inch, ptDay, ptDayHour } from "@/lib/format"
 import { pctCell } from "@/sections/Totals"
 import type { ArEvent, Avalanche, AvalancheDanger, Briefing, Gradient, Landslide, ModelSeries, N, PointOdds, Tier } from "@/types"
 import { GRAD_COLORS, gradLevel, pairName, seriesAt } from "@/lib/gradients"
@@ -26,11 +26,8 @@ const MODEL_COLORS: Record<string, string> = {
 const colorOf = (m: string, i: number) => MODEL_COLORS[m] ?? ["#64748b", "#a16207", "#0f766e"][i % 3]
 
 const PT = "America/Los_Angeles"
-// "Thu 5", built by hand: Intl orders weekday and day differently across engines
-const tickDay = (t: number) =>
-  `${new Date(t).toLocaleDateString("en-US", { weekday: "short", timeZone: PT })} ${new Date(t).toLocaleDateString("en-US", { day: "numeric", timeZone: PT })}`
-const tipTime = (t: number) =>
-  new Date(t).toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", timeZone: PT })
+const tickDay = (t: number) => ptDay(t)
+const tipTime = (t: number) => ptDayHour(t)
 
 /** Rows keyed by time (ms) with one column per model, for a shared tooltip. */
 function rowsOf(series: { model: string; times: string[]; values: N[] }[]) {
@@ -138,7 +135,7 @@ export function ObservedCard({ data }: { data: Briefing }) {
         <CardTitle>How wet it's been</CardTitle>
         <CardDescription>
           Observed precipitation through {dateRange(w30.to, w30.to)}, from NOAA's radar-and-gauge analysis (MRMS),
-          against 1991–2020 normals. Wet ground turns the same rain into more runoff.
+          against 1991 – 2020 normals. Wet ground turns the same rain into more runoff.
         </CardDescription>
       </CardHeader>
       <CardContent className="grid grid-cols-[minmax(0,1fr)] gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)]">
@@ -203,7 +200,7 @@ export function LandslideCard({ data }: { data: Briefing }) {
   if (!ls || !ls.points.length) return null
   const thr = ls.threshold, near = 0.8 * thr
   const day = (k: number) => ls.days[k]
-  const dayName = (k: number) => new Date(Date.parse(day(k).start) + 12 * H).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: PT })
+  const dayName = (k: number) => ptDay(Date.parse(day(k).start) + 12 * H)
   const t0 = Date.parse(ls.days[0].start), t1 = Date.parse(ls.days[ls.days.length - 1].end)
 
   const perDay = (p: Landslide["points"][number]) => ls.days.map((_, k) => {
@@ -1206,7 +1203,7 @@ export function OutlooksCard({ data }: { data: Briefing }) {
       <CardHeader>
         <CardTitle>National outlooks</CardTitle>
         <CardDescription>
-          WPC's Excessive Rainfall Outlook (days 1–5) and CPC's 6–10 and 8–14 day outlooks at the forecast locations.
+          WPC's Excessive Rainfall Outlook (days 1 – 5) and CPC's 6 – 10 and 8 – 14 day outlooks at the forecast locations.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-8">
@@ -1228,7 +1225,7 @@ export function OutlooksCard({ data }: { data: Briefing }) {
                   ))}
                 </TableBody>
               </Table>
-            ) : <p className="text-sm text-muted-foreground">No excessive rainfall risk at any forecast location for days 1–5.</p>}
+            ) : <p className="text-sm text-muted-foreground">No excessive rainfall risk at any forecast location for days 1 – 5.</p>}
             <a className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground" href={o.ero.url} target="_blank" rel="noopener">WPC Excessive Rainfall Outlook</a>
           </div>
         )}
@@ -1243,7 +1240,7 @@ export function OutlooksCard({ data }: { data: Briefing }) {
               Each bar is the most common category across the area's locations, over the days the outlook covers; hover
               for each location's category and probability.
               {cpc.uncovered.length > 0 && ` CPC outlooks cover the US only, so ${cpc.uncovered.join(", ")} ${cpc.uncovered.length > 1 ? "are" : "is"} left out.`}{" "}
-              <a className="underline underline-offset-2 hover:text-foreground" href={o.cpc!.url} target="_blank" rel="noopener">CPC 6–10 and 8–14 day outlooks</a>
+              <a className="underline underline-offset-2 hover:text-foreground" href={o.cpc!.url} target="_blank" rel="noopener">CPC 6 – 10 and 8 – 14 day outlooks</a>
             </p>
           </div>
         )}

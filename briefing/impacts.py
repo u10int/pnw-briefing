@@ -2,7 +2,7 @@
 
 For each hazard, point and day, count the fraction of models exceeding the
 threshold. Days where any point reaches `min_agreement` are grouped into
-events so the briefing can say e.g. "Heavy rain, Nov 7–8, Forks/Aberdeen,
+events so the briefing can say e.g. "Heavy rain, Nov 7 – 8, Forks/Aberdeen,
 7 of 10 models".
 """
 from __future__ import annotations

@@ -104,7 +104,7 @@ export function EnsemblePlume({ data, point }: { data: Briefing; point: string }
     <Card>
       <CardHeader>
         <CardTitle>Ensembles</CardTitle>
-        <CardDescription>Median and the 10th–90th percentile range of accumulated precipitation across members.</CardDescription>
+        <CardDescription>Median and the 10th – 90th percentile range of accumulated precipitation across members.</CardDescription>
       </CardHeader>
       <CardContent>
         {ens.length ? (
@@ -142,7 +142,7 @@ export function EnsembleTable({ data }: { data: Briefing }) {
     <Card>
       <CardHeader>
         <CardTitle>{data.meta.days}-day ensemble totals</CardTitle>
-        <CardDescription>Median, with the 10th–90th percentile range (in).</CardDescription>
+        <CardDescription>Median, with the 10th – 90th percentile range (in).</CardDescription>
       </CardHeader>
       <CardContent>
         <Table>
@@ -162,7 +162,7 @@ export function EnsembleTable({ data }: { data: Briefing }) {
                   return (
                     <TableCell key={e.label} className="text-right tabular-nums">
                       {s ? (<><span className="font-semibold">{s.p50[last].toFixed(1)}</span>{" "}
-                        <span className="text-muted-foreground">{s.p10[last].toFixed(1)}–{s.p90[last].toFixed(1)}</span></>) : "–"}
+                        <span className="text-muted-foreground">{s.p10[last].toFixed(1)} – {s.p90[last].toFixed(1)}</span></>) : "–"}
                     </TableCell>
                   )
                 })}

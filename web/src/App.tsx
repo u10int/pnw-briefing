@@ -169,7 +169,7 @@ export default function App() {
               <ByLocation data={data} />
               <MapCard title="Precipitation maps" description="Each model on its own grid, then the mean and spread on a common grid."
                 tabs={[
-                  { id: "p48", label: "Next 48 hours", src: data.maps.short, alt: "48-hour precipitation by model, with mean and spread", note: "Liquid equivalent. Spread is the highest minus the lowest model at each grid cell. Regional models next to the blend and the global models, over the same two 12Z–12Z days." },
+                  { id: "p48", label: "Next 48 hours", src: data.maps.short, alt: "48-hour precipitation by model, with mean and spread", note: "Liquid equivalent. Spread is the highest minus the lowest model at each grid cell. Regional models next to the blend and the global models, over the same two 12Z – 12Z days." },
                   { id: "pl", label: `Through day ${meta.days}`, src: data.maps.long, alt: "Full-range precipitation by model", note: "Each panel is labeled with the number of days the model covers; mean and spread use only the days every model covers." },
                 ]} />
               <GribAreaMeans data={data} />
@@ -207,7 +207,7 @@ export default function App() {
               <RainByDayCard data={data} only="snow" />
               <MapCard title="Snowfall maps" description="From each model's own snow field; models without one are left out."
                 tabs={[
-                  { id: "s48", label: "Next 48 hours", src: data.maps.snow_short, alt: "48-hour snowfall by model", note: "Model snowfall over the next two 12Z–12Z days." },
+                  { id: "s48", label: "Next 48 hours", src: data.maps.snow_short, alt: "48-hour snowfall by model", note: "Model snowfall over the next two 12Z – 12Z days." },
                   { id: "s7", label: "7 days", src: data.maps.snow_long, alt: "7-day snowfall by model", note: "Models with their own snow field." },
                 ]} />
               <SnowpackCard data={data} />

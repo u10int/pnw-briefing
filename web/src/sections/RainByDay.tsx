@@ -47,8 +47,8 @@ export function RainByDayCard({ data, only }: { data: Briefing; only?: Var }) {
     return <>
       <p className="font-semibold">{r.name} · {dayLabel(data.dates[k])}</p>
       {model
-        ? <p>{model.label} {x.toFixed(2)}″ (model median {(s.med ?? 0).toFixed(2)}″, range {(s.lo ?? 0).toFixed(2)}–{(s.hi ?? 0).toFixed(2)}″)</p>
-        : <p>Median {x.toFixed(2)}″ of {s.n} models (range {(s.lo ?? 0).toFixed(2)}–{(s.hi ?? 0).toFixed(2)}″)</p>}
+        ? <p>{model.label} {x.toFixed(2)}″ (model median {(s.med ?? 0).toFixed(2)}″, range {(s.lo ?? 0).toFixed(2)} – {(s.hi ?? 0).toFixed(2)}″)</p>
+        : <p>Median {x.toFixed(2)}″ of {s.n} models (range {(s.lo ?? 0).toFixed(2)} – {(s.hi ?? 0).toFixed(2)}″)</p>}
       {nrm != null && nrm > 0 && <p>Normal for the day {nrm.toFixed(2)}″ ({Math.round((100 * x) / nrm)}% of normal)</p>}
     </>
   }
@@ -58,8 +58,8 @@ export function RainByDayCard({ data, only }: { data: Briefing; only?: Var }) {
       <CardHeader>
         <CardTitle>{v === "precip" ? "Rain by day" : "Snow by day"}</CardTitle>
         <CardDescription>
-          {model ? <>{model.label}'s forecast for each 12Z–12Z day ({what}), out to day {model.days}.</>
-                 : <>Each location's multi-model median for each 12Z–12Z day ({what}).</>}
+          {model ? <>{model.label}'s forecast for each 12Z – 12Z day ({what}), out to day {model.days}.</>
+                 : <>Each location's multi-model median for each 12Z – 12Z day ({what}).</>}
           {" "}Region rows average their locations. Hover for the range across models{v === "precip" && " and the normal for the day"}.
         </CardDescription>
       </CardHeader>

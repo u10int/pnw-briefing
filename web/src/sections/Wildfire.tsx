@@ -16,12 +16,13 @@ import { isActive } from "@/lib/fire"
 import { FUEL, HDW, RH, type Ramp, SMOKE, spcColor, USDM } from "@/lib/ramps"
 import { DayMatrix, dayLabel, dayStats, type MatrixRow, ModelPick, modelDays, modelsWith, RampStrip, rampCell, regionDays, usePick } from "@/sections/DayMatrix"
 import type { Briefing, N, PsaDay, Wildfire } from "@/types"
+import { dayMD, ptDay, ptDayHour } from "@/lib/format"
 
 const WildfireMap = React.lazy(() => import("@/sections/WildfireMap"))
 
 const when = (iso: string | null) =>
-  iso ? new Date(iso).toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", timeZone: "America/Los_Angeles" }) : "–"
-const shortDate = (iso: string) => new Date(`${iso}T12:00:00`).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })
+  iso ? ptDayHour(iso) : "–"
+const shortDate = (iso: string) => dayMD(iso)
 const ink = (hex: string) => (hex.startsWith("#") ? contrastTextColor(hex) : "inherit")
 const unavailable = (what: string) => <p className="text-sm text-muted-foreground">The {what} service didn't answer when this briefing was built.</p>
 
@@ -69,7 +70,7 @@ const GROUPS: [string, string][] = [["W", "West of the Cascades"], ["C", "Cascad
 const LEVEL_WORD = ["No forecast", "Moist", "Dry", "Very dry", "High risk"]
 
 function FuelCell({ d }: { d: PsaDay | null }) {
-  if (!d) return <td className="px-1 py-1 text-center text-muted-foreground">–</td>
+  if (!d) return <td className="px-1 py-1 text-center text-muted-foreground"> – </td>
   const bg = FUEL[d.level] ?? "transparent"
   const cell = (
     <td className="px-1 py-1 text-center text-[11px] font-medium" style={{ background: bg, color: bg.startsWith("#") ? contrastTextColor(bg) : undefined }}>
@@ -228,8 +229,8 @@ export function FireWeatherByDayCard({ data }: { data: Briefing }) {
     const x = r.days[k]!, s = stats[r.point!][k]
     return <>
       <p className="font-semibold">{r.name} · {dayLabel(data.dates[k])}</p>
-      {model ? <p>{model.label} {fmt(x)} (models {fmt(s.lo)}–{fmt(s.hi)}, median {fmt(s.med)})</p>
-             : <p>Median {fmt(x)} of {s.n} models (range {fmt(s.lo)}–{fmt(s.hi)})</p>}
+      {model ? <p>{model.label} {fmt(x)} (models {fmt(s.lo)} – {fmt(s.hi)}, median {fmt(s.med)})</p>
+             : <p>Median {fmt(x)} of {s.n} models (range {fmt(s.lo)} – {fmt(s.hi)})</p>}
     </>
   }
   return (
@@ -237,7 +238,7 @@ export function FireWeatherByDayCard({ data }: { data: Briefing }) {
       <CardHeader>
         <CardTitle>Fire weather by day</CardTitle>
         <CardDescription>
-          {model ? `${model.label}'s` : "Each location's multi-model median"} {FWORD[v]} for each 12Z–12Z day
+          {model ? `${model.label}'s` : "Each location's multi-model median"} {FWORD[v]} for each 12Z – 12Z day
           {model && `, out to day ${model.days}`}. Region rows show their {lowIsBad ? "driest" : "worst"} location.
         </CardDescription>
       </CardHeader>
@@ -293,9 +294,9 @@ export function WildfireMapCard({ data, wf }: { data: Briefing; wf: Wildfire }) 
 
 /** NWCG fire size classes, by acres; the colour steps up with the class. */
 const SIZE_CLASSES = [
-  { cls: "A", min: 0, typical: 0.1, range: "<¼", color: "#fde68a" }, { cls: "B", min: 0.25, typical: 4, range: "¼–10", color: "#fcc94a" },
-  { cls: "C", min: 10, typical: 40, range: "10–100", color: "#f9a529" }, { cls: "D", min: 100, typical: 200, range: "100–300", color: "#f07b1d" },
-  { cls: "E", min: 300, typical: 600, range: "300–1k", color: "#dc4c16" }, { cls: "F", min: 1000, typical: 2500, range: "1k–5k", color: "#b3261e" },
+  { cls: "A", min: 0, typical: 0.1, range: "<¼", color: "#fde68a" }, { cls: "B", min: 0.25, typical: 4, range: "¼ – 10", color: "#fcc94a" },
+  { cls: "C", min: 10, typical: 40, range: "10 – 100", color: "#f9a529" }, { cls: "D", min: 100, typical: 200, range: "100 – 300", color: "#f07b1d" },
+  { cls: "E", min: 300, typical: 600, range: "300 – 1k", color: "#dc4c16" }, { cls: "F", min: 1000, typical: 2500, range: "1k – 5k", color: "#b3261e" },
   { cls: "G", min: 5000, typical: 30000, range: "5k+", color: "#7a1220" },
 ]
 const sizeClass = (acres: number) => [...SIZE_CLASSES].reverse().find((c) => acres >= c.min)!
@@ -376,7 +377,9 @@ export function IncidentsCard({ wf }: { wf: Wildfire }) {
                       </span>
                     </TableCell>
                     <TableCell><Containment pct={r.contained} /></TableCell>
-                    <TableCell className="tabular-nums">{r.discovered ? new Date(r.discovered).toLocaleDateString("en-US", { month: "short", day: "numeric", year: new Date(r.discovered).getFullYear() !== new Date().getFullYear() ? "numeric" : undefined }) : "–"}</TableCell>
+                    <TableCell className="tabular-nums">{r.discovered ? (new Date(r.discovered).getFullYear() !== new Date().getFullYear()
+                      ? new Date(r.discovered).toLocaleDateString("en-US", { month: "numeric", day: "numeric", year: "2-digit", timeZone: "America/Los_Angeles" })
+                      : ptDay(r.discovered)) : "–"}</TableCell>
                     <TableCell>{r.cause ?? "–"}</TableCell>
                   </TableRow>
                 ))}
@@ -406,7 +409,7 @@ export function DroughtCard({ data, wf }: { data: Briefing; wf: Wildfire }) {
         <CardTitle>Drought by location</CardTitle>
         <CardDescription>
           The US Drought Monitor category at each forecast location
-          {dm?.mapDate && <>, for the week ending {new Date(dm.mapDate).toLocaleDateString("en-US", { month: "long", day: "numeric", timeZone: "UTC" })}</>}.
+          {dm?.mapDate && <>, for the week ending {dayMD(new Date(dm.mapDate).toISOString())}</>}.
           Long-term dryness that keeps heavy fuels and duff ready to burn.
         </CardDescription>
       </CardHeader>

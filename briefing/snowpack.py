@@ -119,7 +119,7 @@ def fetch(cfg, demo: bool = False, today: date | None = None):
         as_of = max([as_of] + [x["date"] for x in sts], key=lambda v: v or "")
     log.info("snowpack: %d stations in %d areas, as of %s", sum(len(a["stations"]) for a in out_areas), len(out_areas), as_of)
     return {"asOf": as_of, "minMedian": min_median, "areas": out_areas,
-            "source": "USDA NRCS SNOTEL (AWDB); medians are the station's 1991–2020 daily median"}
+            "source": "USDA NRCS SNOTEL (AWDB); medians are the station's 1991 – 2020 daily median"}
 
 
 def safe_fetch(cfg, demo=False):

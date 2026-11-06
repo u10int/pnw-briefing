@@ -23,6 +23,7 @@ import { ParticleLayer, type WindDraw } from "@/lib/gl/particle-layer"
 import { type Grid, sameGrid } from "@/lib/gl/util"
 import { FRZ, GUST, IVT, legendBins, PCT, PGRAD, PRECIP, PROB, PTYPE_COLORS, PTYPE_NAMES, type Ramp, REFC, RH, SMOKE, SNOW, SPREAD, TDEP, TEMP, WIND } from "@/lib/ramps"
 import type { Briefing, Cog, ExtremeVar, FieldEntry, FieldsManifest, FieldVar, Gradient } from "@/types"
+import { ptDayHour } from "@/lib/format"
 
 // ------------------------------------------------------------------ map plumbing
 
@@ -508,9 +509,9 @@ const TOT_VARS: { id: TotVar; label: string; group: TotGroup; ramp: Ramp; perMod
   { id: "p24", label: "Chance of 1\" in a day", group: "Odds", ramp: { ...PROB, label: "Chance of 1\" or more in 24 hours, pooled ensembles" }, perModel: false, digits: 0, suffix: "% of members" },
   { id: "p72", label: "Chance of 3\" in 3 days", group: "Odds", ramp: { ...PROB, label: "Chance of 3\" or more in 72 hours, pooled ensembles" }, perModel: false, digits: 0, suffix: "% of members" },
   { id: "obs", label: "Observed precipitation", group: "Observed", ramp: { ...PRECIP, label: "Observed precipitation (MRMS)" }, perModel: false, digits: 2 },
-  { id: "obspct", label: "Observed, % of normal", group: "Observed", ramp: { ...PCT, label: "Observed precipitation, percent of 1991–2020 normal" }, perModel: false, digits: 0, suffix: "% of normal" },
-  { id: "tmaxdep", label: "High temp vs normal", group: "Vs normal", ramp: { ...TDEP, label: "Daily high, model-mean departure from 1991–2020 normal (window average)" }, perModel: false, digits: 1, suffix: "°F vs normal" },
-  { id: "tmindep", label: "Low temp vs normal", group: "Vs normal", ramp: { ...TDEP, label: "Daily low, model-mean departure from 1991–2020 normal (window average)" }, perModel: false, digits: 1, suffix: "°F vs normal" },
+  { id: "obspct", label: "Observed, % of normal", group: "Observed", ramp: { ...PCT, label: "Observed precipitation, percent of 1991 – 2020 normal" }, perModel: false, digits: 0, suffix: "% of normal" },
+  { id: "tmaxdep", label: "High temp vs normal", group: "Vs normal", ramp: { ...TDEP, label: "Daily high, model-mean departure from 1991 – 2020 normal (window average)" }, perModel: false, digits: 1, suffix: "°F vs normal" },
+  { id: "tmindep", label: "Low temp vs normal", group: "Vs normal", ramp: { ...TDEP, label: "Daily low, model-mean departure from 1991 – 2020 normal (window average)" }, perModel: false, digits: 1, suffix: "°F vs normal" },
 ]
 const MEAN = "Model mean"
 
@@ -569,8 +570,7 @@ const flowOf = (layer: HLayer, e: Record<string, FieldEntry>) =>
 // every 2 hPa: this view is only ~7° across, where 4 hPa leaves one or two lines outside a strong storm
 const ISOBARS = Array.from({ length: 62 }, (_, i) => 940 + 2 * i)
 
-const timeLabel = (iso: string) =>
-  new Date(iso).toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", timeZone: "America/Los_Angeles", timeZoneName: "short" })
+const timeLabel = (iso: string) => ptDayHour(iso, true)
 
 /** Band `i` of a field, or null if it has no band within `tol` hours of `iso`. */
 async function bandNear(e: FieldEntry | undefined, iso: string, tol = 0.6) {
@@ -1164,7 +1164,7 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
             {layer === "gust" && <RampLegend ramp={GUST} />}
             {layer === "wind" && <RampLegend ramp={WIND} note={showParticles ? "Particles trace the 10 m wind; faster particles mean stronger wind." : "Arrows point the way the wind is blowing; longer arrows are stronger winds."} />}
             {layer === "frz" && <RampLegend ramp={FRZ} every={2} note="Snow usually reaches the ground about 1,000 ft below the freezing level." />}
-            {layer === "pgrad" && <RampLegend ramp={PGRAD} note="How fast sea-level pressure changes with distance, from the smoothed field: 1–2 is a typical synoptic gradient, 3 and up is windstorm-class, and gap flows (Gorge, Fraser, Strait) pack tighter. Mountain cells (mean height above 600 m, or peaks above 1,400 m) are left blank: sea-level pressure there is an extrapolation, and its gradient would mostly trace the terrain." />}
+            {layer === "pgrad" && <RampLegend ramp={PGRAD} note="How fast sea-level pressure changes with distance, from the smoothed field: 1 – 2 is a typical synoptic gradient, 3 and up is windstorm-class, and gap flows (Gorge, Fraser, Strait) pack tighter. Mountain cells (mean height above 600 m, or peaks above 1,400 m) are left blank: sea-level pressure there is an extrapolation, and its gradient would mostly trace the terrain." />}
             {showPairs && pairList.length > 0 && <p className="text-xs text-muted-foreground">Lines join each gradient station pair, labelled with this model's pressure difference (hPa, first station minus second); arrowheads point from high to low pressure, the way the gap flow blows; amber and red mark the pair's first and second thresholds, as on the pressure gradient card.</p>}
             {layer === "ivt" && <RampLegend ramp={IVT} note={`Vertically integrated water vapor transport (GFS and ECMWF AIFS), the measure behind the atmospheric-river scale: 250 and up is AR conditions${showParticles ? "; particles follow the moisture flow" : ""}.`} />}
             {showParticles && layer !== "wind" && layer !== "ivt" && <p className="text-xs text-muted-foreground">Moving particles trace the 10 m wind.</p>}

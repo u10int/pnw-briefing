@@ -288,7 +288,7 @@ def _export_ivt(m, out_dir: Path, manifest: list):
                        dtype="int16", nodata=-32768, scale=meta["scale"], band_names=times)
         manifest.append({"path": f"fields/{rel}", "model": m["label"], "tier": m.get("tier", "global"), "var": var,
                          "units": meta["units"], "scale": meta["scale"], "nodata": -32768, "times": times,
-                         "run": m["run"].strftime("%HZ %-d %b"),
+                         "run": m["run"].strftime("%HZ %a %-m/%-d"),
                          "init": m["run"].replace(tzinfo=timezone.utc).isoformat()})
 
 
@@ -318,7 +318,7 @@ def export(grib_models, cfg, out_dir: Path):
                            dtype="int16", nodata=-32768, scale=meta["scale"], band_names=times)
             entry = {"path": f"fields/{rel}", "model": m["label"], "tier": m.get("tier", "global"), "var": var,
                      "units": meta["units"], "scale": meta["scale"], "nodata": -32768, "times": times,
-                     "run": m["run"].strftime("%HZ %-d %b"),
+                     "run": m["run"].strftime("%HZ %a %-m/%-d"),
                      "init": m["run"].replace(tzinfo=timezone.utc).isoformat()}
             if "categories" in meta:
                 entry["categories"] = meta["categories"]

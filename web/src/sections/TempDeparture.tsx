@@ -63,8 +63,8 @@ export function TempDepartureCard({ data }: { data: Briefing }) {
     return <>
       <p className="font-semibold">{r.name} · {dayLabel(td.dates[k])}</p>
       {model
-        ? <p>{model.label} {WORD[v]} {deg(x)} (model median {deg(p?.forecast[k] ?? null)}, {deg(p?.low[k] ?? null)}–{deg(p?.high[k] ?? null)})</p>
-        : <p>Forecast {WORD[v]} {deg(x)} (median of {p?.models[k]} models, {deg(p?.low[k] ?? null)}–{deg(p?.high[k] ?? null)})</p>}
+        ? <p>{model.label} {WORD[v]} {deg(x)} (model median {deg(p?.forecast[k] ?? null)}, {deg(p?.low[k] ?? null)} – {deg(p?.high[k] ?? null)})</p>
+        : <p>Forecast {WORD[v]} {deg(x)} (median of {p?.models[k]} models, {deg(p?.low[k] ?? null)} – {deg(p?.high[k] ?? null)})</p>}
       {n != null && x != null && <p>Normal {WORD[v]} {deg(n)} → {signed(x - n)}</p>}
     </>
   }
@@ -75,7 +75,7 @@ export function TempDepartureCard({ data }: { data: Briefing }) {
         <CardTitle>{show === "dep" ? "Temperatures vs normal" : "Daily temperatures"}</CardTitle>
         <CardDescription>
           {model ? `${model.label}'s` : "Each location's multi-model median"} daily {WORD[v]}{" "}
-          {show === "dep" ? "against its 1991–2020 normal for the date (PRISM)" : "temperature"}{model && `, out to day ${model.days}`}.
+          {show === "dep" ? "against its 1991 – 2020 normal for the date (PRISM)" : "temperature"}{model && `, out to day ${model.days}`}.
           {" "}Region rows average their locations.
         </CardDescription>
       </CardHeader>
@@ -110,7 +110,7 @@ export function TempDepartureCard({ data }: { data: Briefing }) {
         <DayMatrix dates={td.dates} rows={rows} leadHead="Avg" leadSub={w.label} dimFrom={w.days}
           style={show === "dep" ? depCell : (x) => rampCell(x, TEMP)} fmt={show === "dep" ? (x) => signed(x) : deg} tip={tip} />
         <p className="text-xs text-muted-foreground">
-          Days past the selected window are shown too; the average covers only the window. Model days run 12Z–12Z (4 AM to 4 AM
+          Days past the selected window are shown too; the average covers only the window. Model days run 12Z – 12Z (4 AM to 4 AM
           Pacific), which holds the day's afternoon high and early-morning low.
           {show === "dep" && noNormal.length > 0 && ` PRISM normals cover the US only, so ${noNormal.join(", ")} ${noNormal.length > 1 ? "have" : "has"} no departure.`}
           {" "}The interactive map's Summary mode has the gridded version under “Temperature vs normal”.

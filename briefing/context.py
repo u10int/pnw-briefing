@@ -2,7 +2,7 @@
 station pairs, and snow level at the passes.
 
 Both read each model's time-stepped map fields (briefing/fields.py) at the nearest grid cell, so
-they cost no extra downloads: hourly for the regional models' first 48 hours, then every 3–6 h.
+they cost no extra downloads: hourly for the regional models' first 48 hours, then every 3 – 6 h.
 """
 from __future__ import annotations
 

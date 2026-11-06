@@ -111,7 +111,7 @@ function RangeBar({ lo, hi, median, scale, color }: { lo: number; hi: number; me
         </div>
       </TooltipTrigger>
       <TooltipContent>
-        Models range {lo.toFixed(1)}–{hi.toFixed(1)} in; median {median.toFixed(1)} in
+        Models range {lo.toFixed(1)} – {hi.toFixed(1)} in; median {median.toFixed(1)} in
       </TooltipContent>
     </Tooltip>
   )
@@ -158,7 +158,7 @@ export function WindowCard({ w, data }: { w: Window; data: Briefing }) {
         ))}
       </CardContent>
       <CardDescription className="px-(--card-pad) text-xs">
-        Bar spans the range across models; the mark is the median. Scale 0–{w.scale} in.
+        Bar spans the range across models; the mark is the median. Scale 0 – {w.scale} in.
         {chg && <> Arrows compare the same {chg.overlapDays} days with yesterday's briefing.</>}
       </CardDescription>
     </Card>

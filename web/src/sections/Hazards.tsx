@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge"
 import { gradLevel, pairName } from "@/lib/gradients"
 import { hazardVisuals, SparkBars } from "@/sections/HazardVisuals"
 import type { Briefing } from "@/types"
+import { ptDay } from "@/lib/format"
 
 export type HazardTab = "precip" | "flood" | "wind" | "snow" | "temp"
 export type Tone = "quiet" | "watch" | "alert"
@@ -15,11 +16,7 @@ interface Item { icon: LucideIcon; text: string }
 export interface Summary { tab: HazardTab; title: string; icon: LucideIcon; items: Item[]; tone: Tone; lead?: string }
 
 const PT = "America/Los_Angeles"
-// "Wed 4", built by hand: Intl orders weekday and day differently across engines
-const day = (t: number | string) => {
-  const d = new Date(typeof t === "string" ? Date.parse(t) : t)
-  return `${d.toLocaleDateString("en-US", { weekday: "short", timeZone: PT })} ${d.toLocaleDateString("en-US", { day: "numeric", timeZone: PT })}`
-}
+const day = (t: number | string) => ptDay(t)
 /** A plain YYYY-MM-DD date read at midday UTC, so it stays on the same calendar day in Pacific time. */
 const midday = (d: string) => (/^\d{4}-\d{2}-\d{2}$/.test(d) ? `${d}T20:00:00Z` : d)
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
@@ -39,7 +36,7 @@ function precip(d: Briefing): Summary {
       items.push({ icon: CloudRain, text: `${r.region}: ${r.median.toFixed(1)} in over ${w.label.toLowerCase().replace("next ", "the next ")}${pct != null ? `, ${Math.round(pct)}% of normal` : ""}` })
     }
   }
-  if (d.wettest) items.push({ icon: CalendarDays, text: `Wettest stretch ${day(midday(d.wettest.start))}–${day(midday(d.wettest.end))}, about ${d.wettest.amount.toFixed(1)} in across the locations` })
+  if (d.wettest) items.push({ icon: CalendarDays, text: `Wettest stretch ${day(midday(d.wettest.start))} – ${day(midday(d.wettest.end))}, about ${d.wettest.amount.toFixed(1)} in across the locations` })
   const tone: Tone = topPct >= 200 ? "alert" : topPct >= 130 ? "watch" : "quiet"
   const lead = tone !== "quiet" && w ? `${topRegion} rain near ${Math.round(topPct / 10) * 10}% of normal over ${w.label.toLowerCase().replace("next ", "the next ")}` : undefined
   return { tab: "precip", title: "Precip", icon: CloudRain, items, tone, lead }
@@ -84,10 +81,10 @@ function flood(d: Briefing): Summary {
     // lead with what the models agree on; a split never sets the severity
     const best = [...eps].sort((a, b) => b.agreed - a.agreed || b.top - a.top || a.start - b.start)[0]
     const split = eps.filter((x) => x.top - x.agreed >= 2 && x.top > best.agreed).sort((a, b) => b.top - a.top || a.start - b.start)[0]
-    const when = (x: Episode) => `${day(x.start)}–${day(x.end)}`
+    const when = (x: Episode) => `${day(x.start)} – ${day(x.end)}`
     const byModel = (x: Episode) => x.ranks.map(([m, r]) => `${m.replace("ECMWF ", "")} ${r ? AR_SHORT[r] : "none"}`).join(", ")
     if (best.agreed >= 1 && best.top - best.agreed <= 1) {
-      const rank = best.agreed === best.top ? `${AR_SHORT[best.agreed]} (${AR_WORD[best.agreed]})` : `${AR_SHORT[best.agreed]}–${AR_SHORT[best.top]} (${AR_WORD[best.agreed]} to ${AR_WORD[best.top]})`
+      const rank = best.agreed === best.top ? `${AR_SHORT[best.agreed]} (${AR_WORD[best.agreed]})` : `${AR_SHORT[best.agreed]} – ${AR_SHORT[best.top]} (${AR_WORD[best.agreed]} to ${AR_WORD[best.top]})`
       lines.push({ icon: Waves, text: `${rank} atmospheric river at ${best.point}, ${when(best)}: ${best.ranks.length > 2 ? `all ${best.ranks.length}` : "both"} models` })
       if (best.agreed >= 3) { tone = "watch"; lead = `${cap(AR_WORD[best.agreed])} atmospheric river at ${best.point} ${when(best)}` }
       if (best.agreed >= 4) tone = "alert"

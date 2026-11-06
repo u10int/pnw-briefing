@@ -1,8 +1,8 @@
 """Wildfire-season context for the Wildfire tab, from public keyless services:
 
 - NWS Red Flag Warnings and Fire Weather Watches from the region's offices (api.weather.gov)
-- SPC fire weather outlooks, days 1–8 (NOAA mapservices: categorical wind/RH and dry thunderstorm
-  areas for days 1–2, probabilities for days 3–8)
+- SPC fire weather outlooks, days 1 – 8 (NOAA mapservices: categorical wind/RH and dry thunderstorm
+  areas for days 1 – 2, probabilities for days 3 – 8)
 - the NWCC 7-day significant fire potential: fuel dryness and high-risk days for each Predictive
   Service Area (NWCG Predictive Services)
 - current wildfire and prescribed-fire incidents and perimeters (NIFC WFIGS)

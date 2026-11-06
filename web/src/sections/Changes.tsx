@@ -202,7 +202,7 @@ export function TotalChanges({ data }: { data: Briefing }) {
                 </TableCell>
                 {data.regions.map((r) => {
                   const v = w.regions[r.id]
-                  if (!v) return <TableCell key={r.id} className="text-right text-muted-foreground">–</TableCell>
+                  if (!v) return <TableCell key={r.id} className="text-right text-muted-foreground"> – </TableCell>
                   return (
                     <TableCell key={r.id} className="text-right">
                       <Delta value={v.delta} />

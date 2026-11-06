@@ -1,7 +1,7 @@
 """How wet it has already been: observed precipitation over the past 7 and 30 days from NOAA's
-MRMS multi-sensor (radar + gauge, Pass 2) 24-hour QPE, against PRISM 1991–2020 normals.
+MRMS multi-sensor (radar + gauge, Pass 2) 24-hour QPE, against PRISM 1991 – 2020 normals.
 
-The 24-hour files ending at 12Z line up with the briefing's 12Z–12Z days. They're read straight
+The 24-hour files ending at 12Z line up with the briefing's 12Z – 12Z days. They're read straight
 from the public AWS bucket (one ~5 MB gzipped GRIB2 per day), cropped to the domain and
 averaged to 0.03°. MRMS covers southern B.C. by radar only, and PRISM normals are US-only, so
 percent of normal is blank in Canada.
@@ -78,7 +78,7 @@ class _quiet:
 
 
 def fetch_days(cfg, start: datetime, ndays: int, demo: bool = False):
-    """Daily observed totals for the `ndays` 12Z–12Z days before `start` (oldest first):
+    """Daily observed totals for the `ndays` 12Z – 12Z days before `start` (oldest first):
     (lat, lon, [day, y, x] inches with NaN for missing days, local dates)."""
     tz = ZoneInfo(cfg["timezone"])
     ends = [start - timedelta(days=k) for k in range(ndays, 0, -1)]
@@ -157,7 +157,7 @@ def summarize(cfg, start: datetime, cache: Path, demo: bool = False):
     # the last 30 days at each location, for a small daily chart
     point_daily = {p["name"]: [None if not np.isfinite(daily[t, i, j]) else round(float(daily[t, i, j]), 2)
                                for t in range(n)] for p, (i, j) in zip(cfg["points"], idx)}
-    summary = {"source": "NOAA MRMS multi-sensor QPE (Pass 2); PRISM 1991–2020 normals" + (" (synthetic in demo)" if demo else ""),
+    summary = {"source": "NOAA MRMS multi-sensor QPE (Pass 2); PRISM 1991 – 2020 normals" + (" (synthetic in demo)" if demo else ""),
                "dates": dates, "windows": windows, "daily": point_daily}
     return summary, grids
 
