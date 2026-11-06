@@ -143,6 +143,8 @@ export function SparkBars({ spark, dates }: { spark: Spark; dates: string[] }) {
       const h = Math.max(v > 0 ? 0.8 : 0, (v / top) * (H - 1))
       return <rect key={`${i}-${k}`} x={k * slot + gap / 2 + i * bw} y={H - h} width={bw} height={h} rx={0.6} fill={s.color} />
     }))
+    // the same muted zero line as the temperature chart, so dry or calm days still sit on something
+    bars.push(<line key="z" x1={0} x2={W} y1={H} y2={H} stroke="var(--muted-foreground)" strokeOpacity={0.45} strokeWidth={1} vectorEffect="non-scaling-stroke" />)
     if (spark.threshold) {
       const y = H - (spark.threshold.value / top) * (H - 1)
       bars.push(<line key="t" x1={0} x2={W} y1={y} y2={y} stroke="var(--muted-foreground)" strokeWidth={1} strokeDasharray="3 2" vectorEffect="non-scaling-stroke" opacity={0.7} />)
