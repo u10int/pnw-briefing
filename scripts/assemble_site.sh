@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
 # Assemble the published site in ./site from today's build and the existing gh-pages contents.
 #
-#   scripts/assemble_site.sh <build-dir> <date>        e.g. scripts/assemble_site.sh web/dist 2026-11-04
+#   scripts/assemble_site.sh <build-dir> <date> [edition]   e.g. scripts/assemble_site.sh web/dist 2026-11-04 evening
 #
 # - Starts from the current gh-pages tree (if any), so the dated archive carries over.
 # - Replaces the latest page at the site root with today's build.
 # - Adds today's build to archive/<date>/, without the hourly fields (they're large; the
 #   latest page keeps them).
 # - Prunes: archive pages older than 60 days; GeoTIFFs in archive pages older than 14 days.
+# - Records the edition (morning/evening) as archive/editions/<date>-<edition>, which the
+#   workflow's gate checks so each edition runs once a day; markers older than KEEP_DAYS go.
 # - Rebuilds archive/index.html.
 #
 # Publishing ./site as a single fresh commit (see publish_site.sh) keeps gh-pages history from
@@ -16,6 +18,7 @@ set -euo pipefail
 
 BUILD="${1:?build dir}"
 DATE="${2:?date YYYY-MM-DD}"
+EDITION="${3:-}"
 SITE="site"
 KEEP_DAYS=60
 KEEP_GRID_DAYS=14
@@ -40,8 +43,23 @@ rm -rf "${SITE:?}/archive/$DATE/"*
 cp -r "$BUILD/." "$SITE/archive/$DATE/"
 rm -rf "$SITE/archive/$DATE/data/fields" "$SITE/archive/$DATE/data/fields.json"
 
-# 4. pruning
+# 4. edition marker
+mkdir -p "$SITE/archive/editions"
+if [ -n "$EDITION" ]; then
+  date -u +%Y-%m-%dT%H:%M:%SZ > "$SITE/archive/editions/$DATE-$EDITION"
+  echo "marked the $EDITION edition of $DATE"
+fi
+
+# 5. pruning
 cd "$SITE/archive"
+CUTOFF=$(date -u -d "$DATE - $KEEP_DAYS days" +%Y-%m-%d 2>/dev/null || echo "")
+if [ -n "$CUTOFF" ]; then
+  for f in editions/*; do
+    [ -e "$f" ] || continue
+    b=$(basename "$f")
+    if [[ "${b:0:10}" < "$CUTOFF" ]]; then rm -f "$f"; fi
+  done
+fi
 mapfile -t DAYS < <(ls -1d 20*/ 2>/dev/null | sed 's#/$##' | sort -r)
 for i in "${!DAYS[@]}"; do
   d="${DAYS[$i]}"
@@ -51,7 +69,7 @@ for i in "${!DAYS[@]}"; do
   if (( i >= KEEP_GRID_DAYS )); then rm -rf "$d/data/cogs"; fi
 done
 
-# 5. archive listing
+# 6. archive listing
 {
   echo '<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
   echo '<title>Past briefings</title><style>body{font:15px/1.6 Inter,system-ui,sans-serif;max-width:640px;margin:40px auto;padding:0 16px;color:#1b1f24;background:#f8f9fb}a{color:#2a78d6}</style>'

@@ -6,7 +6,8 @@ on:
     # are complete by then, alongside the 00Z globals and ensembles.
     # GitHub runs schedules late or not at all when it's busy, so two backup times
     # follow. Whichever runs first builds the briefing; the others see today's
-    # archive on gh-pages and stop.
+    # morning edition on gh-pages and stop. The evening edition comes from an
+    # external scheduler (workflow_dispatch with skip_if_published).
     - cron: "13 15 * * *"
     - cron: "13 16 * * *"
     - cron: "43 17 * * *"
@@ -21,9 +22,14 @@ on:
         type: boolean
         default: false
       skip_if_published:
-        description: "Skip if today's briefing is already published (for external schedulers)"
+        description: "Skip if this edition (morning or evening) is already published today (for external schedulers)"
         type: boolean
         default: false
+      edition:
+        description: "Which edition this run is (auto: morning before 2 PM Pacific, evening after)"
+        type: choice
+        options: [auto, morning, evening]
+        default: auto
 
 permissions:
   contents: write
@@ -37,18 +43,29 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       run: ${{ steps.check.outputs.run }}
+      edition: ${{ steps.check.outputs.edition }}
     steps:
       - id: check
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Manual runs always go ahead. A scheduled run stops if today's briefing is already archived.
+          # Two editions a day: morning (before 2 PM Pacific) and evening. Manual runs always go
+          # ahead. A scheduled run, or a dispatch with skip_if_published, stops if its edition is
+          # already out today: the morning edition once anything is archived for today, the
+          # evening edition once its marker (archive/editions/<date>-evening) is published.
           TODAY=$(TZ=America/Los_Angeles date +%Y-%m-%d)
+          EDITION="${{ inputs.edition }}"
+          if [ -z "$EDITION" ] || [ "$EDITION" = "auto" ]; then
+            [ "$(TZ=America/Los_Angeles date +%-H)" -lt 14 ] && EDITION=morning || EDITION=evening
+          fi
+          echo "edition=$EDITION" >> "$GITHUB_OUTPUT"
+          if [ "$EDITION" = morning ]; then MARK="archive/${TODAY}"; else MARK="archive/editions/${TODAY}-evening"; fi
           if { [ "${{ github.event_name }}" = "schedule" ] || [ "${{ inputs.skip_if_published }}" = "true" ]; } &&
-             gh api "repos/${GITHUB_REPOSITORY}/contents/archive/${TODAY}?ref=gh-pages" --silent 2>/dev/null; then
-            echo "briefing for $TODAY already published; skipping"
+             gh api "repos/${GITHUB_REPOSITORY}/contents/${MARK}?ref=gh-pages" --silent 2>/dev/null; then
+            echo "$EDITION briefing for $TODAY already published; skipping"
             echo "run=false" >> "$GITHUB_OUTPUT"
           else
+            echo "building the $EDITION briefing for $TODAY"
             echo "run=true" >> "$GITHUB_OUTPUT"
           fi
   build:
@@ -140,7 +157,8 @@ jobs:
           npm run build
 
       - name: Assemble site (latest page, dated archive, pruning)
-        run: scripts/assemble_site.sh web/dist "$DATE"
+        # a page-only rebuild doesn't count as an edition
+        run: scripts/assemble_site.sh web/dist "$DATE" "${{ !inputs.page_only && needs.gate.outputs.edition || '' }}"
 
       - name: Publish to gh-pages as a single commit
         env:
