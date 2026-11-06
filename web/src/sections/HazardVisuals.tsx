@@ -2,7 +2,7 @@ import * as React from "react"
 
 import { dayStats } from "@/sections/DayMatrix"
 import type { Briefing, N } from "@/types"
-import { arEpisodes, type HazardTab, OUTAGE_GUST } from "@/sections/Hazards"
+import { arEpisodes, type HazardTab, watchGust, windLevels } from "@/sections/Hazards"
 import { ptDay } from "@/lib/format"
 
 /** The figure and 14-day sketch at the top of each hazard card. Colours are the data's own (rain
@@ -81,7 +81,7 @@ export function hazardVisuals(d: Briefing): Partial<Record<HazardTab, Visual>> {
   const g = peakAt(d, gust, names)
   if (g) out.wind = {
     value: Math.round(g.v).toString(), unit: "mph", caption: `${g.name}, ${day(dayOf(d, g.k))}`, aside: "Strongest gust, model median",
-    spark: { unit: "mph", series: [{ values: across(d, gust, names, "max"), color: "#4b98b8" }], threshold: { value: OUTAGE_GUST.lowland, label: `${OUTAGE_GUST.lowland} mph outages` } },
+    spark: { unit: "mph", series: [{ values: across(d, gust, names, "max"), color: "#4b98b8" }], threshold: { value: watchGust(windLevels(d), "lowland", d.dates[0] ?? ""), label: `${watchGust(windLevels(d), "lowland", d.dates[0] ?? "")} mph outages` } },
   }
 
   // snow: the snowiest pass over the period, and each day's snowiest pass

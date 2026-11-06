@@ -192,6 +192,10 @@ def collect(cfg: dict, out: Path, demo: bool = False, products: bool = True) -> 
         "wettest": {"start": summ["wettest_window"][0], "end": summ["wettest_window"][1],
                     "amount": summ["wettest_window"][2]},
         "events": [{**e, "points": [{"name": n, "frac": f, "peak": pk} for n, f, pk in e["points"]]} for e in evts],
+        # the gust levels the wind summary grades against (see config.yaml impacts)
+        "windLevels": {k: cfg["impacts"].get(k) for k in (
+            "wind_gust_mph", "wind_gust_leaf_mph", "wind_gust_severe_mph", "wind_widespread_mph",
+            "wind_widespread_points", "leaf_season", "wind_wet_soil_drop_mph")},
         "timeline": {"labels": tl_labels, "dates": dates, "matrix": tl},
         "totals": totals,
         "gribAreaMeans": grib_rows,

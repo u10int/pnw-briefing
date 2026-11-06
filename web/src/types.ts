@@ -13,6 +13,13 @@ export interface WindowRegion {
 }
 export interface Window { days: number; label: string; scale: number; regions: WindowRegion[] }
 
+type ByKind = Record<"lowland" | "coast" | "pass", number>
+export interface WindLevels {
+  wind_gust_mph: ByKind; wind_gust_leaf_mph?: ByKind; wind_gust_severe_mph: ByKind
+  wind_widespread_mph: number; wind_widespread_points: number
+  leaf_season?: [string, string]; wind_wet_soil_drop_mph?: number
+}
+
 export interface ImpactEvent {
   hazard: string; label: string; unit: string; start: string; end: string
   level: "likely" | "possible"; agreement: number; n_models: number
@@ -125,6 +132,7 @@ export interface Briefing {
   windows: Window[]
   wettest: { start: string; end: string; amount: number }
   events: ImpactEvent[]
+  windLevels?: WindLevels              // absent in briefings built before it was added
   timeline: { labels: string[]; dates: string[]; matrix: number[][] }
   totals: {
     days: number; label: string

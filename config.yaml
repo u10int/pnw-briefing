@@ -180,7 +180,18 @@ impacts:
   snow_24h:         {lowland: 1.0,  coast: 1.0, pass: 8.0}
   hard_freeze_f:    {lowland: 27,   coast: 27,  pass: null}
   freezing_precip_f: 32      # min temp <= this AND precip >= 0.05" -> frozen/icing precip possible
-  wind_gust_mph:    {lowland: 40,   coast: 50,  pass: 60}   # scattered power outages start near 40 mph in the lowlands
+  # Gusts: "worth watching" where scattered power outages start, and "significant" at NWS High
+  # Wind Warning strength (58 mph, mountains 75). While deciduous trees are in leaf the lowland
+  # level drops (NWS Seattle uses 35 mph then), and after a multi-day rain event (heavy_rain_72h)
+  # it drops by wind_wet_soil_drop_mph for that day and the two after: trees in saturated soil
+  # come down at lower gusts.
+  wind_gust_mph:        {lowland: 40,   coast: 50,  pass: 60}
+  wind_gust_leaf_mph:   {lowland: 35,   coast: 50,  pass: 60}
+  wind_gust_severe_mph: {lowland: 58,   coast: 65,  pass: 75}
+  wind_widespread_mph: 45            # this many lowland locations at advisory strength is also significant
+  wind_widespread_points: 3
+  leaf_season: ["09-01", "11-15"]    # MM-DD, inclusive
+  wind_wet_soil_drop_mph: 5
   heat_f:           {lowland: 90,   coast: 85,  pass: null}
 
 # ----------------------------------------------------------------------------
