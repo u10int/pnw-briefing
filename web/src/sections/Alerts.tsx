@@ -127,7 +127,7 @@ function AlertTimeline({ items, snap }: { items: Alert[]; snap: Alerts }) {
               <Tooltip>
                 <TooltipTrigger asChild>
                   <div tabIndex={0} aria-label={`${a.event}: ${label}`}
-                    className={`absolute top-1/2 flex h-7 -translate-y-1/2 items-center justify-between gap-2 overflow-hidden border border-black/15 px-2 text-xs font-semibold whitespace-nowrap tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-ring ${cut ? "rounded-l-md" : "rounded-md"}`}
+                    className={`absolute top-1/2 flex h-7 -translate-y-1/2 items-center justify-between gap-2 overflow-hidden px-1.5 text-xs font-medium whitespace-nowrap tabular-nums shadow-[inset_0_0_0_1px_rgb(0_0_0/0.08)] outline-offset-1 hover:brightness-105 focus-visible:outline-2 focus-visible:outline-ring ${cut ? "rounded-l-[4px]" : "rounded-[4px]"}`}
                     style={{ left: `${l}%`, width: `${w}%`, background: c.bg, color: c.fg }}>
                     {(fits || fitsOne) && <span>{a0}</span>}
                     {fits && <span>{a1}</span>}
