@@ -71,26 +71,26 @@ function Cell({ name, w, ks, stats, chg, overlap, region, scale, rid, note }: {
     <td className="px-3 py-2 align-top">
       <Tooltip>
         <TooltipTrigger asChild>
-          {/* each value in a right-aligned slot and its change in a fixed-width slot after it, so
-              values line up down the column whether or not they changed */}
+          {/* each value right-aligned with its change in a fixed-width slot before it, so values
+              line up along the right of the column whether or not they changed */}
           <div tabIndex={0} className="cursor-default outline-none focus-visible:underline">
           <div className="flex items-baseline justify-end tabular-nums whitespace-nowrap">
             {ks.map((k, i) => (
               <React.Fragment key={k}>
                 {i > 0 && <span className="px-1 text-muted-foreground">/</span>}
+                <span className="w-12 pr-1 text-right"><Chg c={quiet ? undefined : chg?.[k]} k={k} /></span>
                 <span className={`min-w-[2.75rem] text-right ${quiet ? "text-muted-foreground" : region ? "font-semibold" : "font-medium"}`}>
                   {quiet ? "0" : stats?.[k] ? fmt(stats[k]!.median, k) : "–"}
                 </span>
-                <span className="w-12 pl-1 text-left"><Chg c={quiet ? undefined : chg?.[k]} k={k} /></span>
               </React.Fragment>
             ))}
             </div>
             {scale && !quiet && (
-              <div className="mt-1.5 space-y-0.5 pr-12">
+              <div className="mt-1.5 ml-auto w-28 space-y-0.5">
                 {have.map((k) => <Band key={k} s={stats![k]!} min={scale[0]} max={scale[1]} color={BAR_COLOR(k, rid)} />)}
               </div>
             )}
-            {note && <div className="mt-0.5 pr-12 text-right text-[11px] font-normal whitespace-nowrap">{note}</div>}
+            {note && <div className="mt-0.5 text-right text-[11px] font-normal whitespace-nowrap">{note}</div>}
           </div>
         </TooltipTrigger>
         <TooltipContent className="max-w-xs space-y-1">
