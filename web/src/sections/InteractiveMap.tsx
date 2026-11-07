@@ -24,6 +24,7 @@ import { type Grid, sameGrid } from "@/lib/gl/util"
 import { FRZ, GUST, IVT, legendBins, PCT, PGRAD, PRECIP, PROB, PTYPE_COLORS, PTYPE_NAMES, type Ramp, REFC, RH, SMOKE, SNOW, SPREAD, TDEP, TEMP, WIND } from "@/lib/ramps"
 import type { Briefing, Cog, ExtremeVar, FieldEntry, FieldsManifest, FieldVar, Gradient } from "@/types"
 import { ptDayHour } from "@/lib/format"
+import { openLocation } from "@/lib/locationlink"
 
 // ------------------------------------------------------------------ map plumbing
 
@@ -331,9 +332,15 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
       const near = m.queryRenderedFeatures([[e.point.x - 6, e.point.y - 6], [e.point.x + 6, e.point.y + 6]], { layers: ["points"] })
       const { v, t } = loaded.current
       const parts = [v?.sample(e.lngLat.lng, e.lngLat.lat, t, smoothRef.current), overlays.current?.sample?.(e.lngLat.lng, e.lngLat.lat, smoothRef.current)]
+      m.getCanvas().style.cursor = near.length ? "pointer" : ""
       setHover({ x: e.point.x, y: e.point.y, text: parts.filter(Boolean).join(", ") || null, place: near.length ? String(near[0].properties?.name) : null })
     })
     m.on("mouseout", () => setHover(null))
+    // a forecast location opens its detail panel
+    m.on("click", (e: MapMouseEvent) => {
+      const near = m.queryRenderedFeatures([[e.point.x - 6, e.point.y - 6], [e.point.x + 6, e.point.y + 6]], { layers: ["points"] })
+      if (near.length) openLocation(String(near[0].properties?.name))
+    })
     return () => { sync.remove(m); m.remove() }
   }, [])
 
@@ -413,7 +420,7 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
       {hover && (hover.text || hover.place) && (
         <div className="pointer-events-none absolute z-10 rounded-md bg-popover px-2 py-1 text-xs shadow-md ring-1 ring-border"
              style={{ left: Math.min(hover.x + 14, (el.current?.clientWidth ?? 0) - 170), top: hover.y + 14 }}>
-          {hover.place && <div className="font-medium">{hover.place}</div>}
+          {hover.place && <div className="font-medium">{hover.place} <span className="font-normal opacity-60">· click for details</span></div>}
           <div className="tabular-nums">{hover.text ?? "No data"}</div>
         </div>
       )}

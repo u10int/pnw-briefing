@@ -8,16 +8,18 @@ import { type ChartConfig, ChartContainer, ChartLegend, ChartLegendContent, Char
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { dayShort, maxOf, median, minOf } from "@/lib/format"
-import type { Briefing, N } from "@/types"
+import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet"
+import type { Briefing, N, TrendVar } from "@/types"
 
 const ENS_COLORS = ["var(--chart-1)", "var(--chart-2)", "var(--chart-3)"]
 
 export function LocationPicker({ data, value, onChange }: { data: Briefing; value: string; onChange: (v: string) => void }) {
   // locations outside the comparison regions (e.g. Vancouver BC) are listed last
   const others = data.points.filter((p) => !data.regions.some((r) => r.id === p.region))
+  const zones = [...new Set(others.map((p) => p.zone ?? "Other locations"))]
   const groups = [
     ...data.regions.map((r) => ({ r: { id: r.id, name: r.name }, pts: data.points.filter((p) => p.region === r.id) })),
-    ...(others.length ? [{ r: { id: "_other", name: "Other locations" }, pts: others }] : []),
+    ...zones.map((z) => ({ r: { id: `zone:${z}`, name: z }, pts: others.filter((p) => (p.zone ?? "Other locations") === z) })),
   ]
   return (
     <Select value={value} onValueChange={onChange}>
@@ -307,5 +309,66 @@ export function DayByDay({ data, point }: { data: Briefing; point: string }) {
         </div>
       </CardContent>
     </Card>
+  )
+}
+
+
+const GLANCE: { k: TrendVar; label: string }[] = [
+  { k: "precip", label: "Precip" }, { k: "snow", label: "Snow" }, { k: "gust", label: "Strongest gust" },
+  { k: "tmax", label: "Average high" }, { k: "tmin", label: "Average low" },
+]
+const glanceFmt = (k: TrendVar, v: number) =>
+  k === "precip" || k === "snow" ? `${v >= 10 ? v.toFixed(0) : v.toFixed(k === "precip" && v < 1 ? 2 : 1)}″` : k === "gust" ? `${Math.round(v)} mph` : `${Math.round(v)}°`
+
+/** One location's detail in a panel that slides over the page: where it is, its next 7 days at a
+ *  glance (with the change since yesterday), the running total, the ensemble spread and the
+ *  day-by-day detail. Opened from location names anywhere on the page, and from the map. */
+export function LocationPanel({ data, name, onChange, onClose }: { data: Briefing; name: string | null; onChange: (n: string) => void; onClose: () => void }) {
+  const p = data.points.find((x) => x.name === name)
+  const region = p?.region ? data.regions.find((r) => r.id === p.region)?.name : p?.zone
+  const w = data.trends?.windows.find((x) => x.days === 7) ?? data.trends?.windows[0]
+  const c = data.change?.trends?.windows.find((x) => x.days === w?.days)
+  const kind = p ? { lowland: "Lowland", coast: "Coast", pass: "Pass" }[p.kind] : ""
+  return (
+    <Sheet open={!!p} onOpenChange={(o) => { if (!o) onClose() }}>
+      {/* no focus jump to the picker on open: it would pop the keyboard-focus ring on touch */}
+      <SheetContent aria-describedby={undefined} onOpenAutoFocus={(e) => e.preventDefault()}>
+        {p && (
+          <>
+            <div className="border-b px-6 pt-5 pb-4 pr-14">
+              <SheetTitle>{p.name}</SheetTitle>
+              <SheetDescription>{[p.area, region, kind].filter(Boolean).join(" · ")}</SheetDescription>
+              <div className="mt-3"><LocationPicker data={data} value={p.name} onChange={onChange} /></div>
+            </div>
+            <div className="flex-1 space-y-4 overflow-y-auto px-6 py-5">
+              {w?.points[p.name] && (
+                <div>
+                  <p className="mb-2 text-sm font-medium">{w.label}</p>
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-5">
+                    {GLANCE.map(({ k, label }) => {
+                      const s = w.points[p.name][k]
+                      const d = c?.points[p.name]?.[k]
+                      if (!s) return null
+                      return (
+                        <div key={k}>
+                          <p className="text-xs text-muted-foreground">{label}</p>
+                          <p className="text-lg font-semibold tabular-nums">{glanceFmt(k, s.median)}</p>
+                          {d && Math.abs(d.delta) >= (k === "precip" ? 0.05 : k === "snow" ? 0.2 : k === "gust" ? 1 : 0.5) && (
+                            <p className="text-xs text-muted-foreground tabular-nums">{d.delta > 0 ? "+" : "−"}{glanceFmt(k, Math.abs(d.delta))} since yesterday</p>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+              <RunningTotal data={data} point={p.name} />
+              <EnsemblePlume data={data} point={p.name} />
+              <DayByDay data={data} point={p.name} />
+            </div>
+          </>
+        )}
+      </SheetContent>
+    </Sheet>
   )
 }

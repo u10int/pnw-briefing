@@ -6,6 +6,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { dateRange, dayShort, issuedLabel, peak, redCell } from "@/lib/format"
 import { type MapRequest, openOnMap } from "@/lib/maplink"
 import type { Briefing, EventChange, ImpactEvent } from "@/types"
+import { openLocation } from "@/lib/locationlink"
 
 /** Rain first, then winter hazards, then wind and heat (the order of impacts.HAZARDS); anything else after, by first date. */
 const HAZARD_ORDER = ["heavy_rain_24h", "heavy_rain_72h", "snow_24h", "freezing_precip", "hard_freeze", "wind", "heat"]
@@ -143,7 +144,8 @@ function WhereLabel({ data, pts, unit, muted }: { data: Briefing; pts: { name: s
       {top != null && unit && <span className="shrink-0 font-semibold tabular-nums">{short(top, unit)}</span>}
     </span>
   )
-  if (pts.length === 1) return text
+  if (pts.length === 1)
+    return <button type="button" onClick={() => openLocation(pts[0].name)} className="min-w-0 rounded text-left hover:underline focus-visible:outline-2 focus-visible:outline-ring">{text}</button>
   return (
     <Tooltip>
       <TooltipTrigger asChild><span tabIndex={0} className="min-w-0 cursor-default outline-none focus-visible:underline">{text}</span></TooltipTrigger>
