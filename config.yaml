@@ -89,7 +89,7 @@ points:
   - {name: Government Camp,  lat: 45.30, lon: -121.75, kind: pass,    region: nwor, plume: true, elev_ft: 3980, area: Northern OR Cascades, zone: OR Cascades}
   # outside the comparison regions (no PRISM normals or NWS alerts in Canada)
   - {name: Vancouver BC,     lat: 49.28, lon: -123.12, kind: lowland, area: Lower Mainland BC, zone: Southwest BC}
-  - {name: Whistler BC,      lat: 50.12, lon: -122.95, kind: pass,    elev_ft: 2214}   # village; pass thresholds for sno, area: Sea to Sky BC, zone: Southwest BC}
+  - {name: Whistler BC,      lat: 50.12, lon: -122.95, kind: pass,    elev_ft: 2214, area: Sea to Sky BC, zone: Southwest BC}   # village; pass thresholds for snow
 
 # ----------------------------------------------------------------------------
 # GRIB models — the primary source. NOAA models come from NODD (AWS, with

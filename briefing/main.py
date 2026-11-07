@@ -17,7 +17,7 @@ import numpy as np
 import yaml
 
 from . import (alerts, analysis, avalanche, change, cogs, context, extremes, fields, impacts, landslide,
-               maps, normals, observed, odds, outlooks, report, snowpack, tempdep, wildfire)
+               maps, normals, observed, odds, outlooks, report, snowpack, tempdep, trends, wildfire)
 from .grib import day0
 
 ROOT = Path(__file__).resolve().parent
@@ -224,29 +224,48 @@ def collect(cfg: dict, out: Path, demo: bool = False, products: bool = True) -> 
         "snowpack": safe("snowpack", lambda: snowpack.fetch(cfg, demo)) if products else None,
         "outlooks": safe("NWS discussions and outlooks", lambda: outlooks.fetch(cfg, demo)) if products else None,
     }
-    return clean(data)
+    data = clean(data)
+    # window cards for the snow, wind and temperature tabs, from the cleaned per-point series
+    data["trends"] = clean(safe("window trends", lambda: trends.summarize(data, analysis.windows(cfg))))
+    return data
 
 
-def build(cfg: dict, out: Path, demo: bool = False, previous: Path | None = None) -> Path:
+def build(cfg: dict, out: Path, demo: bool = False, previous: Path | None = None, history: Path | None = None) -> Path:
     out.mkdir(parents=True, exist_ok=True)
     data = collect(cfg, out, demo)
 
     # ---- change since the previous briefing
-    prev = None
+    prev, earlier = None, []
     if demo:
         from . import demo as src
-        src.reset(day_offset=1, scale=0.85, seed=11)   # a synthetic "yesterday"
-        prev = collect(cfg, out, demo=True, products=False)
-        prev["meta"]["issued"] = (datetime.fromisoformat(data["meta"]["issued"]) - timedelta(days=1)).isoformat()
+        for k, (scale, seed) in enumerate([(0.85, 11), (0.7, 12), (1.1, 13), (0.9, 14)], start=1):   # synthetic earlier days
+            src.reset(day_offset=k, scale=scale, seed=seed)
+            d = collect(cfg, out, demo=True, products=False)
+            d["meta"]["issued"] = (datetime.fromisoformat(data["meta"]["issued"]) - timedelta(days=k)).isoformat()
+            earlier.append(d)
+        prev = earlier[0]
         src.reset()
     elif previous and previous.exists():
         try:
             prev = json.loads(previous.read_text())
         except Exception as e:
             log.warning("previous briefing unreadable (%s)", e)
+    if not demo and history and history.is_dir():
+        # earlier days' briefings for the trends table's run-to-run sparklines
+        for f in sorted(history.glob("*.json")):
+            try:
+                earlier.append(json.loads(f.read_text()))
+            except Exception as e:
+                log.warning("earlier briefing %s unreadable (%s)", f.name, e)
+    if prev and not any(e.get("meta", {}).get("issued") == prev.get("meta", {}).get("issued") for e in earlier):
+        earlier.append(prev)
     data["change"] = clean(safe("change since yesterday", lambda: change.compare(data, prev, analysis.windows(cfg))))
     if data["change"] is None:
         log.info("no previous briefing to compare with")
+    else:
+        data["change"]["trends"] = clean(safe("window trends since yesterday", lambda: trends.compare(data, prev, analysis.windows(cfg))))
+    if earlier:
+        data["trendHistory"] = clean(safe("trend history", lambda: trends.history(data, earlier, analysis.windows(cfg))))
 
     ok = [x["label"] for x in data["status"] if x["ok"]]
     missing = [x["label"] for x in data["status"] if not x["ok"]]
@@ -264,11 +283,12 @@ def main():
     ap.add_argument("--out", default="web/public/data")
     ap.add_argument("--demo", action="store_true")
     ap.add_argument("--previous", type=Path, help="yesterday's briefing.json, for the change view")
+    ap.add_argument("--history", type=Path, help="a folder of earlier days' briefing.json files, for the trend sparklines")
     a = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     logging.getLogger("herbie").setLevel(logging.WARNING)
     cfg = yaml.safe_load(open(a.config))
-    build(cfg, Path(a.out), demo=a.demo, previous=a.previous)
+    build(cfg, Path(a.out), demo=a.demo, previous=a.previous, history=a.history)
 
 
 if __name__ == "__main__":

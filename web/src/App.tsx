@@ -15,6 +15,7 @@ import { ArCard, AvalancheCard, DiscussionsCard, GradientsCard, LandslideCard, O
 import { DayByDay, EnsemblePlume, EnsembleTable, LocationPicker, RunningTotal } from "@/sections/Location"
 import { extremeTabs, MapCard } from "@/sections/Maps"
 import { Headline, WindowCard } from "@/sections/Overview"
+import { TrendsCard } from "@/sections/Trends"
 import { ByLocation, GribAreaMeans, RegionTotals } from "@/sections/Totals"
 import { RainByDayCard } from "@/sections/RainByDay"
 import { TempDepartureCard } from "@/sections/TempDeparture"
@@ -142,6 +143,13 @@ export default function App() {
             description="The latest discussions from the Seattle and Portland offices, and the national rainfall and extended outlooks.">
             <DiscussionsCard data={data} />
             <OutlooksCard data={data} />
+          </Section>
+        )}
+
+        {data.trends && (
+          <Section title="Forecast trends"
+            description="Each location's precipitation, snow, strongest gust and average high and low over the chosen window, and how each moved since yesterday's briefing. The column headings open the details.">
+            <TrendsCard data={data} onOpen={(t) => openTab(t)} onLocation={(n) => { setPoint(n); openTab("locations") }} />
           </Section>
         )}
 

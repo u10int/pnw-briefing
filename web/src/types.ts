@@ -58,9 +58,20 @@ export interface EventChange {
   hazard?: string; prevStart?: string | null; prevEnd?: string | null; shifted?: boolean
   agreement?: number | null; where?: { name: string; peak: number | null }[]; unit?: string | null
 }
+export type TrendVar = "precip" | "snow" | "gust" | "tmax" | "tmin"
+export interface TrendStat { median: number; lo: number; hi: number; n: number }
+export interface TrendChangeVar { now: number; prev: number; delta: number }
+export type ByVar<T> = Partial<Record<TrendVar, T>>
+export interface TrendWindow { days: number; label: string; points: Record<string, ByVar<TrendStat>>; regions: Record<string, ByVar<TrendStat>> }
+export interface TrendChange {
+  days: number; label: string; overlapDays: number
+  points: Record<string, ByVar<TrendChangeVar>>; regions: Record<string, ByVar<TrendChangeVar>>
+}
+
 export interface Change {
   prevIssued: string | null
   windows: ChangeWindow[]
+  trends?: { windows: TrendChange[] }                  // absent before the trends table was added
   events: { new: EventChange[]; upgraded: EventChange[]; downgraded: EventChange[]; dropped: EventChange[]; same: EventChange[] }
 }
 
@@ -157,6 +168,9 @@ export interface Briefing {
   normals: Normals | null
   alerts: Alerts | null
   change: Change | null
+  trends?: { windows: TrendWindow[] }                  // the trends table above the tabs
+  // each region's value over the last few briefings, on dates they all share (oldest run first)
+  trendHistory?: { windows: { days: number; from: string; to: string; nDays: number; runs: (string | null)[]; regions: Record<string, ByVar<(number | null)[]>> }[] }
   ar?: AtmosphericRivers | null
   gradients?: Gradient[]
   snowLevel?: SnowLevel | null
