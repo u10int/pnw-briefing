@@ -4,6 +4,7 @@ import { Area, Bar, CartesianGrid, ComposedChart, ErrorBar, Line, LineChart, XAx
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { type ChartConfig, ChartContainer, ChartLegend, ChartLegendContent, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart"
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
@@ -41,7 +42,7 @@ export function LocationPicker({ data, value, onChange }: { data: Briefing; valu
 const axis = { tickLine: false, axisLine: false, tickMargin: 8 } as const
 
 /** Running total per model, and the accumulated median of daily amounts (monotonic by construction). */
-export function RunningTotal({ data, point }: { data: Briefing; point: string }) {
+function RunningTotalChart({ data, point }: { data: Briefing; point: string }) {
   const keys = data.models.map((_, i) => `m${i}`)
   const config: ChartConfig = Object.fromEntries([
     ...data.models.map((m, i) => [keys[i], { label: m.label + (m.source === "open-meteo" ? " *" : ""),
@@ -66,30 +67,22 @@ export function RunningTotal({ data, point }: { data: Briefing; point: string })
     })
   }, [data, point])
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Running total</CardTitle>
-        <CardDescription>Light blue lines are regional models, gray are global, the dark line is the median.</CardDescription>
-      </CardHeader>
-      <CardContent>
-        <ChartContainer config={config} className="aspect-auto h-[300px] w-full">
-          <LineChart data={rows} margin={{ left: 0, right: 12, top: 8 }}>
-            <CartesianGrid vertical={false} />
-            <XAxis dataKey="date" tickFormatter={dayShort} {...axis} minTickGap={24} />
-            <YAxis {...axis} width={44} tickFormatter={(v) => `${v} in`} />
-            <ChartTooltip content={<ChartTooltipContent labelFormatter={(v) => dayShort(String(v))} />} />
-            {keys.map((k) => (
-              <Line isAnimationActive={false} key={k} dataKey={k} type="monotone" stroke={`var(--color-${k})`} strokeWidth={1.5} dot={false} connectNulls={false} />
-            ))}
-            <Line isAnimationActive={false} dataKey="median" type="monotone" stroke="var(--color-median)" strokeWidth={3} dot={false} />
-          </LineChart>
-        </ChartContainer>
-      </CardContent>
-    </Card>
+    <ChartContainer config={config} className="aspect-auto h-[260px] w-full">
+      <LineChart data={rows} margin={{ left: 0, right: 12, top: 8 }}>
+        <CartesianGrid vertical={false} />
+        <XAxis dataKey="date" tickFormatter={dayShort} {...axis} minTickGap={24} />
+        <YAxis {...axis} width={44} tickFormatter={(v) => `${v} in`} />
+        <ChartTooltip content={<ChartTooltipContent labelFormatter={(v) => dayShort(String(v))} />} />
+        {keys.map((k) => (
+          <Line isAnimationActive={false} key={k} dataKey={k} type="monotone" stroke={`var(--color-${k})`} strokeWidth={1.5} dot={false} connectNulls={false} />
+        ))}
+        <Line isAnimationActive={false} dataKey="median" type="monotone" stroke="var(--color-median)" strokeWidth={3} dot={false} />
+      </LineChart>
+    </ChartContainer>
   )
 }
 
-export function EnsemblePlume({ data, point }: { data: Briefing; point: string }) {
+function EnsembleChart({ data, point }: { data: Briefing; point: string }) {
   const ens = data.ensembles.filter((e) => e.points[point])
   const plumePoints = data.points.filter((p) => p.plume).map((p) => p.name)
   const config: ChartConfig = Object.fromEntries(ens.map((e, i) => [`e${i}`, { label: `${e.label} (${e.members})`, color: ENS_COLORS[i % 3] }]))
@@ -102,36 +95,59 @@ export function EnsemblePlume({ data, point }: { data: Briefing; point: string }
     })
     return row
   })
+  return ens.length ? (
+    <ChartContainer config={config} className="aspect-auto h-[260px] w-full">
+      <ComposedChart data={rows} margin={{ left: 0, right: 12, top: 8 }}>
+        <CartesianGrid vertical={false} />
+        <XAxis dataKey="date" tickFormatter={dayShort} {...axis} minTickGap={24} />
+        <YAxis {...axis} width={44} tickFormatter={(v) => `${v} in`} />
+        <ChartTooltip content={<ChartTooltipContent labelFormatter={(v) => dayShort(String(v))} />} />
+        {ens.map((_, i) => (
+          <Area isAnimationActive={false} key={`b${i}`} dataKey={`b${i}`} type="monotone" stroke="none" fill={`var(--color-e${i})`}
+                fillOpacity={0.12} tooltipType="none" legendType="none" />
+        ))}
+        {ens.map((_, i) => (
+          <Line isAnimationActive={false} key={`e${i}`} dataKey={`e${i}`} type="monotone" stroke={`var(--color-e${i})`} strokeWidth={2.5}
+                strokeDasharray={i === 2 ? "6 4" : undefined} dot={false} />
+        ))}
+        <ChartLegend content={<ChartLegendContent />} />
+      </ComposedChart>
+    </ChartContainer>
+  ) : (
+    <p className="text-sm text-muted-foreground">
+      Ensembles are computed for {plumePoints.join(", ")}. Pick one of those to see the spread.
+    </p>
+  )
+}
+
+const PRECIP_VIEWS = {
+  models: { label: "Models", desc: "Running total for each model. Light blue lines are regional models, gray are global, the dark line is the median." },
+  ensembles: { label: "Ensembles", desc: "Ensemble median and the 10th – 90th percentile range of accumulated precipitation across members." },
+} as const
+type PrecipView = keyof typeof PRECIP_VIEWS
+
+/** Accumulated precipitation: the deterministic models' running totals, or the ensemble spread. */
+export function PrecipTotalCard({ data, point }: { data: Briefing; point: string }) {
+  const [view, setView] = React.useState<PrecipView>(() => {
+    try { return localStorage.getItem("location-precip-view") === "ensembles" ? "ensembles" : "models" } catch { return "models" }
+  })
+  const pick = (v: string) => {
+    setView(v as PrecipView)
+    try { localStorage.setItem("location-precip-view", v) } catch { /* storage unavailable */ }
+  }
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Ensembles</CardTitle>
-        <CardDescription>Median and the 10th – 90th percentile range of accumulated precipitation across members.</CardDescription>
+        <CardTitle>Total precipitation</CardTitle>
+        <CardDescription>{PRECIP_VIEWS[view].desc}</CardDescription>
+        <CardAction>
+          <Tabs value={view} onValueChange={pick}>
+            <TabsList>{(Object.keys(PRECIP_VIEWS) as PrecipView[]).map((k) => <TabsTrigger key={k} value={k}>{PRECIP_VIEWS[k].label}</TabsTrigger>)}</TabsList>
+          </Tabs>
+        </CardAction>
       </CardHeader>
       <CardContent>
-        {ens.length ? (
-          <ChartContainer config={config} className="aspect-auto h-[300px] w-full">
-            <ComposedChart data={rows} margin={{ left: 0, right: 12, top: 8 }}>
-              <CartesianGrid vertical={false} />
-              <XAxis dataKey="date" tickFormatter={dayShort} {...axis} minTickGap={24} />
-              <YAxis {...axis} width={44} tickFormatter={(v) => `${v} in`} />
-              <ChartTooltip content={<ChartTooltipContent labelFormatter={(v) => dayShort(String(v))} />} />
-              {ens.map((_, i) => (
-                <Area isAnimationActive={false} key={`b${i}`} dataKey={`b${i}`} type="monotone" stroke="none" fill={`var(--color-e${i})`}
-                      fillOpacity={0.12} tooltipType="none" legendType="none" />
-              ))}
-              {ens.map((_, i) => (
-                <Line isAnimationActive={false} key={`e${i}`} dataKey={`e${i}`} type="monotone" stroke={`var(--color-e${i})`} strokeWidth={2.5}
-                      strokeDasharray={i === 2 ? "6 4" : undefined} dot={false} />
-              ))}
-              <ChartLegend content={<ChartLegendContent />} />
-            </ComposedChart>
-          </ChartContainer>
-        ) : (
-          <p className="text-sm text-muted-foreground">
-            Ensembles are computed for {plumePoints.join(", ")}. Pick one of those to see the spread.
-          </p>
-        )}
+        {view === "models" ? <RunningTotalChart data={data} point={point} /> : <EnsembleChart data={data} point={point} />}
       </CardContent>
     </Card>
   )
@@ -264,10 +280,10 @@ export function DayByDay({ data, point }: { data: Briefing; point: string }) {
           </div>
         </CardAction>
       </CardHeader>
-      <CardContent className="grid gap-6 lg:grid-cols-3">
+      <CardContent className="grid gap-6">
         <div>
           <p className="mb-2 text-sm font-medium">Precipitation</p>
-          <ChartContainer config={pConf} className="aspect-auto h-[220px] w-full">
+          <ChartContainer config={pConf} className="aspect-auto h-[180px] w-full">
             <ComposedChart data={rows} margin={{ left: 0, right: 4, top: 8 }}>
               <CartesianGrid vertical={false} />{x}
               <YAxis {...axis} width={40} />
@@ -280,7 +296,7 @@ export function DayByDay({ data, point }: { data: Briefing; point: string }) {
         </div>
         <div>
           <p className="mb-2 truncate text-sm font-medium">High and low{hoverLabel("temp")}</p>
-          <ChartContainer config={tConf} className="aspect-auto h-[220px] w-full">
+          <ChartContainer config={tConf} className="aspect-auto h-[180px] w-full">
             <ComposedChart data={rows} margin={{ left: 0, right: 4, top: 8 }}>
               <CartesianGrid vertical={false} />{x}
               <YAxis {...axis} width={40} domain={[(m: number) => Math.floor((m - 3) / 5) * 5, (m: number) => Math.ceil((m + 3) / 5) * 5]} tickFormatter={(v) => `${v}°`} />
@@ -295,7 +311,7 @@ export function DayByDay({ data, point }: { data: Briefing; point: string }) {
         </div>
         <div>
           <p className="mb-2 truncate text-sm font-medium">Peak gust{hoverLabel("gust")}</p>
-          <ChartContainer config={gConf} className="aspect-auto h-[220px] w-full">
+          <ChartContainer config={gConf} className="aspect-auto h-[180px] w-full">
             <LineChart data={rows} margin={{ left: 0, right: 4, top: 8 }}>
               <CartesianGrid vertical={false} />{x}
               <YAxis {...axis} width={40} />
@@ -362,8 +378,7 @@ export function LocationPanel({ data, name, onChange, onClose }: { data: Briefin
                   </div>
                 </div>
               )}
-              <RunningTotal data={data} point={p.name} />
-              <EnsemblePlume data={data} point={p.name} />
+              <PrecipTotalCard data={data} point={p.name} />
               <DayByDay data={data} point={p.name} />
             </div>
           </>
