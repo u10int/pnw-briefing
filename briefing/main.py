@@ -17,7 +17,7 @@ import numpy as np
 import yaml
 
 from . import (alerts, analysis, avalanche, change, cogs, context, extremes, fields, impacts, landslide,
-               maps, normals, observed, odds, outlooks, report, snowpack, tempdep, wildfire)
+               maps, normals, observed, odds, outlooks, report, snowpack, tempdep, trends, wildfire)
 from .grib import day0
 
 ROOT = Path(__file__).resolve().parent
@@ -224,7 +224,10 @@ def collect(cfg: dict, out: Path, demo: bool = False, products: bool = True) -> 
         "snowpack": safe("snowpack", lambda: snowpack.fetch(cfg, demo)) if products else None,
         "outlooks": safe("NWS discussions and outlooks", lambda: outlooks.fetch(cfg, demo)) if products else None,
     }
-    return clean(data)
+    data = clean(data)
+    # window cards for the snow, wind and temperature tabs, from the cleaned per-point series
+    data["trends"] = clean(safe("window trends", lambda: trends.summarize(data, analysis.windows(cfg))))
+    return data
 
 
 def build(cfg: dict, out: Path, demo: bool = False, previous: Path | None = None) -> Path:
@@ -247,6 +250,8 @@ def build(cfg: dict, out: Path, demo: bool = False, previous: Path | None = None
     data["change"] = clean(safe("change since yesterday", lambda: change.compare(data, prev, analysis.windows(cfg))))
     if data["change"] is None:
         log.info("no previous briefing to compare with")
+    else:
+        data["change"]["trends"] = clean(safe("window trends since yesterday", lambda: trends.compare(data, prev, analysis.windows(cfg))))
 
     ok = [x["label"] for x in data["status"] if x["ok"]]
     missing = [x["label"] for x in data["status"] if not x["ok"]]

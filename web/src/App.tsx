@@ -15,6 +15,7 @@ import { ArCard, AvalancheCard, DiscussionsCard, GradientsCard, LandslideCard, O
 import { DayByDay, EnsemblePlume, EnsembleTable, LocationPicker, RunningTotal } from "@/sections/Location"
 import { extremeTabs, MapCard } from "@/sections/Maps"
 import { Headline, WindowCard } from "@/sections/Overview"
+import { TrendCards } from "@/sections/Trends"
 import { ByLocation, GribAreaMeans, RegionTotals } from "@/sections/Totals"
 import { RainByDayCard } from "@/sections/RainByDay"
 import { TempDepartureCard } from "@/sections/TempDeparture"
@@ -189,6 +190,7 @@ export default function App() {
             <Section title="Wind" first
               description="Pressure gradients behind the region's classic wind events (south wind, Gorge and Fraser outflow, onshore pushes), and the strongest winds and gusts in each model."
               action={<MapLink req={{ mode: "hourly", layer: "pgrad", isobars: true, pairs: true }} label="Pressure gradients on the map" />}>
+              <TrendCards data={data} kind="gust" />
               <WindByDayCard data={data} />
               <GradientsCard data={data} />
               <MapCard title="Wind and gust maps" description="The strongest sustained wind and gust in each model."
@@ -201,6 +203,7 @@ export default function App() {
             <Section title="Snow and mountains" first
               description="Where the snow level sits against the passes, how much snow the models put down, the snowpack so far, and avalanche danger."
               action={<MapLink req={{ mode: "hourly", layer: "frz" }} label="Freezing level on the map" />}>
+              <TrendCards data={data} kind="snow" />
               <SnowLevelCard data={data} />
               <RainByDayCard data={data} only="snow" />
               <MapCard title="Snowfall maps" description="From each model's own snow field; models without one are left out."
@@ -217,6 +220,7 @@ export default function App() {
             <Section title="Temperature" first
               description="Daily highs and lows against normal for each location, and the warmest and coldest each model gets."
               action={<MapLink req={{ mode: "totals", variable: "tmaxdep", days: 7 }} label="Departures on the map" />}>
+              <TrendCards data={data} kind="temp" />
               <TempDepartureCard data={data} />
               <MapCard title="High and low temperature maps" description="The highest and lowest 2 m temperature in each model."
                 tabs={[...pickExtremes(data, "short", "the next 48 hours", ["tmax", "tmin"], " (48 h)"),
