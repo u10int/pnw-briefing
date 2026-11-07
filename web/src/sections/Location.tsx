@@ -152,45 +152,6 @@ export function PrecipTotalCard({ data, point }: { data: Briefing; point: string
   )
 }
 
-export function EnsembleTable({ data }: { data: Briefing }) {
-  if (!data.ensembles.length) return null
-  const pts = data.points.map((p) => p.name).filter((n) => data.ensembles.some((e) => e.points[n]))
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>{data.meta.days}-day ensemble totals</CardTitle>
-        <CardDescription>Median, with the 10th – 90th percentile range (in).</CardDescription>
-      </CardHeader>
-      <CardContent>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Location</TableHead>
-              {data.ensembles.map((e) => <TableHead key={e.label} className="text-right">{e.label}</TableHead>)}
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {pts.map((p) => (
-              <TableRow key={p}>
-                <TableCell>{p}</TableCell>
-                {data.ensembles.map((e) => {
-                  const s = e.points[p]
-                  const last = s ? s.p50.length - 1 : -1
-                  return (
-                    <TableCell key={e.label} className="text-right tabular-nums">
-                      {s ? (<><span className="font-semibold">{s.p50[last].toFixed(1)}</span>{" "}
-                        <span className="text-muted-foreground">{s.p10[last].toFixed(1)} – {s.p90[last].toFixed(1)}</span></>) : "–"}
-                    </TableCell>
-                  )
-                })}
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </CardContent>
-    </Card>
-  )
-}
 
 /** A boolean setting remembered in this browser (when storage is available). */
 function useStoredFlag(key: string, initial: boolean): [boolean, (v: boolean) => void] {
