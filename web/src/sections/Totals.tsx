@@ -236,7 +236,7 @@ export function ByLocation({ data }: { data: Briefing }) {
   const meds = pts.map((p) => median(t.rows.map((r) => r.points[p])))
   const models = Object.fromEntries(data.models.map((m) => [m.label, m]))
   const ens = data.ensembles.filter((e) => e.dates.length >= t.days)
-  const ensPts = data.points.filter((p) => p.plume).map((p) => p.name)
+  const ensPts = pts.filter((p) => ens.some((e) => e.points[p]))
   const cell = (v: N, p: string) => {
     const x = value(v, p)
     return { style: showPct ? pctCell(x) : blueCell(x, max), text: x == null ? "–" : showPct ? `${Math.round(x)}` : inch(x) }
@@ -248,7 +248,7 @@ export function ByLocation({ data }: { data: Briefing }) {
         <CardDescription>
           {showPct ? "Each model's total as a percent of the 1991 – 2020 normal for the same days." : "Totals in inches."} The
           Median row is the median across models{chg ? "; the row below it is the change in that median since yesterday" : ""}.
-          {ens.length > 0 && <> Ensemble medians are computed for {ensPts.join(", ")}; hover one for the 10th – 90th percentile range.</>}
+          {ens.length > 0 && <> Hover an ensemble median for the 10th – 90th percentile range{ensPts.length < pts.length ? ` (ensembles are computed for ${ensPts.join(", ")})` : ""}.</>}
         </CardDescription>
         <CardAction className="flex flex-wrap justify-start gap-2 @xl/card-header:justify-end">
           {data.normals && (
