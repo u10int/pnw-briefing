@@ -11,7 +11,7 @@ import { HazardStrip } from "@/sections/Hazards"
 import { NwsAlerts } from "@/sections/Alerts"
 import { TotalChanges } from "@/sections/Changes"
 import { ImpactBoard } from "@/sections/Impacts"
-import { ArCard, AvalancheCard, DiscussionsCard, GradientsCard, LandslideCard, ObservedCard, OddsCard, OutlooksCard, SnowLevelCard, SnowpackCard } from "@/sections/Context"
+import { ArCard, AvalancheCard, DiscussionsCard, ForecasterNotes, GradientsCard, LandslideCard, ObservedCard, OddsCard, OutlooksCard, SnowLevelCard, SnowpackCard } from "@/sections/Context"
 import { DayByDay, EnsemblePlume, EnsembleTable, LocationPicker, RunningTotal } from "@/sections/Location"
 import { extremeTabs, MapCard } from "@/sections/Maps"
 import { Headline, WindowCard } from "@/sections/Overview"
@@ -23,17 +23,18 @@ import { WildfireTab } from "@/sections/Wildfire"
 import { WindByDayCard } from "@/sections/WindByDay"
 import type { Briefing } from "@/types"
 
-// MapLibre is large; load it only when the Map tab is first opened.
+// MapLibre is large; it loads with the Map tab, which is the first tab and opens by default.
 const InteractiveMap = React.lazy(() => import("@/sections/InteractiveMap").then((m) => ({ default: m.InteractiveMap })))
 
 const TABS = [
+  { id: "map", label: "Map" },
   { id: "precip", label: "Precip" },
   { id: "flood", label: "Flooding" },
   { id: "wind", label: "Wind" },
   { id: "snow", label: "Snow & mountains" },
   { id: "temp", label: "Temperature" },
   { id: "fire", label: "Wildfire" },
-  { id: "map", label: "Map" },
+  { id: "outlooks", label: "Outlooks" },
   { id: "locations", label: "Locations" },
 ] as const
 type Tab = (typeof TABS)[number]["id"]
@@ -79,7 +80,7 @@ export default function App() {
   const [data, setData] = React.useState<Briefing | null>(null)
   const [error, setError] = React.useState<string | null>(null)
   const [point, setPoint] = React.useState("Seattle")
-  const [tab, setTab] = React.useState<Tab>(() => tabFromHash() ?? "precip")
+  const [tab, setTab] = React.useState<Tab>(() => tabFromHash() ?? "map")
   const [mapSeen, setMapSeen] = React.useState(tab === "map")
   const [mapReq, setMapReq] = React.useState<(MapRequest & { nonce: number }) | null>(null)
   const tabsTop = React.useRef<HTMLDivElement>(null)
@@ -130,6 +131,7 @@ export default function App() {
 
         <div className="space-y-4">
           <HazardStrip data={data} onOpen={(t) => openTab(t)} />
+          <ForecasterNotes data={data} onFull={() => openTab("outlooks")} />
           <NwsAlerts data={data} />
         </div>
 
@@ -137,14 +139,6 @@ export default function App() {
           description={`Each hazard's share of models over its threshold day by day, the periods where at least ${Math.round(meta.minAgreement * 100)}% agree at a forecast location, and what changed since yesterday. Thresholds differ for lowland, coast and pass locations; regional models count for the days they cover. Hover anything for details.`}>
           <ImpactBoard data={data} />
         </Section>
-
-        {data.outlooks && (
-          <Section title="What NWS forecasters say"
-            description="The latest discussions from the Seattle and Portland offices, and the national rainfall and extended outlooks.">
-            <DiscussionsCard data={data} />
-            <OutlooksCard data={data} />
-          </Section>
-        )}
 
         {data.trends && (
           <Section title="Forecast trends"
@@ -249,6 +243,16 @@ export default function App() {
                 </React.Suspense>
               </Section>
             )}
+          </TabsContent>
+
+          <TabsContent value="outlooks">
+            <Section title="Outlooks and discussions" first
+              description="The national excessive rainfall and extended outlooks, and the full forecast discussions from the Seattle and Portland offices.">
+              {data.outlooks ? <>
+                <OutlooksCard data={data} />
+                <DiscussionsCard data={data} defaultFull />
+              </> : <p className="text-muted-foreground">The outlooks and discussions weren't available for this briefing.</p>}
+            </Section>
           </TabsContent>
 
           <TabsContent value="locations">

@@ -1,7 +1,7 @@
 import * as React from "react"
 import { DayHead } from "@/components/DayHead"
 import { CartesianGrid, Line, LineChart, ReferenceArea, ReferenceLine, XAxis, YAxis } from "recharts"
-import { ChevronDown } from "lucide-react"
+import { ChevronDown, ChevronRight } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -9,7 +9,7 @@ import { type ChartConfig, ChartContainer, ChartTooltip, ChartTooltipContent } f
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { dateRange, dayShort, inch, ptDay, ptDayHour } from "@/lib/format"
+import { dateRange, dayShort, inch, issuedLabel, ptDay, ptDayHour } from "@/lib/format"
 import { pctCell } from "@/sections/Totals"
 import type { ArEvent, Avalanche, AvalancheDanger, Briefing, Gradient, Landslide, ModelSeries, N, PointOdds, Tier } from "@/types"
 import { GRAD_COLORS, gradLevel, pairName, seriesAt } from "@/lib/gradients"
@@ -1026,8 +1026,7 @@ export function SnowpackCard({ data }: { data: Briefing }) {
 
 // ------------------------------------------------------------------ NWS discussions and outlooks
 
-const issuedAt = (iso: string | null) =>
-  iso ? new Date(iso).toLocaleString("en-US", { weekday: "short", hour: "numeric", minute: "2-digit", timeZone: PT, timeZoneName: "short" }) : ""
+const issuedAt = (iso: string | null) => (iso ? issuedLabel(iso) : "")     // "Sat 11/7 3:28 AM PST"
 
 /** Collapsed to each office's key messages (or the synopsis's opening paragraph when there are
  *  none); one toggle opens the full synopsis and hydrology for both offices. */
@@ -1036,9 +1035,9 @@ const OFFICE_NAME: Record<string, string> = { SEW: "NWS Seattle", PQR: "NWS Port
 const sentences = (p: string) => p.split(/(?<=[.!?])\s+(?=[A-Z(])/).map((x) => x.trim()).filter(Boolean)
 const BRIEF = 3      // synopsis sentences shown as bullets before "show more"
 
-export function DiscussionsCard({ data }: { data: Briefing }) {
+export function DiscussionsCard({ data, defaultFull = false }: { data: Briefing; defaultFull?: boolean }) {
   const ds = data.outlooks?.discussions ?? []
-  const [full, setFull] = React.useState(false)
+  const [full, setFull] = React.useState(defaultFull)
   if (!ds.length) return null
   // without key messages (most days: offices write them for significant weather), the synopsis
   // sentences stand in as the bullets
@@ -1088,6 +1087,41 @@ export function DiscussionsCard({ data }: { data: Briefing }) {
             </div>
           )
         })}
+      </CardContent>
+    </Card>
+  )
+}
+
+/** The forecast discussions in brief, under the hazard cards: each office's key messages, or the
+ *  first few sentences of its synopsis, with a link to the full text in the Outlooks tab. */
+export function ForecasterNotes({ data, onFull }: { data: Briefing; onFull: () => void }) {
+  const ds = data.outlooks?.discussions ?? []
+  if (!ds.length) return null
+  return (
+    <Card className="gap-0 py-4">
+      <CardContent className="grid gap-x-8 gap-y-4 md:grid-cols-2">
+        {ds.map((d) => {
+          const km = d.keyMessages?.map((k) => k.replace(/^\*\s*/, ""))
+          const pts = (km?.length ? km : (d.synopsis ?? []).flatMap(sentences)).slice(0, BRIEF)
+          return (
+            <div key={d.office} className="min-w-0 text-sm">
+              <div className="mb-1.5 flex flex-wrap items-baseline justify-between gap-x-3">
+                <span className="font-medium">{OFFICE_NAME[d.office] ?? d.name} forecasters</span>
+                <span className="text-xs text-muted-foreground">{issuedAt(d.issued)}</span>
+              </div>
+              {pts.length ? (
+                <ul className="list-disc space-y-1 pl-5 text-muted-foreground marker:text-muted-foreground/60">
+                  {pts.map((k, i) => <li key={i} className="leading-snug"><span className="text-foreground">{k}</span></li>)}
+                </ul>
+              ) : <p className="text-muted-foreground">No synopsis in the latest discussion.</p>}
+            </div>
+          )
+        })}
+        <div className="md:col-span-2">
+          <Button variant="link" size="sm" className="h-auto px-0 text-muted-foreground hover:text-foreground" onClick={onFull}>
+            Full discussions and outlooks<ChevronRight aria-hidden />
+          </Button>
+        </div>
       </CardContent>
     </Card>
   )
