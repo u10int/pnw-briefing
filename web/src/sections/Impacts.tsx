@@ -3,7 +3,7 @@ import { DayHead } from "@/components/DayHead"
 
 import { Card, CardContent } from "@/components/ui/card"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { dateRange, dayShort, issuedLabel, peak } from "@/lib/format"
+import { dateRange, dayShort, issuedLabel, peak, redCell } from "@/lib/format"
 import type { Briefing, EventChange, ImpactEvent } from "@/types"
 
 /** Rain first, then winter hazards, then wind and heat (the order of impacts.HAZARDS); anything else after, by first date. */
@@ -25,6 +25,9 @@ const LEVEL: Record<Level, { word: string; bar: string; text: string; tint: stri
 const LABEL_OF: Record<string, string> = {
   heavy_rain_24h: "Heavy rain", heavy_rain_72h: "Multi-day rain, flood risk", snow_24h: "Snow",
   freezing_precip: "Possible icy precipitation", hard_freeze: "Hard freeze", wind: "Strong gusts", heat: "Heat",
+}
+const UNIT_OF: Record<string, string> = {
+  heavy_rain_24h: "in/24h", heavy_rain_72h: "in/72h", snow_24h: "in/24h", freezing_precip: "°F", hard_freeze: "°F", wind: "mph", heat: "°F",
 }
 const dayN = (d: string) => Math.round(Date.parse(`${d}T12:00:00Z`) / 864e5)
 const nDays = (k: number) => `${Math.abs(k)} day${Math.abs(k) === 1 ? "" : "s"}`
@@ -83,6 +86,7 @@ export function ImpactBoard({ data }: { data: Briefing }) {
 
   // hazards: those with periods, then those whose agreement strip shows a building signal
   const strip = new Map(data.timeline.labels.map((l, i) => [l, data.timeline.matrix[i]]))
+  const stripDetail = new Map(data.timeline.labels.map((l, i) => [l, data.timeline.detail?.[i]]))
   const ids = new Set<string>([...data.events.map((e) => e.hazard), ...dropped.map((e) => e.hazard ?? ""),
     ...Object.entries(LABEL_OF).filter(([, l]) => (strip.get(l) ?? []).some((v) => v >= 0.15)).map(([h]) => h)])
   ids.delete("")
@@ -90,7 +94,8 @@ export function ImpactBoard({ data }: { data: Briefing }) {
   const groups = [...ids].sort((a, b) => rank(a) - rank(b)).map((h) => {
     const evs = data.events.filter((e) => e.hazard === h).sort((a, b) => a.start.localeCompare(b.start))
     const label = evs[0]?.label ?? LABEL_OF[h] ?? h
-    return { h, label, unit: evs[0]?.unit ?? "", evs, drops: dropped.filter((e) => e.hazard === h), strip: strip.get(label) }
+    return { h, label, unit: evs[0]?.unit ?? UNIT_OF[h] ?? "", evs, drops: dropped.filter((e) => e.hazard === h),
+      strip: strip.get(label), detail: stripDetail.get(label) }
   })
   if (!groups.length) {
     return <Card><CardContent className="text-muted-foreground">No hazard reaches the agreement threshold in the next {data.meta.days} days.</CardContent></Card>
@@ -144,20 +149,41 @@ export function ImpactBoard({ data }: { data: Briefing }) {
                     <div className="absolute inset-0 grid items-end" style={{ gridTemplateColumns: `repeat(${nd}, 1fr)` }}>
                       {dates.map((d, k) => {
                         const v = g.strip?.[k] ?? 0
-                        const c = v >= 0.6 ? LEVEL.likely.bar : v >= minAg ? LEVEL.possible.bar : "var(--muted-foreground)"
+                        const cell = g.detail?.[k]
+                        // each model at the most affected location: those over the threshold first, then by value
+                        const mods = [...(cell?.models ?? [])].sort((a, b) => Number(b[2]) - Number(a[2]) ||
+                          (g.unit === "°F" ? (a[1] ?? 1e9) - (b[1] ?? 1e9) : (b[1] ?? -1e9) - (a[1] ?? -1e9)))
                         return (
                           <Tooltip key={d}>
                             <TooltipTrigger asChild>
-                              <div className="flex h-full items-end justify-center px-[18%] pb-px outline-none" tabIndex={v > 0 ? 0 : -1}>
-                                <div className="w-full rounded-t-[2px]" style={{ height: `${Math.max(v > 0 ? 6 : 0, v * 100)}%`, background: c, opacity: v >= minAg ? 0.45 : 0.25 }} />
+                              <div className="flex h-full items-end justify-center px-[18%] outline-none" tabIndex={v > 0 ? 0 : -1}>
+                                <div className="w-full rounded-t-[2px]" style={{ height: `${Math.max(v > 0 ? 8 : 0, v * 100)}%`, background: redCell(v).background }} />
                               </div>
                             </TooltipTrigger>
-                            <TooltipContent>{g.label}, {dayShort(d)}: {pct(v)} of models over the threshold at the most affected location</TooltipContent>
+                            <TooltipContent className="max-w-xs">
+                              <p className="font-semibold">{g.label} · {dayShort(d)}</p>
+                              <p>{pct(v)} of {mods.length || "the"} models over the threshold{cell ? ` at ${cell.point}` : " at the most affected location"}</p>
+                              {mods.length > 0 && (
+                                <div className="mt-1.5 grid grid-cols-[auto_auto] gap-x-4 gap-y-0.5 tabular-nums">
+                                  {mods.map(([m, val, hit]) => (
+                                    <React.Fragment key={m}>
+                                      <span className={`flex items-center gap-1.5 ${hit ? "" : "opacity-60"}`}>
+                                        <span className={`size-1.5 rounded-full ${hit ? "bg-current" : "border border-current"}`} aria-hidden />{m}
+                                      </span>
+                                      <span className={`text-right ${hit ? "font-semibold" : "opacity-60"}`}>
+                                        {val == null ? "–" : g.unit ? short(val, g.unit) : hit ? "yes" : "no"}
+                                      </span>
+                                    </React.Fragment>
+                                  ))}
+                                </div>
+                              )}
+                            </TooltipContent>
                           </Tooltip>
                         )
                       })}
                     </div>
-                    {/* the agreement needed to flag a period */}
+                    {/* a baseline for the columns to stand on, and the agreement needed to flag a period */}
+                    <div className="pointer-events-none absolute inset-x-0 bottom-0 border-t border-muted-foreground/50" />
                     <div className="pointer-events-none absolute inset-x-0 border-t border-dashed border-muted-foreground/50" style={{ bottom: `${minAg * 100}%` }} />
                   </div>
                 </div>
@@ -246,7 +272,7 @@ export function ImpactBoard({ data }: { data: Briefing }) {
           <span className="flex items-center gap-1.5"><span className="h-3 w-5 rounded-[3px]" style={{ background: LEVEL.likely.bar }} />Likely (60%+ of models)</span>
           <span className="flex items-center gap-1.5"><span className="h-3 w-5 rounded-[3px]" style={{ background: LEVEL.possible.bar }} />Possible ({pct(minAg)}+)</span>
           <span className="flex items-center gap-1.5">
-            <span className="flex h-3 items-end gap-px">{[0.3, 0.7, 1, 0.5].map((h, i) => <span key={i} className="w-1 rounded-t-[1px] bg-muted-foreground/60" style={{ height: `${h * 100}%` }} />)}</span>
+            <span className="flex h-3 items-end gap-px border-b border-muted-foreground/50">{[0.3, 0.7, 1, 0.5].map((h, i) => <span key={i} className="w-1 rounded-t-[1px]" style={{ height: `${h * 100}%`, background: redCell(h).background }} />)}</span>
             Share of models over the threshold each day; dashed line at {pct(minAg)}
           </span>
           {hasPrev && <span className="flex items-center gap-1.5"><span className="h-3 w-5 rounded-[3px] border border-dashed border-muted-foreground/60" />Yesterday's dates, or dropped</span>}

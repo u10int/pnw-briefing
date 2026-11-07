@@ -26,11 +26,28 @@ def test_gust_events_use_per_day_levels():
     cfg["points"], cfg["days"] = [p], 3
     dates = ["2026-11-14", "2026-11-15", "2026-11-16"]
     zeros = [0.0] * 3
-    models = [{"dates": dates, "data": {p["name"]: {
+    models = [{"label": f"M{i}", "dates": dates, "data": {p["name"]: {
         "precipitation_sum": zeros, "rain_sum": zeros, "snowfall_sum": zeros,
         "temperature_2m_min": [45.0] * 3, "temperature_2m_max": [55.0] * 3,
-        "wind_gusts_10m_max": [37.0, 30.0, 38.0]}}} for _ in range(3)]
+        "wind_gusts_10m_max": [37.0, 30.0, 38.0]}}} for i in range(3)]
     d, agree = impacts.detect(models, cfg)
     ev = [e for e in impacts.events(d, agree, cfg) if e["hazard"] == "wind"]
     # 37 mph on 11/14 is over the leaf-on 35; 38 mph on 11/16 is under the usual 40
     assert [(e["start"], e["end"]) for e in ev] == [("2026-11-14", "2026-11-14")]
+
+
+def test_timeline_detail_lists_each_model():
+    cfg = yaml.safe_load(open("config.yaml"))
+    p = next(x for x in cfg["points"] if x["kind"] == "lowland")
+    cfg["points"], cfg["days"] = [p], 2
+    dates = ["2026-12-01", "2026-12-02"]
+    gusts = [[50.0, 10.0], [30.0, 10.0]]
+    models = [{"label": f"M{i}", "dates": dates, "data": {p["name"]: {
+        "precipitation_sum": [0.0, 0.0], "rain_sum": [0.0, 0.0], "snowfall_sum": [0.0, 0.0],
+        "temperature_2m_min": [45.0, 45.0], "temperature_2m_max": [55.0, 55.0],
+        "wind_gusts_10m_max": g}}} for i, g in enumerate(gusts)]
+    d, agree = impacts.detect(models, cfg)
+    labels, m, detail = impacts.timeline(d, agree)
+    row = labels.index("Strong gusts")
+    assert m[row][0] == 0.5 and detail[row][1] is None
+    assert detail[row][0] == {"point": p["name"], "models": [["M0", 50.0, True], ["M1", 30.0, False]]}

@@ -75,7 +75,7 @@ def detect(point_models, cfg):
                 if thr is None or len(vals) == 0:
                     return None
                 hit = vals >= thr if ge else vals <= thr
-                return np.where(np.isnan(vals), np.nan, hit.astype(float)), vals
+                return np.where(np.isnan(vals), np.nan, hit.astype(float)), vals, m["label"]
 
             per["heavy_rain_24h"].append(flag(pr, imp["heavy_rain_24h"][kind]))
             per["heavy_rain_72h"].append(flag(r72, imp["heavy_rain_72h"][kind]))
@@ -88,7 +88,7 @@ def detect(point_models, cfg):
             if kind != "pass":
                 fz = ((tmin <= imp["freezing_precip_f"]) & (tmax <= imp["freezing_precip_f"] + 4)
                       & (pr >= 0.05) & (np.nan_to_num(ra) > 0))
-                per["freezing_precip"].append((np.where(np.isnan(tmin), np.nan, fz.astype(float)), tmin))
+                per["freezing_precip"].append((np.where(np.isnan(tmin), np.nan, fz.astype(float)), tmin, m["label"]))
 
         for h, lst in per.items():
             lst = [x for x in lst if x is not None and len(x[0])]
@@ -101,7 +101,9 @@ def detect(point_models, cfg):
             nmod = np.sum(~np.isnan(hits), axis=0)
             hi = HAZARDS[h][2] == "°F" and h in ("hard_freeze", "freezing_precip")
             peak = np.nanmin(vals, axis=0) if hi else np.nanmax(vals, axis=0)
-            agree[h][name] = {"frac": frac, "n": nmod, "peak": peak}
+            # each model's value and whether it crossed, for the page's per-model tooltips
+            agree[h][name] = {"frac": frac, "n": nmod, "peak": peak,
+                              "models": [x[2] for x in lst], "hits": hits, "vals": vals}
 
     return dates, agree
 
@@ -148,14 +150,37 @@ def events(dates, agree, cfg):
 
 
 def timeline(dates, agree):
-    """hazard x day matrix of the max agreement across points."""
-    rows, labels = [], []
+    """hazard x day matrix of the max agreement across points, and for each cell the location it
+    comes from with each model's value there and whether it crossed the threshold."""
+    rows, labels, detail = [], [], []
     for h, by_pt in agree.items():
         if not by_pt:
             continue
-        m = np.vstack([np.nan_to_num(d["frac"][: len(dates)]) for d in by_pt.values()]).max(axis=0)
+        names = list(by_pt)
+        fr = np.vstack([np.nan_to_num(np.pad(by_pt[n]["frac"][: len(dates)], (0, max(0, len(dates) - len(by_pt[n]["frac"]))),
+                                             constant_values=np.nan)) for n in names])
+        m = fr.max(axis=0)
         if m.max() < 0.1:  # nothing worth a row
             continue
         rows.append(m)
         labels.append(HAZARDS[h][0])
-    return labels, (np.vstack(rows) if rows else np.zeros((0, len(dates))))
+        low = h in ("hard_freeze", "freezing_precip")
+        cells = []
+        for k in range(len(dates)):
+            if m[k] <= 0:
+                cells.append(None)
+                continue
+            # the most affected location: the highest agreement, then the worst peak
+            cand = [n for i, n in enumerate(names) if fr[i, k] == m[k]]
+            pk = lambda n: by_pt[n]["peak"][k] if k < len(by_pt[n]["peak"]) and not np.isnan(by_pt[n]["peak"][k]) else np.nan
+            best = min(cand, key=pk) if low else max(cand, key=lambda n: np.nan_to_num(pk(n), nan=-1e9))
+            d = by_pt[best]
+            mods = []
+            for j, lab in enumerate(d["models"]):
+                if k >= d["hits"].shape[1] or np.isnan(d["hits"][j, k]):
+                    continue
+                v = d["vals"][j, k]
+                mods.append([lab, None if np.isnan(v) else round(float(v), 2), bool(d["hits"][j, k])])
+            cells.append({"point": best, "models": mods})
+        detail.append(cells)
+    return labels, (np.vstack(rows) if rows else np.zeros((0, len(dates)))), detail

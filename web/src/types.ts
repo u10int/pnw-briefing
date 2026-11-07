@@ -133,7 +133,11 @@ export interface Briefing {
   wettest: { start: string; end: string; amount: number }
   events: ImpactEvent[]
   windLevels?: WindLevels              // absent in briefings built before it was added
-  timeline: { labels: string[]; dates: string[]; matrix: number[][] }
+  timeline: {
+    labels: string[]; dates: string[]; matrix: number[][]
+    // per row and day: the most affected location and each model's [label, value, crossed]; absent before it was added
+    detail?: ({ point: string; models: [string, number | null, boolean][] } | null)[][]
+  }
   totals: {
     days: number; label: string
     rows: { model: string; tier: Tier; source: string; regions: Record<string, N>; points: Record<string, N> }[]
