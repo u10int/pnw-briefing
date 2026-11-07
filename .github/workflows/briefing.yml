@@ -116,6 +116,13 @@ jobs:
             fi
           fi
           ls -la previous.json 2>/dev/null || echo "no earlier briefing yet"
+          # the few days before that too, for the trends table's run-to-run sparklines
+          rm -rf history && mkdir -p history
+          for D in $(git ls-tree --name-only origin/gh-pages archive/ 2>/dev/null | sed 's#^archive/##' \
+                     | grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' | awk -v t="$TODAY" '$0 < t' | sort | tail -5); do
+            git show "origin/gh-pages:archive/$D/data/briefing.json" > "history/$D.json" 2>/dev/null || rm -f "history/$D.json"
+          done
+          echo "$(ls history | wc -l) earlier briefings for the trend history"
 
       - name: Preflight checks (environment and data hosts)
         if: ${{ !inputs.demo && !inputs.page_only }}
@@ -131,7 +138,7 @@ jobs:
           echo "DATE=$DATE" >> "$GITHUB_ENV"
           export PYTHONUNBUFFERED=1
           PREV=""; [ -s previous.json ] && PREV="--previous previous.json"
-          python -m briefing.main --out web/public/data $PREV ${{ inputs.demo && '--demo' || '' }}
+          python -m briefing.main --out web/public/data $PREV --history history ${{ inputs.demo && '--demo' || '' }}
 
       - name: Reuse the published briefing data (page-only rebuild)
         if: ${{ inputs.page_only }}

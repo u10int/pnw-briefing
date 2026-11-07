@@ -109,3 +109,41 @@ def compare(now, prev, windows):
                     "points": {n: d for n in a["points"] if n in b["points"] and (d := diff(a["points"][n], b["points"][n]))},
                     "regions": {r: d for r in a["regions"] if r in b["regions"] and (d := diff(a["regions"][r], b["regions"][r]))}})
     return {"windows": out}
+
+
+def history(now, earlier, windows, min_share=0.5):
+    """How each region's values moved over the last few briefings, for the table's sparklines.
+
+    `earlier` are previous briefings (any order). For each window, briefings are taken newest
+    first while the dates they share with today's window stay at least `min_share` of it; every
+    value is then over those same dates, so the runs compare like for like.
+    {"windows": [{days, from, to, nDays, runs: [issued…], regions: {rid: {var: [value or None…]}}}]}
+    (runs oldest first; the last is today's briefing).
+    """
+    docs = sorted((d for d in earlier if d and d.get("models")), key=lambda d: d.get("meta", {}).get("issued") or "", reverse=True)
+    if not docs:
+        return None
+    names = [p["name"] for p in now["points"]]
+    out = []
+    for w in windows:
+        dates = list(now["dates"][: w["days"]])
+        used = []
+        for d in docs:
+            common = [x for x in dates if x in set(d["dates"])]
+            if len(common) < max(1, int(np.ceil(min_share * w["days"]))):
+                break
+            dates, used = common, used + [d]
+        if not used:
+            continue
+        runs = list(reversed(used)) + [now]
+        regs = {}
+        for i, d in enumerate(runs):
+            pts = [p for p in now["points"] if p["name"] in {q["name"] for q in d.get("points", [])}]
+            doc = {**d, "points": pts, "regions": now["regions"]}
+            vals = _window(doc, [d["dates"].index(x) for x in dates], [p["name"] for p in pts])["regions"]
+            for rid, byvar in vals.items():
+                for var, st in byvar.items():
+                    regs.setdefault(rid, {}).setdefault(var, [None] * len(runs))[i] = st["median"]
+        out.append({"days": w["days"], "from": dates[0], "to": dates[-1], "nDays": len(dates),
+                    "runs": [d.get("meta", {}).get("issued") for d in runs], "regions": regs})
+    return {"windows": out}

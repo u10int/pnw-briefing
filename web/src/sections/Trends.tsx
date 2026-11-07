@@ -1,38 +1,55 @@
 import * as React from "react"
-import { ArrowDownRight, ArrowUpRight, ChevronRight } from "lucide-react"
+import { ArrowDownRight, ArrowUpRight, ChevronRight, ChevronsUpDown } from "lucide-react"
 
 import { pctColor } from "@/components/Delta"
-
+import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import type { Briefing, TrendChangeVar, TrendStat, TrendVar } from "@/types"
+import { ptDay } from "@/lib/format"
+import type { Briefing, ByVar, TrendChangeVar, TrendStat, TrendVar } from "@/types"
 
 type Tab = "precip" | "snow" | "wind" | "temp"
-const COLS: { id: string; vars: TrendVar[]; tab: Tab; head: string; sub: string }[] = [
-  { id: "precip", vars: ["precip"], tab: "precip", head: "Precip", sub: "total" },
-  { id: "snow", vars: ["snow"], tab: "snow", head: "Snow", sub: "total" },
-  { id: "gust", vars: ["gust"], tab: "wind", head: "Wind", sub: "strongest gust" },
-  { id: "temp", vars: ["tmax", "tmin"], tab: "temp", head: "Temperature", sub: "average high / low" },
+const COLS: { k: TrendVar; tab: Tab; head: string; sub: string }[] = [
+  { k: "precip", tab: "precip", head: "Precip", sub: "total" },
+  { k: "snow", tab: "snow", head: "Snow", sub: "total" },
+  { k: "gust", tab: "wind", head: "Wind", sub: "strongest gust, mph" },
+  { k: "tmax", tab: "temp", head: "High", sub: "average" },
+  { k: "tmin", tab: "temp", head: "Low", sub: "average" },
 ]
-const UNIT: Record<TrendVar, string> = { precip: "in", snow: "in", gust: "mph", tmax: "°", tmin: "°" }
 const WHAT: Record<TrendVar, string> = { precip: "Precipitation", snow: "Snowfall", gust: "Strongest gust", tmax: "Average high", tmin: "Average low" }
+const inches = (k: TrendVar) => k === "precip" || k === "snow"
 const fmt = (v: number, k: TrendVar) =>
-  k === "precip" || k === "snow" ? `${v >= 10 ? v.toFixed(0) : v.toFixed(v < 1 && k === "precip" ? 2 : 1).replace(/^0\./, ".")}″`
+  inches(k) ? `${v >= 10 ? v.toFixed(0) : v.toFixed(v < 1 && k === "precip" ? 2 : 1).replace(/^0\./, ".")}″`
     : k === "gust" ? `${Math.round(v)}` : `${Math.round(v)}°`
-// below these, a change is noise and reads as "no change"
+const fmtU = (v: number, k: TrendVar) => `${fmt(v, k)}${k === "gust" ? " mph" : ""}`
+// below these a change is noise and isn't shown
 const FLAT: Record<TrendVar, number> = { precip: 0.05, snow: 0.2, gust: 1, tmax: 0.5, tmin: 0.5 }
+/** A change worth noticing: the cell gets a faint tint in the change's colour. */
+const big = (k: TrendVar, c: TrendChangeVar) =>
+  k === "precip" ? Math.abs(c.delta) >= Math.max(0.1, 0.25 * Math.max(c.now, c.prev))
+    : k === "snow" ? Math.abs(c.delta) >= 3 : k === "gust" ? Math.abs(c.delta) >= 5 : Math.abs(c.delta) >= 3
+/** Models far apart: precip or snow spread over 1.5× the median (and at least half an inch),
+ *  gusts 15 mph apart, temperatures 8° apart. */
+const unsure = (k: TrendVar, s: TrendStat) =>
+  inches(k) ? s.hi - s.lo >= Math.max(0.5, 1.5 * s.median) : k === "gust" ? s.hi - s.lo >= 15 : s.hi - s.lo >= 8
 const UP_COLOR: Record<TrendVar, [string, string]> = {          // [up, down]
   precip: ["var(--wetter)", "var(--drier)"], snow: ["var(--wetter)", "var(--drier)"],
   gust: ["#c2410c", "#0f766e"], tmax: ["#c0392b", "#2c6fbb"], tmin: ["#c0392b", "#2c6fbb"],   // gust: stronger orange, calmer teal
 }
+const SPARK_SPAN: Record<TrendVar, number> = { precip: 0.5, snow: 2, gust: 10, tmax: 6, tmin: 6 }
+const REGION_VAR: Record<string, string> = { wwa: "var(--wwa)", nwor: "var(--nwor)" }
+const BAR_COLOR = (k: TrendVar, rid?: string) =>
+  k === "tmax" ? "#d6604d" : k === "tmin" ? "#4393c3" : (rid && REGION_VAR[rid]) || "var(--muted-foreground)"
+const ask = <T,>(f: () => T, fallback: T): T => { try { return f() } catch { return fallback } }
+const STORE = "pnw-trends"
 
 /** The change since yesterday, compact: arrow and signed amount, coloured by direction. */
 function Chg({ c, k }: { c: TrendChangeVar | undefined; k: TrendVar }) {
   if (!c || Math.abs(c.delta) < FLAT[k]) return null
   const up = c.delta > 0
   const Icon = up ? ArrowUpRight : ArrowDownRight
-  const d = k === "precip" || k === "snow" ? Math.abs(c.delta).toFixed(Math.abs(c.delta) < 1 ? (k === "precip" ? 2 : 1) : 1).replace(/^0\./, ".")
+  const d = inches(k) ? Math.abs(c.delta).toFixed(Math.abs(c.delta) < 1 ? (k === "precip" ? 2 : 1) : 1).replace(/^0\./, ".")
     : Math.round(Math.abs(c.delta)).toString()
   return (
     <span className="text-xs font-medium tabular-nums" style={{ color: UP_COLOR[k][up ? 0 : 1] }}>
@@ -41,10 +58,6 @@ function Chg({ c, k }: { c: TrendChangeVar | undefined; k: TrendVar }) {
     </span>
   )
 }
-
-const REGION_VAR: Record<string, string> = { wwa: "var(--wwa)", nwor: "var(--nwor)" }
-const BAR_COLOR = (k: TrendVar, rid?: string) =>
-  k === "tmax" ? "#d6604d" : k === "tmin" ? "#4393c3" : (rid && REGION_VAR[rid]) || "var(--muted-foreground)"
 
 /** The models' range as a faint band with the median as a mark, on [min, max]. */
 function Band({ s, min, max, color }: { s: TrendStat; min: number; max: number; color: string }) {
@@ -58,37 +71,56 @@ function Band({ s, min, max, color }: { s: TrendStat; min: number; max: number; 
   )
 }
 
-function Cell({ name, w, ks, stats, chg, overlap, region, scale, rid, note }: {
-  name: string; w: string; ks: TrendVar[]; stats: Partial<Record<TrendVar, TrendStat>> | undefined
-  chg: Partial<Record<TrendVar, TrendChangeVar>> | undefined; overlap?: number; region?: boolean
-  /** region rows: the shared scale for the range bars, and a line under them (percent of normal, departure) */
-  scale?: [number, number]; rid?: string; note?: React.ReactNode
-}) {
-  const have = ks.filter((k) => stats?.[k])
-  if (!have.length) return <td className="px-3 py-2 text-center text-muted-foreground">–</td>
-  // snow that rounds to nothing stays quiet, unless it changed
-  const quiet = ks[0] === "snow" && (stats!.snow!.median < 0.05) && !(chg?.snow && Math.abs(chg.snow.delta) >= FLAT.snow)
+/** The region's value in each recent briefing (oldest left, today right), over dates they all share. */
+function Spark({ vals, color, minSpan }: { vals: (number | null)[]; color: string; minSpan: number }) {
+  const xs = vals.map((v, i) => [i, v] as const).filter((p): p is readonly [number, number] => p[1] != null)
+  if (xs.length < 2) return null
+  // at least `minSpan` tall, so small wobbles stay small instead of filling the line's height
+  const a = Math.min(...xs.map((p) => p[1])), b = Math.max(...xs.map((p) => p[1])), mid = (a + b) / 2
+  const lo = Math.min(a, mid - minSpan / 2), hi = Math.max(b, mid + minSpan / 2)
+  const W = 112, H = 16, pad = 2
+  const px = (i: number) => pad + ((W - 2 * pad) * i) / Math.max(1, vals.length - 1)
+  const py = (v: number) => (hi - lo < 1e-9 ? H / 2 : pad + (H - 2 * pad) * (1 - (v - lo) / (hi - lo)))
+  const d = xs.map(([i, v], j) => `${j ? "L" : "M"}${px(i).toFixed(1)},${py(v).toFixed(1)}`).join("")
+  const [li, lv] = xs[xs.length - 1]
   return (
-    <td className="px-3 py-2 align-top">
+    <svg viewBox={`0 0 ${W} ${H}`} className="block h-4 w-28" aria-hidden>
+      <path d={d} fill="none" stroke={color} strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round" opacity={0.8} />
+      <circle cx={px(li)} cy={py(lv)} r={2.2} fill={color} />
+    </svg>
+  )
+}
+
+type Hist = NonNullable<Briefing["trendHistory"]>["windows"][number]
+
+function Cell({ name, w, k, s, c, overlap, region, scale, rid, note, pct, hist }: {
+  name: string; w: string; k: TrendVar; s: TrendStat | undefined; c: TrendChangeVar | undefined; overlap?: number
+  region?: boolean; scale?: [number, number]; rid?: string; note?: React.ReactNode; pct?: number | null
+  hist?: { h: Hist; vals: (number | null)[] }
+}) {
+  if (!s) return <td className="px-3 py-2 text-right text-muted-foreground">–</td>
+  // snow that rounds to nothing is left blank, unless it changed
+  const blank = k === "snow" && s.median < 0.05 && !(c && Math.abs(c.delta) >= FLAT.snow)
+  if (blank) return <td className="px-3 py-2" />
+  const shown = c && Math.abs(c.delta) >= FLAT[k] ? c : undefined
+  const tint = shown && big(k, shown) ? `color-mix(in srgb, ${UP_COLOR[k][shown.delta > 0 ? 0 : 1]} 9%, transparent)` : undefined
+  const wide = unsure(k, s)
+  return (
+    <td className="px-3 py-2 align-top" style={{ background: tint }}>
       <Tooltip>
         <TooltipTrigger asChild>
-          {/* each value right-aligned with its change in a fixed-width slot before it, so values
-              line up along the right of the column whether or not they changed */}
           <div tabIndex={0} className="cursor-default outline-none focus-visible:underline">
-          <div className="flex items-baseline justify-end tabular-nums whitespace-nowrap">
-            {ks.map((k, i) => (
-              <React.Fragment key={k}>
-                {i > 0 && <span className="px-1 text-muted-foreground">/</span>}
-                <span className="w-12 shrink-0 pr-1 text-right"><Chg c={quiet ? undefined : chg?.[k]} k={k} /></span>
-                <span className={`text-right ${quiet ? "text-muted-foreground" : region ? "font-semibold" : "font-medium"}`}>
-                  {quiet ? "0" : stats?.[k] ? fmt(stats[k]!.median, k) : "–"}
-                </span>
-              </React.Fragment>
-            ))}
+            {/* the change in a fixed-width slot before the value, so values line up along the right */}
+            <div className="flex items-baseline justify-end tabular-nums whitespace-nowrap">
+              <span className="w-12 shrink-0 pr-1 text-right"><Chg c={shown} k={k} /></span>
+              <span className={`${region ? "font-semibold" : "font-medium"} ${wide ? "underline decoration-muted-foreground/60 decoration-dotted underline-offset-4" : ""}`}>
+                {fmt(s.median, k)}
+              </span>
             </div>
-            {scale && !quiet && (
+            {scale && (
               <div className="mt-1.5 ml-auto w-28 space-y-0.5">
-                {have.map((k) => <Band key={k} s={stats![k]!} min={scale[0]} max={scale[1]} color={BAR_COLOR(k, rid)} />)}
+                <Band s={s} min={scale[0]} max={scale[1]} color={BAR_COLOR(k, rid)} />
+                {hist && <Spark vals={hist.vals} color={BAR_COLOR(k, rid)} minSpan={SPARK_SPAN[k]} />}
               </div>
             )}
             {note && <div className="mt-0.5 text-right text-[11px] font-normal whitespace-nowrap">{note}</div>}
@@ -96,36 +128,50 @@ function Cell({ name, w, ks, stats, chg, overlap, region, scale, rid, note }: {
         </TooltipTrigger>
         <TooltipContent className="max-w-xs space-y-1">
           <p className="font-semibold">{name} · {w}</p>
-          {have.map((k) => {
-            const s = stats![k]!, c = chg?.[k]
-            return (
-              <p key={k}>
-                {WHAT[k]}: {fmt(s.median, k)}{k === "gust" ? " mph" : ""}, median of {s.n} models (range {fmt(s.lo, k)} – {fmt(s.hi, k)}{k === "gust" ? " mph" : ""})
-                {c && <>; yesterday {fmt(c.prev, k)}{k === "gust" ? " mph" : ""} over the same {overlap} days</>}
-              </p>
-            )
-          })}
+          <p>{WHAT[k]}: {fmtU(s.median, k)}, median of {s.n} models (range {fmt(s.lo, k)} – {fmtU(s.hi, k)})</p>
+          {wide && <p>The models are far apart here, so treat the median loosely.</p>}
+          {pct != null && <p>{Math.round(pct)}% of normal for these days</p>}
+          {c && <p>Yesterday {fmtU(c.prev, k)} over the same {overlap} days{shown ? "" : " (no real change)"}</p>}
+          {hist && hist.vals.filter((v) => v != null).length > 1 && (
+            <div className="pt-1">
+              <p className="opacity-80">Last {hist.vals.length} briefings, over {hist.h.nDays} shared day{hist.h.nDays === 1 ? "" : "s"}:</p>
+              <div className="grid grid-cols-[auto_auto] gap-x-3 tabular-nums">
+                {hist.vals.map((v, i) => (
+                  <React.Fragment key={i}>
+                    <span className="opacity-80">{hist.h.runs[i] ? (i === hist.vals.length - 1 ? "Today" : ptDay(hist.h.runs[i]!)) : "–"}</span>
+                    <span className="text-right">{v == null ? "–" : fmtU(v, k)}</span>
+                  </React.Fragment>
+                ))}
+              </div>
+            </div>
+          )}
         </TooltipContent>
       </Tooltip>
     </td>
   )
 }
 
-/** Forecast trends: each location (grouped by region, with the region's own row) for
- *  precipitation, snow, wind and temperature over a chosen window, with the change since
- *  yesterday's briefing beside each value. Column headings open their tabs. */
-export function TrendsCard({ data, onOpen }: { data: Briefing; onOpen: (t: Tab) => void }) {
+/** Forecast trends: every location, grouped by region, for precipitation, snow, wind and the
+ *  average high and low over a chosen window. Each value is the median across models with the
+ *  change since yesterday's briefing before it; a tinted cell is a change worth noticing and a
+ *  dotted underline a value the models disagree on. Region rows add the models' range, a
+ *  sparkline over the last few briefings and the departure from normal; they open to show their
+ *  locations. Column headings open their tabs and location names the Locations tab. */
+export function TrendsCard({ data, onOpen, onLocation }: { data: Briefing; onOpen: (t: Tab) => void; onLocation: (name: string) => void }) {
   const wins = data.trends?.windows ?? []
-  const [days, setDays] = React.useState(wins[1]?.days ?? wins[0]?.days ?? 7)
-  const [open, setOpen] = React.useState<Set<string>>(new Set())        // regions start collapsed
+  // the chosen window and open regions are remembered in this browser
+  const saved = ask(() => JSON.parse(localStorage.getItem(STORE) ?? "{}") as { days?: number; open?: string[] }, {})
+  const [days, setDays] = React.useState(saved.days ?? wins[1]?.days ?? wins[0]?.days ?? 7)
+  const [open, setOpen] = React.useState<Set<string>>(new Set(saved.open ?? []))
+  React.useEffect(() => { ask(() => localStorage.setItem(STORE, JSON.stringify({ days, open: [...open] })), undefined) }, [days, open])
   const toggle = (k: string) => setOpen((o) => { const n = new Set(o); if (n.has(k)) n.delete(k); else n.add(k); return n })
   if (!wins.length) return null
   const w = wins.find((x) => x.days === days) ?? wins[0]
   const c = data.change?.trends?.windows.find((x) => x.days === w.days)
+  const h = data.trendHistory?.windows.find((x) => x.days === w.days)
 
-  // regions in order, then anything outside them grouped by zone (e.g. Southwest BC)
   // `rid` keys the group's own row: a region id, or "zone:<name>" for locations outside every region
-  const groups: { key: string; name: string; rid?: string; points: string[] }[] = data.regions.map((r) => ({
+  const groups: { key: string; name: string; rid: string; points: string[] }[] = data.regions.map((r) => ({
     key: r.id, name: r.name, rid: r.id, points: data.points.filter((p) => p.region === r.id).map((p) => p.name),
   }))
   for (const p of data.points.filter((p) => !p.region)) {
@@ -133,59 +179,64 @@ export function TrendsCard({ data, onOpen }: { data: Briefing; onOpen: (t: Tab) 
     const g = groups.find((x) => x.key === z) ?? (groups.push({ key: z, name: z, rid: `zone:${z}`, points: [] }), groups[groups.length - 1])
     g.points.push(p.name)
   }
+  const allOpen = groups.every((g) => open.has(g.key))
 
   // one scale per column across the region rows, so the bars compare between regions
   const regionStats = Object.values(w.regions)
-  const span = (ks: TrendVar[]) => regionStats.flatMap((r) => ks.flatMap((k) => (r[k] ? [r[k]!.lo, r[k]!.hi] : [])))
-  const scaleFor = (col: (typeof COLS)[number]): [number, number] | undefined => {
-    const xs = span(col.vars)
+  const scaleFor = (k: TrendVar): [number, number] | undefined => {
+    const both = k === "tmax" || k === "tmin" ? (["tmax", "tmin"] as TrendVar[]) : [k]   // highs and lows share one, so they compare
+    const xs = regionStats.flatMap((r) => both.flatMap((v) => (r[v] ? [r[v]!.lo, r[v]!.hi] : [])))
     if (!xs.length) return undefined
-    if (col.id === "temp") return [Math.floor((Math.min(...xs) - 2) / 5) * 5, Math.ceil((Math.max(...xs) + 2) / 5) * 5]
-    const top = Math.max(...xs, col.id === "gust" ? 30 : 0.1)
-    const steps = col.id === "gust" ? [30, 40, 50, 60, 70, 80, 90, 100] : [0.5, 1, 2, 3, 4, 6, 8, 10, 12, 15, 20, 25, 30, 40, 50, 75, 100]
+    if (k === "tmax" || k === "tmin") return [Math.floor((Math.min(...xs) - 2) / 5) * 5, Math.ceil((Math.max(...xs) + 2) / 5) * 5]
+    const top = Math.max(...xs, k === "gust" ? 30 : 0.1)
+    const steps = k === "gust" ? [30, 40, 50, 60, 70, 80, 90, 100] : [0.5, 1, 2, 3, 4, 6, 8, 10, 12, 15, 20, 25, 30, 40, 50, 75, 100]
     return [0, steps.find((x) => x >= top * 1.05) ?? Math.ceil(top * 1.05)]
   }
-  const scales = Object.fromEntries(COLS.map((c) => [c.id, scaleFor(c)]))
-  const pctNorm = data.normals?.windows.find((x) => x.days === w.days)
+  const norm = data.normals?.windows.find((x) => x.days === w.days)
   const dep = data.tempDeparture?.windows.find((x) => x.days === w.days)
   const sgn = (v: number) => { const n = Math.round(v); return `${n > 0 ? "+" : n < 0 ? "−" : "±"}${Math.abs(n)}°` }
-  const noteFor = (colId: string, rid: string) => {
-    if (colId === "precip") {
-      const p = pctNorm?.regions[rid]?.pct
+  const noteFor = (k: TrendVar, rid: string) => {
+    if (k === "precip") {
+      const p = norm?.regions[rid]?.pct
       return p != null ? <span style={{ color: pctColor(p) }}>{Math.round(p)}% of normal</span> : null
     }
-    if (colId === "temp") {
-      const d = dep?.regions[rid]
-      return d && d.tmax != null ? <span className="text-muted-foreground">{sgn(d.tmax)}{d.tmin != null && <> / {sgn(d.tmin)}</>} vs normal</span> : null
+    if (k === "tmax" || k === "tmin") {
+      const v = dep?.regions[rid]?.[k]
+      return v != null ? <span className="text-muted-foreground">{sgn(v)} vs normal</span> : null
     }
     return null
   }
+  const pctFor = (k: TrendVar, point: string) => (k === "precip" ? norm?.points[point]?.pct ?? null : null)
 
   return (
     <Card>
       <CardContent className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <Tabs value={String(w.days)} onValueChange={(v) => setDays(Number(v))}>
-            <TabsList>{wins.map((x) => <TabsTrigger key={x.days} value={String(x.days)}>{x.label.replace(/^Next /, "")}</TabsTrigger>)}</TabsList>
-          </Tabs>
+          <div className="flex flex-wrap items-center gap-2">
+            <Tabs value={String(w.days)} onValueChange={(v) => setDays(Number(v))}>
+              <TabsList>{wins.map((x) => <TabsTrigger key={x.days} value={String(x.days)}>{x.label.replace(/^Next /, "")}</TabsTrigger>)}</TabsList>
+            </Tabs>
+            <Button variant="ghost" size="sm" onClick={() => setOpen(allOpen ? new Set() : new Set(groups.map((g) => g.key)))}>
+              <ChevronsUpDown aria-hidden />{allOpen ? "Collapse all" : "Expand all"}
+            </Button>
+          </div>
           <p className="text-xs text-muted-foreground">
             {c ? <>Arrows: change since yesterday's briefing over the same {c.overlapDays} days.</> : "Changes appear once there's an earlier briefing to compare with."}
           </p>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[860px] table-fixed border-collapse text-sm sm:min-w-[720px]">
-            {/* equal data columns (temperature a bit wider for its two values), so the bars line up */}
-            <colgroup><col className="w-[150px] sm:w-[190px]" /><col /><col /><col /><col className="w-[30%]" /></colgroup>
+          <table className="w-full min-w-[880px] table-fixed border-collapse text-sm">
+            <colgroup><col className="w-[150px] sm:w-[190px]" /><col /><col /><col /><col /><col /></colgroup>
             <thead>
               <tr className="border-b">
                 <th className="sticky left-0 z-10 bg-card py-2 pr-3 pl-2 text-left font-medium text-muted-foreground">Location</th>
                 {COLS.map((col) => (
-                  <th key={col.id} className="px-3 py-2 text-right font-medium">
+                  <th key={col.k} className="px-3 py-2 text-right font-medium">
                     <button type="button" onClick={() => onOpen(col.tab)}
                       className="group inline-flex items-center gap-0.5 rounded hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring">
                       {col.head}<ChevronRight className="size-3.5 text-muted-foreground transition-transform group-hover:translate-x-0.5" aria-hidden />
                     </button>
-                    <span className="block text-xs font-normal text-muted-foreground">{col.sub}{col.id === "gust" ? ", mph" : ""}</span>
+                    <span className="block text-xs font-normal text-muted-foreground">{col.sub}</span>
                   </th>
                 ))}
               </tr>
@@ -201,25 +252,40 @@ export function TrendsCard({ data, onOpen }: { data: Briefing; onOpen: (t: Tab) 
                     </button>
                     <span className="block pl-5 text-xs font-normal text-muted-foreground">{g.points.length} locations</span>
                   </th>
-                  {COLS.map((col) => g.rid
-                    ? <Cell key={col.id} name={g.name} w={w.label} ks={col.vars} stats={w.regions[g.rid]} chg={c?.regions[g.rid]} overlap={c?.overlapDays}
-                        region scale={scales[col.id]} rid={g.rid} note={noteFor(col.id, g.rid)} />
-                    : <td key={col.id} />)}
+                  {COLS.map((col) => (
+                    <Cell key={col.k} name={g.name} w={w.label} k={col.k} s={w.regions[g.rid]?.[col.k]} c={c?.regions[g.rid]?.[col.k]}
+                      overlap={c?.overlapDays} region scale={scaleFor(col.k)} rid={g.rid} note={noteFor(col.k, g.rid)}
+                      pct={col.k === "precip" ? norm?.regions[g.rid]?.pct ?? null : null}
+                      hist={h?.regions[g.rid]?.[col.k] ? { h, vals: h.regions[g.rid][col.k]! } : undefined} />
+                  ))}
                 </tr>
-                {open.has(g.key) && g.points.map((n) => (
-                  <tr key={n} className="border-t border-border/50">
-                    <th scope="row" className="sticky left-0 z-10 bg-card py-2 pr-3 pl-5 text-left font-normal whitespace-nowrap">{n}</th>
-                    {COLS.map((col) => <Cell key={col.id} name={n} w={w.label} ks={col.vars} stats={w.points[n]} chg={c?.points[n]} overlap={c?.overlapDays} />)}
-                  </tr>
-                ))}
+                {open.has(g.key) && g.points.map((n) => {
+                  const ps: ByVar<TrendStat> | undefined = w.points[n]
+                  return (
+                    <tr key={n} className="border-t border-border/50">
+                      <th scope="row" className="sticky left-0 z-10 bg-card py-2 pr-3 pl-5 text-left font-normal whitespace-nowrap">
+                        <button type="button" onClick={() => onLocation(n)}
+                          className="rounded text-left hover:underline focus-visible:outline-2 focus-visible:outline-ring">{n}</button>
+                      </th>
+                      {COLS.map((col) => <Cell key={col.k} name={n} w={w.label} k={col.k} s={ps?.[col.k]} c={c?.points[n]?.[col.k]}
+                        overlap={c?.overlapDays} pct={pctFor(col.k, n)} />)}
+                    </tr>
+                  )
+                })}
               </tbody>
             ))}
           </table>
         </div>
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 text-xs text-muted-foreground">
+          <span className="flex items-center gap-1.5"><span className="h-3 w-5 rounded-[3px] bg-[color-mix(in_srgb,var(--wetter)_14%,transparent)]" />A change worth noticing</span>
+          <span><span className="font-medium text-foreground underline decoration-muted-foreground/60 decoration-dotted underline-offset-4">2.6″</span> Models far apart</span>
+          <span className="flex items-center gap-1.5"><svg viewBox="0 0 28 12" className="h-3 w-7" aria-hidden><path d="M2,9 L10,6 L18,7 L26,3" fill="none" stroke="currentColor" strokeWidth={1.5} /><circle cx={26} cy={3} r={2} fill="currentColor" /></svg>
+            Last {h?.runs.length ?? "few"} briefings{h ? `, over the ${h.nDays} day${h.nDays === 1 ? "" : "s"} they share` : ""}</span>
+        </div>
         <p className="text-xs text-muted-foreground">
           Each value is the median across the models that cover the whole window. Region rows combine their locations within each model
           (precipitation and temperature averaged, snow at the passes, wind as the strongest lowland or coastal gust); their bars span the models,
-          with the mark at the median, on one scale per column. Click a region for its locations; hover a value for details.
+          with the mark at the median, on one scale per column. Click a region for its locations, or a location for its details.
         </p>
       </CardContent>
     </Card>

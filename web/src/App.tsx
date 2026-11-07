@@ -149,7 +149,7 @@ export default function App() {
         {data.trends && (
           <Section title="Forecast trends"
             description="Each location's precipitation, snow, strongest gust and average high and low over the chosen window, and how each moved since yesterday's briefing. The column headings open the details.">
-            <TrendsCard data={data} onOpen={(t) => openTab(t)} />
+            <TrendsCard data={data} onOpen={(t) => openTab(t)} onLocation={(n) => { setPoint(n); openTab("locations") }} />
           </Section>
         )}
 

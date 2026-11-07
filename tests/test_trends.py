@@ -43,3 +43,17 @@ def test_zone_group_for_locations_outside_regions():
     w2 = trends.summarize(doc, WINS)["windows"][0]
     assert w2["regions"]["zone:Southwest BC"]["snow"]["median"] == 8
     assert "precip" not in w2["regions"]["zone:Southwest BC"]       # Whistler has no precip series here
+
+
+def test_history_over_shared_dates():
+    older = {**DOC, "meta": {"issued": "2026-11-05T12:00:00"}, "dates": ["2026-11-05", "2026-11-06", "2026-11-07"],
+             "models": [{"label": "A", "data": {"Pass": {"snowfall_sum": [5, 5, 2]}}}]}
+    newer = {**DOC, "meta": {"issued": "2026-11-06T12:00:00"}, "dates": ["2026-11-06", "2026-11-07", "2026-11-08"],
+             "models": [{"label": "A", "data": {"Pass": {"snowfall_sum": [5, 3, 4]}}}]}
+    now = {**DOC, "meta": {"issued": "2026-11-07T12:00:00"}}
+    h = trends.history(now, [older, newer], WINS, min_share=0.3)["windows"][0]
+    # 48 h window is 11/7-11/8; the older run only covers 11/7, so all three use just 11/7
+    assert (h["from"], h["to"], h["nDays"]) == ("2026-11-07", "2026-11-07", 1)
+    assert h["regions"]["wwa"]["snow"] == [2.0, 3.0, 0.5]       # today: median of A 1 and B 0
+    h2 = trends.history(now, [older, newer], WINS, min_share=0.75)["windows"][0]
+    assert len(h2["runs"]) == 2                                  # the older run shares too few dates
