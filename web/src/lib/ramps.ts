@@ -166,3 +166,8 @@ export const PTYPE_NAMES = ["none", "rain", "snow", "freezing rain", "sleet", "m
 export const PTYPE_COLORS: Record<string, string> = {
   rain: "#45bf5a", snow: "#2f73d2", "freezing rain": "#dd356f", sleet: "#f39237", mix: "#b53caa",
 }
+
+
+/** AR scale colours, rank 0 (below the scale) to 5 (exceptional): the timeline, badges and the map's coastal outlook. */
+export const AR_COLORS = ["#9ca3af", "#4f9fd8", "#3fae6a", "#e9b625", "#f08a24", "#d9342b"]
+export const AR_LABELS = ["Below AR scale", "AR1 Weak", "AR2 Moderate", "AR3 Strong", "AR4 Extreme", "AR5 Exceptional"]

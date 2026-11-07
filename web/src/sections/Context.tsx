@@ -15,6 +15,7 @@ import type { ArEvent, Avalanche, AvalancheDanger, Briefing, Gradient, Landslide
 import { GRAD_COLORS, gradLevel, pairName, seriesAt } from "@/lib/gradients"
 import { arEpisodes, type Episode } from "@/sections/Hazards"
 import { contrastTextColor } from "@/lib/contrast"
+import { AR_COLORS } from "@/lib/ramps"
 
 // ------------------------------------------------------------------ shared: multi-model time series
 
@@ -309,7 +310,7 @@ export function LandslideCard({ data }: { data: Briefing }) {
 
 // ------------------------------------------------------------------ atmospheric rivers
 
-const AR_COLORS = ["#9ca3af", "#4f9fd8", "#3fae6a", "#e9b625", "#f08a24", "#d9342b"]
+// AR_COLORS: lib/ramps (shared with the map's coastal outlook)
 const AR_SHORT = ["Below scale", "AR1 Weak", "AR2 Moderate", "AR3 Strong", "AR4 Extreme", "AR5 Exceptional"]
 
 function ArBadge({ rank }: { rank: number }) {

@@ -68,6 +68,14 @@ export interface TrendChange {
   points: Record<string, ByVar<TrendChangeVar>>; regions: Record<string, ByVar<TrendChangeVar>>
 }
 
+export interface ArCoastRank { rank: number; peak: number | null; start: string | null }
+export interface ArCoast {
+  points: { name: string; lat: number; lon: number }[]
+  names: Record<string, string>; tiers: Record<string, string | null>
+  windows: { days: number; label: string; models: Record<string, Record<string, ArCoastRank>>
+             median: Record<string, { rank: number; max: number; peak: number | null; n: number; atLeast1: number }> }[]
+}
+
 export interface Change {
   prevIssued: string | null
   windows: ChangeWindow[]
@@ -98,7 +106,7 @@ export type ExtremeVar = "tmax" | "tmin" | "wind" | "gust"
 
 export interface Cog {
   path: string; model: string; tier: string
-  var: "precip" | "snow" | "mean" | "spread" | "pct" | ExtremeVar | "p24" | "p72" | "obs" | "obspct" | "tmaxdep" | "tmindep"
+  var: "precip" | "snow" | "mean" | "spread" | "pct" | ExtremeVar | "p24" | "p72" | "obs" | "obspct" | "tmaxdep" | "tmindep" | "ar"
   days: number; units: string; run?: string | null; members?: string[]; threshold?: number
 }
 
@@ -168,7 +176,8 @@ export interface Briefing {
   normals: Normals | null
   alerts: Alerts | null
   change: Change | null
-  trends?: { windows: TrendWindow[] }                  // the trends table above the tabs
+  trends?: { windows: TrendWindow[] }
+  arCoast?: ArCoast | null                              // the coastal AR outlook (map layer); absent before it was added                  // the trends table above the tabs
   // each region's value over the last few briefings, on dates they all share (oldest run first)
   trendHistory?: { windows: { days: number; from: string; to: string; nDays: number; runs: (string | null)[]; regions: Record<string, ByVar<(number | null)[]>> }[] }
   ar?: AtmosphericRivers | null

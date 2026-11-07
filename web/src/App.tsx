@@ -227,7 +227,10 @@ export default function App() {
           <TabsContent value="flood">
             <Section title="Flooding" first
               description="What turns rain into a problem: how wet it has already been, how close that puts the Seattle area to the landslide threshold, whether an atmospheric river is coming, and how many ensemble members reach the heavy-rain thresholds."
-              action={<MapLink req={{ mode: "hourly", layer: "ivt", isobars: true }} label="Moisture transport (IVT) on the map" />}>
+              action={<div className="flex flex-wrap gap-2">
+                <MapLink req={{ mode: "totals", variable: "ar", days: 7 }} label="AR outlook on the map" />
+                <MapLink req={{ mode: "hourly", layer: "ivt", isobars: true }} label="Moisture transport (IVT) on the map" />
+              </div>}>
               <ObservedCard data={data} />
               <LandslideCard data={data} />
               <ArCard data={data} />

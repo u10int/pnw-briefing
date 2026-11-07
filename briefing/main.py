@@ -114,6 +114,7 @@ def collect(cfg: dict, out: Path, demo: bool = False, products: bool = True) -> 
     # ---- forecast context: AR strength, pressure gradients, pass snow level, ensemble odds, and
     # how much has already fallen (observed). Each is optional; a failure leaves it out.
     ar = safe("atmospheric rivers", lambda: context.atmospheric_rivers(grib_models, cfg))
+    ar_out = safe("AR coast outlook", lambda: context.ar_coast(grib_models, cfg, start, analysis.windows(cfg)))
     grads = safe("pressure gradients", lambda: context.gradients(grib_models, cfg), [])
     snow_lvl = safe("pass snow level", lambda: context.snow_levels(grib_models, cfg))
     ens_odds = safe("ensemble odds", lambda: odds.point_odds(ensembles, cfg))
@@ -215,6 +216,7 @@ def collect(cfg: dict, out: Path, demo: bool = False, products: bool = True) -> 
         "alerts": nws_alerts,
         "wildfire": safe("wildfire", lambda: wildfire.fetch(cfg, (nws_alerts or {}).get("zones"), demo, (nws_alerts or {}).get("pages"))) if products else None,
         "ar": ar,
+        "arCoast": ar_out,
         "gradients": grads,
         "snowLevel": snow_lvl,
         "odds": ens_odds,
