@@ -305,16 +305,16 @@ export function ImpactBoard({ data }: { data: Briefing }) {
                         <WhereLabel data={data} pts={pts} unit={e.unit} />
                         <PeakLine pts={pts} unit={e.unit}>{st && <Tag s={st} />}</PeakLine>
                       </div>
-                      <div className="relative h-8">
+                      <div className="relative min-h-8 self-stretch">
                         {dayLines}
                         {st?.prev && (() => { const p = span(st.prev[0], st.prev[1]); return (
-                          <div className="absolute top-1 bottom-1 rounded-[4px] border border-dashed border-muted-foreground/60" style={{ left: p.left, width: p.width }} aria-hidden />
+                          <div className="absolute top-1/2 h-7 -translate-y-1/2 rounded-[4px] border border-dashed border-muted-foreground/60" style={{ left: p.left, width: p.width }} aria-hidden />
                         ) })()}
                         <Tooltip>
                           <TooltipTrigger asChild>
                             <button type="button" aria-label={`${e.label}, ${dateRange(e.start, e.end)}: ${label}. Show it on the map`}
                               onClick={() => openOnMap(mapRequestFor(e))}
-                              className="absolute top-1 bottom-1 flex cursor-pointer items-center overflow-hidden rounded-[4px] px-1.5 text-[11px] font-semibold whitespace-nowrap tabular-nums shadow-[inset_0_0_0_1px_rgb(0_0_0/0.08)] outline-offset-1 hover:brightness-105 focus-visible:outline-2 focus-visible:outline-ring"
+                              className="absolute top-1/2 h-7 -translate-y-1/2 flex cursor-pointer items-center overflow-hidden rounded-[4px] px-1.5 text-[11px] font-semibold whitespace-nowrap tabular-nums shadow-[inset_0_0_0_1px_rgb(0_0_0/0.08)] outline-offset-1 hover:brightness-105 focus-visible:outline-2 focus-visible:outline-ring"
                               style={{ left: b.left, width: b.width, ...fillStyle(lv, fillOf(st)) }}>
                               {b.cells >= 2 ? label : b.cells >= 1 ? pct(e.agreement) : ""}
                             </button>
@@ -344,12 +344,12 @@ export function ImpactBoard({ data }: { data: Briefing }) {
                           <span className="shrink-0 rounded border border-dashed border-muted-foreground/60 px-1.5 py-px text-[10px] leading-4 font-semibold">Dropped</span>
                         </PeakLine>
                       </div>
-                      <div className="relative h-8">
+                      <div className="relative min-h-8 self-stretch">
                         {dayLines}
                         <Tooltip>
                           <TooltipTrigger asChild>
                             <div tabIndex={0} aria-label={`${e.label}, ${dateRange(e.start, e.end)}: dropped`}
-                              className="absolute top-1 bottom-1 flex items-center overflow-hidden rounded-[4px] border border-dashed border-muted-foreground/60 px-1.5 text-[11px] font-medium whitespace-nowrap text-muted-foreground outline-none focus-visible:outline-2 focus-visible:outline-ring"
+                              className="absolute top-1/2 h-7 -translate-y-1/2 flex items-center overflow-hidden rounded-[4px] border border-dashed border-muted-foreground/60 px-1.5 text-[11px] font-medium whitespace-nowrap text-muted-foreground outline-none focus-visible:outline-2 focus-visible:outline-ring"
                               style={{ left: b.left, width: b.width }}>
                               {b.cells >= 2 ? `was ${was.toLowerCase()}` : ""}
                             </div>
