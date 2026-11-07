@@ -104,7 +104,7 @@ def collect(cfg: dict, out: Path, demo: bool = False, products: bool = True) -> 
         w["scale"] = float(steps[0] if steps else np.ceil(top * 1.05 / 10) * 10)   # never fails on large totals
     dates, agree = impacts.detect(models, cfg)
     evts = impacts.events(dates, agree, cfg)
-    tl_labels, tl = impacts.timeline(dates, agree)
+    tl_labels, tl, tl_detail = impacts.timeline(dates, agree)
 
     # ---- normals and departure from normal
     norm_cache = Path(cfg.get("cache_dir", ".cache")) / "prism"
@@ -184,7 +184,7 @@ def collect(cfg: dict, out: Path, demo: bool = False, products: bool = True) -> 
                  "sources": {"ncep": [m["label"] for m in grib_models if m.get("family") == "ncep"],
                              "ecmwf": [m["label"] for m in grib_models if m.get("family") == "ecmwf"]}},
         "regions": [{"id": rid, "name": r["name"], "short": r.get("short", r["name"])} for rid, r in cfg["regions"].items()],
-        "points": [{"name": p["name"], "kind": p["kind"], "region": p.get("region"), "plume": bool(p.get("plume")),
+        "points": [{"name": p["name"], "kind": p["kind"], "region": p.get("region"), "plume": bool(p.get("plume")), "area": p.get("area"), "zone": p.get("zone"),
                     "lat": p["lat"], "lon": p["lon"]} for p in cfg["points"]],
         "regionShapes": {rid: r["polygon"] for rid, r in cfg["regions"].items()},
         "status": status,
@@ -196,7 +196,7 @@ def collect(cfg: dict, out: Path, demo: bool = False, products: bool = True) -> 
         "windLevels": {k: cfg["impacts"].get(k) for k in (
             "wind_gust_mph", "wind_gust_leaf_mph", "wind_gust_severe_mph", "wind_widespread_mph",
             "wind_widespread_points", "leaf_season", "wind_wet_soil_drop_mph")},
-        "timeline": {"labels": tl_labels, "dates": dates, "matrix": tl},
+        "timeline": {"labels": tl_labels, "dates": dates, "matrix": tl, "detail": tl_detail},
         "totals": totals,
         "gribAreaMeans": grib_rows,
         "dates": models[0]["dates"],

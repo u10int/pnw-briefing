@@ -5,7 +5,10 @@ export type N = number | null
 export type Tier = "regional" | "blend" | "global"
 
 export interface Region { id: string; name: string; short: string }
-export interface Point { name: string; kind: "lowland" | "coast" | "pass"; region: string | null; plume: boolean; lat: number; lon: number }
+export interface Point {
+  name: string; kind: "lowland" | "coast" | "pass"; region: string | null; plume: boolean; lat: number; lon: number
+  area?: string | null; zone?: string | null   // "Northern Puget Sound" in "Puget Sound"; absent in briefings built before they were added
+}
 
 export interface WindowRegion {
   rid: string; region: string; median: number; lo: number; hi: number
@@ -133,7 +136,11 @@ export interface Briefing {
   wettest: { start: string; end: string; amount: number }
   events: ImpactEvent[]
   windLevels?: WindLevels              // absent in briefings built before it was added
-  timeline: { labels: string[]; dates: string[]; matrix: number[][] }
+  timeline: {
+    labels: string[]; dates: string[]; matrix: number[][]
+    // per row and day: the most affected location and each model's [label, value, crossed]; absent before it was added
+    detail?: ({ point: string; models: [string, number | null, boolean][] } | null)[][]
+  }
   totals: {
     days: number; label: string
     rows: { model: string; tier: Tier; source: string; regions: Record<string, N>; points: Record<string, N> }[]

@@ -9,8 +9,8 @@ import { issuedLabel } from "@/lib/format"
 import { type MapRequest, onOpenMap, openOnMap } from "@/lib/maplink"
 import { HazardStrip } from "@/sections/Hazards"
 import { NwsAlerts } from "@/sections/Alerts"
-import { HazardChanges, TotalChanges } from "@/sections/Changes"
-import { AgreementGrid, ImpactsTable } from "@/sections/Impacts"
+import { TotalChanges } from "@/sections/Changes"
+import { ImpactBoard } from "@/sections/Impacts"
 import { ArCard, AvalancheCard, DiscussionsCard, GradientsCard, LandslideCard, ObservedCard, OddsCard, OutlooksCard, SnowLevelCard, SnowpackCard } from "@/sections/Context"
 import { DayByDay, EnsemblePlume, EnsembleTable, LocationPicker, RunningTotal } from "@/sections/Location"
 import { extremeTabs, MapCard } from "@/sections/Maps"
@@ -133,10 +133,8 @@ export default function App() {
         </div>
 
         <Section title="Impacts to watch"
-          description={`Listed when at least ${Math.round(meta.minAgreement * 100)}% of models cross a threshold at a forecast location. Thresholds differ for lowland, coast and pass locations; regional models count for the days they cover.`}>
-          <ImpactsTable data={data} />
-          <AgreementGrid data={data} />
-          <HazardChanges data={data} />
+          description={`Each hazard's share of models over its threshold day by day, the periods where at least ${Math.round(meta.minAgreement * 100)}% agree at a forecast location, and what changed since yesterday. Thresholds differ for lowland, coast and pass locations; regional models count for the days they cover. Hover anything for details.`}>
+          <ImpactBoard data={data} />
         </Section>
 
         {data.outlooks && (
