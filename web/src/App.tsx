@@ -17,6 +17,7 @@ import { onOpenLocation } from "@/lib/locationlink"
 import { extremeTabs, MapCard } from "@/sections/Maps"
 import { Headline, WindowCard } from "@/sections/Overview"
 import { TrendsCard } from "@/sections/Trends"
+import { VerificationCard } from "@/sections/Verify"
 import { ByLocation, GribAreaMeans, RegionTotals } from "@/sections/Totals"
 import { RainByDayCard } from "@/sections/RainByDay"
 import { RiversCard } from "@/sections/Rivers"
@@ -222,6 +223,7 @@ export default function App() {
                 {data.windows.map((w) => <WindowCard key={w.days} w={w} data={data} />)}
               </div>
               <RainByDayCard data={data} />
+              <VerificationCard data={data} />
               <TotalChanges data={data} />
               <RegionTotals data={data} />
               <ByLocation data={data} />
