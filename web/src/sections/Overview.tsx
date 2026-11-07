@@ -15,6 +15,27 @@ const RANK = { alert: 2, watch: 1, quiet: 0 } as const
 /** Leads with whichever hazards the summary cards flag, most severe first, so the headline and
  *  the cards below it never disagree. A quiet briefing leads with the rain totals instead. */
 export function Headline({ data }: { data: Briefing }) {
+  if (data.summary?.headline) return <Overview data={data} />
+  return <LegacyHeadline data={data} />
+}
+
+/** The headline and lead written when the briefing was built (see briefing/summary.py). */
+function Overview({ data }: { data: Briefing }) {
+  const s = data.summary!
+  return (
+    <div className="space-y-4">
+      <h1 className="max-w-[26ch] text-[2.75rem] leading-[1.08] font-semibold tracking-tight text-balance max-sm:text-3xl">{s.headline}</h1>
+      {s.lede && <p className="max-w-[68ch] text-base text-pretty text-muted-foreground">{s.lede}</p>}
+      <div className="flex flex-wrap items-center gap-2">
+        <RunStatus data={data} />
+        {data.meta.demo && <Badge variant="possible">Demo data, rendered from synthetic fields</Badge>}
+      </div>
+    </div>
+  )
+}
+
+/** Briefings built before the overview was written at build time. */
+function LegacyHeadline({ data }: { data: Briefing }) {
   const sums = React.useMemo(() => summarize(data), [data])
   const notable = sums.filter((s) => s.tone !== "quiet" && s.lead).sort((a, b) => RANK[b.tone] - RANK[a.tone])
   const quiet = sums.filter((s) => s.tone === "quiet").map((s) => s.title.toLowerCase())

@@ -286,3 +286,12 @@ nws_offices: [SEW, PQR]
 nws_areas: [WA, OR]          # states queried for active alerts
 nws_user_agent: "(pnw-briefing, nshipes@urban10.com)"   # optional; defaults to the GitHub repo name
 cache_dir: .cache            # PRISM normals are cached here between runs
+
+# ----------------------------------------------------------------------------
+# Headline and lead. The facts come from the briefing's data; when the OPENAI_API_KEY secret is
+# set, an OpenAI model words them (numbers it uses are checked against the facts). Without the
+# key, or if the model's text fails the check, rule-based sentences are used instead.
+# ----------------------------------------------------------------------------
+summary:
+  enabled: true
+  model: gpt-4.1-mini
