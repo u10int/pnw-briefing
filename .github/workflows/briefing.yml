@@ -2,7 +2,7 @@ name: Daily forecast briefing
 
 on:
   schedule:
-    # 15:13 UTC = 7:13 AM PST / 8:13 AM PDT. The 12Z HRRR, RRFS, NAM and NBM runs
+    # GitHub cron times are always UTC: 15:13 UTC = 7:13 AM PST / 8:13 AM PDT. The 12Z HRRR, RRFS, NAM and NBM runs
     # are complete by then, alongside the 00Z globals and ensembles.
     # GitHub runs schedules late or not at all when it's busy, so two backup times
     # follow. Whichever runs first builds the briefing; the others see today's
@@ -55,6 +55,9 @@ jobs:
           # evening edition once its marker (archive/editions/<date>-evening) is published.
           TODAY=$(TZ=America/Los_Angeles date +%Y-%m-%d)
           EDITION="${{ inputs.edition }}"
+          # the cron times are morning backups: GitHub can start them hours late, and one that lands
+          # after 2 PM must still count as the morning edition, not build the evening one early
+          if [ "${{ github.event_name }}" = "schedule" ]; then EDITION=morning; fi
           if [ -z "$EDITION" ] || [ "$EDITION" = "auto" ]; then
             [ "$(TZ=America/Los_Angeles date +%-H)" -lt 14 ] && EDITION=morning || EDITION=evening
           fi
