@@ -17,7 +17,7 @@ import numpy as np
 import yaml
 
 from . import (alerts, analysis, avalanche, change, cogs, context, extremes, fields, impacts, landslide,
-               maps, normals, observed, odds, outlooks, report, rivers, snowpack, tempdep, trends, verify, wildfire)
+               maps, normals, observed, odds, outlooks, report, rivers, snowpack, tempdep, trends, urma, verify, wildfire)
 from .grib import day0
 
 ROOT = Path(__file__).resolve().parent
@@ -271,6 +271,10 @@ def build(cfg: dict, out: Path, demo: bool = False, previous: Path | None = None
         data["trendHistory"] = clean(safe("trend history", lambda: trends.history(data, earlier, analysis.windows(cfg))))
         # how the models have been doing: earlier briefings' precipitation against MRMS
         data["verification"] = clean(safe("model verification", lambda: verify.verify(data, earlier)))
+    # analysed highs and lows (URMA) for the recent days, reusing the ones earlier briefings fetched
+    data["observedTemps"] = clean(safe("analysed temperatures (URMA)", lambda: urma.collect(cfg, earlier, demo=demo)))
+    if earlier and data["observedTemps"]:
+        data["tempVerification"] = clean(safe("temperature verification", lambda: verify.verify_temps(data, earlier)))
 
     ok = [x["label"] for x in data["status"] if x["ok"]]
     missing = [x["label"] for x in data["status"] if not x["ok"]]

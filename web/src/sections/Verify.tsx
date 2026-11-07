@@ -133,3 +133,139 @@ export function VerificationCard({ data }: { data: Briefing }) {
     </Card>
   )
 }
+
+const deg = (v: number) => `${v.toFixed(1)}°`
+/** Every 5° (or 10° for a wide range) across the chart's rounded domain. */
+function tempTicks(rows: Record<string, unknown>[]) {
+  const vs = rows.flatMap((r) => ["obsHi", "obsLo", "hi", "lo"].map((k) => r[k])).filter((x): x is number => typeof x === "number")
+  if (!vs.length) return undefined
+  const lo = Math.floor((Math.min(...vs) - 3) / 5) * 5, hi = Math.ceil((Math.max(...vs) + 3) / 5) * 5
+  const step = hi - lo > 40 ? 10 : 5
+  return Array.from({ length: Math.floor((hi - lo) / step) + 1 }, (_, i) => lo + i * step)
+}
+const WARM = "#c0392b", COOL = "#2c6fbb"
+/** Mean forecast minus analysed, as words: under half a degree is about right. */
+function TempBias({ b }: { b: number }) {
+  if (Math.abs(b) < 0.5) return <span className="text-muted-foreground">about right</span>
+  return <span style={{ color: b > 0 ? WARM : COOL }}>{Math.abs(b).toFixed(1)}° too {b > 0 ? "warm" : "cool"}</span>
+}
+
+/** How the models have been doing with temperature: recent briefings' daily highs and lows at the
+ *  forecast locations against the URMA analysis, by lead time, best first; and a chart of the
+ *  day-1 highs and lows against the analysis, per region. */
+export function TempVerificationCard({ data }: { data: Briefing }) {
+  const v = data.tempVerification
+  const [lead, setLead] = React.useState("d1")
+  const ranked = React.useMemo(() => (v?.models ?? []).filter((m) => m.scores[lead]).sort((a, b) => a.scores[lead].mae - b.scores[lead].mae), [v, lead])
+  const leads = (v?.leads ?? []).filter((l) => v?.models.some((m) => m.scores[l.id]))
+  const [rid, setRid] = React.useState(data.regions[0]?.id ?? "wwa")
+  const chartModels = React.useMemo(() => (v ? Object.keys(v.chart.day1) : []), [v])
+  const [pick, setPick] = React.useState<string>("")
+  const shown = pick && chartModels.includes(pick) ? pick : (v?.models.filter((m) => m.scores.d1).sort((a, b) => a.scores.d1.mae - b.scores.d1.mae)[0]?.model ?? chartModels[0])
+  if (!v || !ranked.length) return null
+  const best = ranked[0]
+  const maxMae = Math.max(...ranked.map((m) => m.scores[lead].mae), 0.1)
+  const fc = v.chart.day1[shown]?.[rid]
+  const ob = v.chart.observed[rid]
+  const rows = v.chart.dates.map((d, k) => ({
+    d, obsHi: ob?.hi[k] ?? null, obsLo: ob?.lo[k] ?? null, hi: fc?.hi[k] ?? null, lo: fc?.lo[k] ?? null,
+  })).filter((r) => chartModels.some((m) => v.chart.day1[m]?.[rid]?.hi[v.chart.dates.indexOf(r.d)] != null))
+  const config = {
+    obsHi: { label: "Analysed high", color: "var(--muted-foreground)" }, obsLo: { label: "Analysed low", color: "var(--muted-foreground)" },
+    hi: { label: `${shown} high`, color: WARM }, lo: { label: `${shown} low`, color: COOL },
+  } satisfies ChartConfig
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>How the models have been doing</CardTitle>
+        <CardDescription>
+          Each recent briefing's daily highs and lows at the forecast locations against the {v.source} analysis, {dateRange(v.from, v.to)} ({v.nDays} days).
+          Typical miss is the average difference per location and day; bias is the average forecast minus the analysis.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <Tabs value={lead} onValueChange={setLead}>
+            <TabsList>{leads.map((l) => <TabsTrigger key={l.id} value={l.id}>{l.label}</TabsTrigger>)}</TabsList>
+          </Tabs>
+          <p className="text-sm">Closest lately at this lead: <span className="font-semibold">{best.model}</span>, typical miss {deg(best.scores[lead].mae)}</p>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[680px] text-sm">
+            <thead>
+              <tr className="border-b text-left text-xs text-muted-foreground">
+                <th className="py-2 pr-3 font-medium">Model</th>
+                <th className="px-3 py-2 font-medium">Typical miss</th>
+                <th className="px-3 py-2 text-right font-medium">Highs</th>
+                <th className="px-3 py-2 text-right font-medium">Lows</th>
+                <th className="px-3 py-2 text-right font-medium">Within {v.within}°</th>
+                <th className="py-2 pl-3 text-right font-medium">Scored</th>
+              </tr>
+            </thead>
+            <tbody>
+              {ranked.map((m, i) => {
+                const s = m.scores[lead]
+                return (
+                  <tr key={m.model} className="border-b border-border/60 last:border-b-0">
+                    <td className="py-2 pr-3 whitespace-nowrap"><span className="mr-2 inline-block w-4 text-right text-xs text-muted-foreground tabular-nums">{i + 1}</span>{m.model}</td>
+                    <td className="px-3 py-2">
+                      <div className="flex items-center gap-2">
+                        <div className="h-2 w-28 rounded-full bg-muted">
+                          <div className="h-2 rounded-full" style={{ width: `${(100 * s.mae) / maxMae}%`, background: i === 0 ? "var(--foreground)" : "var(--muted-foreground)", opacity: i === 0 ? 1 : 0.55 }} />
+                        </div>
+                        <span className="tabular-nums">{deg(s.mae)}</span>
+                      </div>
+                    </td>
+                    {(["Hi", "Lo"] as const).map((k) => (
+                      <td key={k} className="px-3 py-2 text-right whitespace-nowrap">
+                        <Tooltip>
+                          <TooltipTrigger asChild><span className="cursor-default"><TempBias b={s[`bias${k}`]} /></span></TooltipTrigger>
+                          <TooltipContent>{k === "Hi" ? "Highs" : "Lows"}: typical miss {deg(s[`mae${k}`])}, on average {Math.abs(s[`bias${k}`]).toFixed(1)}° {s[`bias${k}`] >= 0 ? "above" : "below"} the analysis</TooltipContent>
+                        </Tooltip>
+                      </td>
+                    ))}
+                    <td className="px-3 py-2 text-right tabular-nums">{pct(s.within)}</td>
+                    <td className="py-2 pl-3 text-right text-xs text-muted-foreground tabular-nums">{s.days} days</td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="space-y-2 border-t pt-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm font-medium">Day-1 highs and lows against the analysis</p>
+            <div className="flex flex-wrap items-center gap-2">
+              <Tabs value={rid} onValueChange={setRid}>
+                <TabsList>{data.regions.map((r) => <TabsTrigger key={r.id} value={r.id}>{r.short}</TabsTrigger>)}</TabsList>
+              </Tabs>
+              <Select value={shown} onValueChange={setPick}>
+                <SelectTrigger className="w-full sm:w-[190px]" aria-label="Model"><SelectValue /></SelectTrigger>
+                <SelectContent>{chartModels.map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+          </div>
+          <ChartContainer config={config} className="aspect-auto h-[220px] w-full">
+            <ComposedChart data={rows} margin={{ top: 6, right: 8, bottom: 0, left: 0 }}>
+              <CartesianGrid vertical={false} />
+              <XAxis dataKey="d" tickLine={false} axisLine={false} tickMargin={8} tickFormatter={(d) => dayMD(d)} minTickGap={24} />
+              <YAxis tickLine={false} axisLine={false} width={40} allowDecimals={false} domain={[(m: number) => Math.floor((m - 3) / 5) * 5, (m: number) => Math.ceil((m + 3) / 5) * 5]}
+                     ticks={tempTicks(rows)} tickFormatter={(x) => `${x}°`} />
+              <ChartTooltip content={<ChartTooltipContent labelFormatter={(d) => dayMD(String(d))} />} />
+              <Line dataKey="obsHi" stroke="var(--color-obsHi)" strokeWidth={6} strokeOpacity={0.25} dot={false} connectNulls isAnimationActive={false} />
+              <Line dataKey="obsLo" stroke="var(--color-obsLo)" strokeWidth={6} strokeOpacity={0.25} dot={false} connectNulls isAnimationActive={false} />
+              <Line dataKey="hi" stroke="var(--color-hi)" strokeWidth={2} dot={{ r: 2.5 }} connectNulls isAnimationActive={false} />
+              <Line dataKey="lo" stroke="var(--color-lo)" strokeWidth={2} dot={{ r: 2.5 }} connectNulls isAnimationActive={false} />
+            </ComposedChart>
+          </ChartContainer>
+          <p className="text-xs text-muted-foreground">
+            Wide gray bands: the region's average analysed high and low each day. Lines: the model's day-1 forecast for them, from the briefing issued that morning.
+            {" "}{v.source} is sampled hourly, so its highs can run slightly cool and its lows slightly warm.
+          </p>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}

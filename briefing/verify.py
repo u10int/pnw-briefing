@@ -86,3 +86,71 @@ def verify(now, earlier, max_days=14):
     used = sorted({x[3] for xs in pairs.values() for x in xs})
     return {"from": used[0], "to": used[-1], "nDays": len(used), "wet": WET, "leads": LEADS,
             "models": rows, "chart": {"dates": days, "observed": obs_reg, "day1": fc_reg}}
+
+
+WITHIN = 3.0          # °F: a forecast this close counts as "within"
+
+
+def verify_temps(now, earlier, max_days=14):
+    """Each recent briefing's daily highs and lows against the URMA analysis (`observedTemps`).
+
+    Scores per model and lead group, over every location and day: the typical miss (mean absolute
+    error, °F) for highs, lows and both; the bias (mean forecast minus analysed, so + is too warm);
+    and the share of highs and lows within 3 °F."""
+    ot = now.get("observedTemps") or {}
+    days = [str(d)[:10] for d in ot.get("dates") or []][-max_days:]
+    if not days or not earlier:
+        return None
+    pos = {d: k for k, d in enumerate(str(x)[:10] for x in ot["dates"])}
+    o_at = {}
+    for p in ot.get("tmax") or {}:
+        for d in days:
+            k = pos[d]
+            hi, lo = ot["tmax"][p], (ot.get("tmin") or {}).get(p) or []
+            if k < len(hi) and k < len(lo) and hi[k] is not None and lo[k] is not None:
+                o_at[(p, d)] = (float(hi[k]), float(lo[k]))
+    region_of = {p["name"]: p.get("region") for p in now["points"]}
+
+    pairs, tiers, day1 = {}, {}, {}
+    for b in earlier:
+        bd = [str(x)[:10] for x in b.get("dates", [])]
+        for m in b.get("models", []):
+            tiers.setdefault(m["label"], m.get("tier"))
+            for p, series in (m.get("data") or {}).items():
+                fh, fl = series.get("temperature_2m_max") or [], series.get("temperature_2m_min") or []
+                for k, d in enumerate(bd):
+                    o = o_at.get((p, d))
+                    if o is None or k >= len(fh) or k >= len(fl) or fh[k] is None or fl[k] is None:
+                        continue
+                    grp = next((g["id"] for g in LEADS if k in g["leads"]), None)
+                    if grp:
+                        pairs.setdefault((m["label"], grp), []).append((float(fh[k]), o[0], float(fl[k]), o[1], p, d))
+                    if k == 0 and region_of.get(p):
+                        day1.setdefault((m["label"], d, region_of[p]), []).append((float(fh[k]), float(fl[k])))
+    if not pairs:
+        return None
+
+    def score(xs):
+        a = np.array([x[:4] for x in xs])
+        eh, el = a[:, 0] - a[:, 1], a[:, 2] - a[:, 3]
+        both = np.concatenate([eh, el])
+        r = lambda v: round(float(v), 1)
+        return {"mae": r(np.mean(np.abs(both))), "maeHi": r(np.mean(np.abs(eh))), "maeLo": r(np.mean(np.abs(el))),
+                "biasHi": r(np.mean(eh)), "biasLo": r(np.mean(el)),
+                "within": round(float(np.mean(np.abs(both) <= WITHIN)), 2),
+                "n": int(len(xs)), "days": len({x[5] for x in xs})}
+
+    models = sorted({m for m, _ in pairs})
+    rows = [{"model": m, "tier": tiers.get(m), "scores": {g["id"]: score(pairs[(m, g["id"])]) for g in LEADS if (m, g["id"]) in pairs}}
+            for m in models]
+    regions = [r["id"] for r in now["regions"]]
+
+    def reg_obs(r, d, k):
+        v = [o_at[(p, d)][k] for p in ot.get("tmax") or {} if region_of.get(p) == r and (p, d) in o_at]
+        return round(float(np.mean(v)), 1) if v else None
+    observed = {r: {"hi": [reg_obs(r, d, 0) for d in days], "lo": [reg_obs(r, d, 1) for d in days]} for r in regions}
+    fc = {m: {r: {key: [round(float(np.mean([x[k] for x in day1[(m, d, r)]])), 1) if (m, d, r) in day1 else None for d in days]
+                  for key, k in (("hi", 0), ("lo", 1))} for r in regions} for m in models}
+    used = sorted({x[5] for xs in pairs.values() for x in xs})
+    return {"from": used[0], "to": used[-1], "nDays": len(used), "within": WITHIN, "source": ot.get("source", "URMA"),
+            "leads": LEADS, "models": rows, "chart": {"dates": days, "observed": observed, "day1": fc}}

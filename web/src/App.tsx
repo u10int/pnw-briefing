@@ -16,8 +16,9 @@ import { onOpenLocation } from "@/lib/locationlink"
 import { extremeTabs, MapCard } from "@/sections/Maps"
 import { Headline } from "@/sections/Overview"
 import { TrendsCard } from "@/sections/Trends"
-import { VerificationCard } from "@/sections/Verify"
+import { TempVerificationCard, VerificationCard } from "@/sections/Verify"
 import { ByLocation, RegionTotals } from "@/sections/Totals"
+import { WindByLocation, WindPeaks } from "@/sections/WindTotals"
 import { RainByDayCard } from "@/sections/RainByDay"
 import { RiversCard } from "@/sections/Rivers"
 import { TempDepartureCard } from "@/sections/TempDeparture"
@@ -247,9 +248,11 @@ export default function App() {
 
           <TabsContent value="wind">
             <Section title="Wind" first
-              description="Pressure gradients behind the region's classic wind events (south wind, Gorge and Fraser outflow, onshore pushes), and the strongest winds and gusts in each model."
+              description="The strongest gusts by region and location in each model, day by day, the pressure gradients behind the region's classic wind events (south wind, Gorge and Fraser outflow, onshore pushes), and the model maps."
               action={<MapLink req={{ mode: "hourly", layer: "pgrad", isobars: true, pairs: true }} label="Pressure gradients on the map" />}>
+              <WindPeaks data={data} />
               <WindByDayCard data={data} />
+              <WindByLocation data={data} />
               <GradientsCard data={data} />
               <MapCard title="Wind and gust maps" description="The strongest sustained wind and gust in each model."
                 tabs={[...pickExtremes(data, "short", "the next 48 hours", ["gust", "wind"], " (48 h)"),
@@ -275,12 +278,13 @@ export default function App() {
 
           <TabsContent value="temp">
             <Section title="Temperature" first
-              description="Daily highs and lows against normal for each location, and the warmest and coldest each model gets."
+              description="Daily highs and lows against normal for each location, the warmest and coldest each model gets, and how the models' highs and lows have verified lately."
               action={<MapLink req={{ mode: "totals", variable: "tmaxdep", days: 7 }} label="Departures on the map" />}>
               <TempDepartureCard data={data} />
               <MapCard title="High and low temperature maps" description="The highest and lowest 2 m temperature in each model."
                 tabs={[...pickExtremes(data, "short", "the next 48 hours", ["tmax", "tmin"], " (48 h)"),
                        ...pickExtremes(data, "long", "each model's full range", ["tmax", "tmin"], ` (to day ${meta.days})`)]} />
+              <TempVerificationCard data={data} />
             </Section>
           </TabsContent>
 

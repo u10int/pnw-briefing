@@ -411,3 +411,28 @@ def rivers(cfg):
                     "record": {"stage": cats["major"] + 3, "time": "2021-11-16T12:00:00Z"}, "url": f"https://water.noaa.gov/gauges/{lid}"})
     out.sort(key=lambda r: (-(r["crest"]["level"] or 0), r["name"]))
     return {"source": "Demo river forecasts", "gauges": out}
+
+
+def observed_temps(earlier, days):
+    """Synthetic analysed highs and lows: the earliest-lead median forecast of the earlier
+    briefings, plus a few degrees of noise, so the demo has temperature verification to show."""
+    rng = np.random.default_rng(21)
+    want = {d.isoformat() for d in days}
+    best = {}                                                   # (point, day) -> (lead, [highs], [lows])
+    for b in earlier:
+        bd = [str(x)[:10] for x in b.get("dates", [])]
+        for k, d in enumerate(bd):
+            if d not in want:
+                continue
+            for m in b.get("models", []):
+                for p, s in (m.get("data") or {}).items():
+                    hi, lo = (s.get("temperature_2m_max") or [None] * (k + 1)), (s.get("temperature_2m_min") or [None] * (k + 1))
+                    if k >= len(hi) or hi[k] is None or k >= len(lo) or lo[k] is None:
+                        continue
+                    cur = best.get((p, d))
+                    if cur is None or k < cur[0]:
+                        best[(p, d)] = cur = (k, [], [])
+                    if k == cur[0]:
+                        cur[1].append(hi[k]); cur[2].append(lo[k])
+    return {key: (round(float(np.median(h)) + rng.normal(0.5, 2.5), 1), round(float(np.median(l)) + rng.normal(-0.3, 2.5), 1))
+            for key, (_, h, l) in best.items()}
