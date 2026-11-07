@@ -58,17 +58,20 @@ export interface EventChange {
   hazard?: string; prevStart?: string | null; prevEnd?: string | null; shifted?: boolean
   agreement?: number | null; where?: { name: string; peak: number | null }[]; unit?: string | null
 }
-export type TrendVar = "snow" | "gust" | "tmax" | "tmin"
-export interface TrendWindow {
-  days: number; label: string
-  regions: { rid: string; region: string; median: number; lo: number; hi: number; n: number }[]
+export type TrendVar = "precip" | "snow" | "gust" | "tmax" | "tmin"
+export interface TrendStat { median: number; lo: number; hi: number; n: number }
+export interface TrendChangeVar { now: number; prev: number; delta: number }
+type ByVar<T> = Partial<Record<TrendVar, T>>
+export interface TrendWindow { days: number; label: string; points: Record<string, ByVar<TrendStat>>; regions: Record<string, ByVar<TrendStat>> }
+export interface TrendChange {
+  days: number; label: string; overlapDays: number
+  points: Record<string, ByVar<TrendChangeVar>>; regions: Record<string, ByVar<TrendChangeVar>>
 }
-export interface TrendChange { days: number; label: string; overlapDays: number; regions: Record<string, { now: number; prev: number; delta: number }> }
 
 export interface Change {
   prevIssued: string | null
   windows: ChangeWindow[]
-  trends?: Partial<Record<TrendVar, TrendChange[]>>    // absent before the snow/wind/temperature cards were added
+  trends?: { windows: TrendChange[] }                  // absent before the trends table was added
   events: { new: EventChange[]; upgraded: EventChange[]; downgraded: EventChange[]; dropped: EventChange[]; same: EventChange[] }
 }
 
@@ -165,7 +168,7 @@ export interface Briefing {
   normals: Normals | null
   alerts: Alerts | null
   change: Change | null
-  trends?: Partial<Record<TrendVar, TrendWindow[]>>    // window cards for the snow, wind and temperature tabs
+  trends?: { windows: TrendWindow[] }                  // the trends table above the tabs
   ar?: AtmosphericRivers | null
   gradients?: Gradient[]
   snowLevel?: SnowLevel | null
