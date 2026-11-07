@@ -273,7 +273,7 @@ def ensembles(cfg):
     for label, k in specs:
         mem = {p["name"]: np.vstack([_shape(n, RNG.normal(0, 1.2), RNG.uniform(0.5, 1.6)) * oro[p["kind"]]
                                      for _ in range(k)])
-               for p in cfg["points"] if p.get("plume")}
+               for p in cfg["points"]}
         rec = {"id": label, "label": label, "dates": dates, "members": mem,
                "run": None if label == "Canadian GEPS" else start - timedelta(hours=12)}
         if label != "Canadian GEPS":

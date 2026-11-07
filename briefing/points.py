@@ -111,7 +111,7 @@ def fetch_ensembles(cfg, start):
     sup = cfg.get("supplement", {})
     if not sup.get("enabled"):
         return []
-    pts, n = [p for p in cfg["points"] if p.get("plume")], cfg["days"]
+    pts, n = cfg["points"], cfg["days"]
     tz = ZoneInfo(cfg["timezone"])
     dates = [(start + timedelta(days=d)).replace(tzinfo=timezone.utc).astimezone(tz).date() for d in range(n)]
     out = []

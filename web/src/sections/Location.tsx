@@ -84,7 +84,7 @@ function RunningTotalChart({ data, point }: { data: Briefing; point: string }) {
 
 function EnsembleChart({ data, point }: { data: Briefing; point: string }) {
   const ens = data.ensembles.filter((e) => e.points[point])
-  const plumePoints = data.points.filter((p) => p.plume).map((p) => p.name)
+  const plumePoints = Object.keys(data.ensembles[0]?.points ?? {})
   const config: ChartConfig = Object.fromEntries(ens.map((e, i) => [`e${i}`, { label: `${e.label} (${e.members})`, color: ENS_COLORS[i % 3] }]))
   const rows = (ens[0]?.dates ?? []).map((d, t) => {
     const row: Record<string, unknown> = { date: d }
@@ -115,7 +115,7 @@ function EnsembleChart({ data, point }: { data: Briefing; point: string }) {
     </ChartContainer>
   ) : (
     <p className="text-sm text-muted-foreground">
-      Ensembles are computed for {plumePoints.join(", ")}. Pick one of those to see the spread.
+      {plumePoints.length ? <>Ensembles are computed for {plumePoints.join(", ")}. Pick one of those to see the spread.</> : "No ensemble forecasts in this briefing."}
     </p>
   )
 }
@@ -155,7 +155,7 @@ export function PrecipTotalCard({ data, point }: { data: Briefing; point: string
 
 export function EnsembleTable({ data }: { data: Briefing }) {
   if (!data.ensembles.length) return null
-  const pts = data.points.filter((p) => p.plume).map((p) => p.name)
+  const pts = data.points.map((p) => p.name).filter((n) => data.ensembles.some((e) => e.points[n]))
   return (
     <Card>
       <CardHeader>
