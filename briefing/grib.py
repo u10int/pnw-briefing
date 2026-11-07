@@ -770,7 +770,7 @@ def fetch_model(spec, cfg, start, points):
 # ---------------------------------------------------------------- ensembles
 
 def fetch_ensemble(spec, cfg, start, points):
-    """Per-member daily precip at plume points."""
+    """Per-member daily precip at every forecast location."""
     dom = cfg["domain"]
     tz = ZoneInfo(cfg["timezone"])
     try:
@@ -871,7 +871,6 @@ def fetch_all(cfg):
     start = day0(cfg)
     pts = cfg["points"]
     det = [m for m in (fetch_model(s, cfg, start, pts) for s in cfg["grib_models"] if s.get("enabled", True)) if m]
-    plume_pts = [p for p in pts if p.get("plume")]
-    ens = [e for e in (fetch_ensemble(s, cfg, start, plume_pts) for s in cfg.get("grib_ensembles", [])
+    ens = [e for e in (fetch_ensemble(s, cfg, start, pts) for s in cfg.get("grib_ensembles", [])
                        if s.get("enabled", True)) if e]
     return det, ens
