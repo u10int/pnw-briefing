@@ -12,7 +12,8 @@ import { NwsAlerts } from "@/sections/Alerts"
 import { TotalChanges } from "@/sections/Changes"
 import { ImpactBoard } from "@/sections/Impacts"
 import { ArCard, AvalancheCard, DiscussionsCard, ForecasterNotes, GradientsCard, LandslideCard, ObservedCard, OddsCard, OutlooksCard, SnowLevelCard, SnowpackCard } from "@/sections/Context"
-import { DayByDay, EnsemblePlume, EnsembleTable, LocationPicker, RunningTotal } from "@/sections/Location"
+import { EnsembleTable, LocationPanel } from "@/sections/Location"
+import { onOpenLocation } from "@/lib/locationlink"
 import { extremeTabs, MapCard } from "@/sections/Maps"
 import { Headline, WindowCard } from "@/sections/Overview"
 import { TrendsCard } from "@/sections/Trends"
@@ -35,11 +36,11 @@ const TABS = [
   { id: "temp", label: "Temperature", icon: Thermometer },
   { id: "fire", label: "Wildfire", icon: Flame },
   { id: "outlooks", label: "Outlooks", icon: Telescope },
-  { id: "locations", label: "Locations", icon: MapPin },
 ] as const
 type Tab = (typeof TABS)[number]["id"]
+/** "#precip" or "#precip/Seattle": the tab, and a location whose panel is open. */
 const tabFromHash = (): Tab | null => {
-  let h = location.hash.replace("#", "")
+  let h = location.hash.replace("#", "").split("/")[0]
   if (h === "rain") h = "precip"           // links from before the precip/flooding split
   return TABS.some((t) => t.id === h) ? (h as Tab) : null
 }
@@ -79,7 +80,11 @@ function Section({ title, description, action, children, first }: {
 export default function App() {
   const [data, setData] = React.useState<Briefing | null>(null)
   const [error, setError] = React.useState<string | null>(null)
-  const [point, setPoint] = React.useState("Seattle")
+  // the location whose detail panel is open (kept in the URL after the tab: "#precip/Seattle")
+  const [point, setPoint] = React.useState<string | null>(() => {
+    const n = decodeURIComponent(location.hash.split("/")[1] ?? "")
+    return n || null
+  })
   const [tab, setTab] = React.useState<Tab>(() => tabFromHash() ?? "map")
   const [mapSeen, setMapSeen] = React.useState(tab === "map")
   const [mapReq, setMapReq] = React.useState<(MapRequest & { nonce: number }) | null>(null)
@@ -89,15 +94,26 @@ export default function App() {
   const openTab = React.useCallback((t: Tab, scroll = true) => {
     setTab(t)
     if (t === "map") setMapSeen(true)
-    history.replaceState(null, "", `#${t}`)
+    history.replaceState(null, "", `#${t}${location.hash.includes("/") ? location.hash.slice(location.hash.indexOf("/")) : ""}`)
     if (scroll) requestAnimationFrame(() => tabsTop.current?.scrollIntoView({ behavior: "smooth", block: "start" }))
   }, [])
   React.useEffect(() => {
     const onHash = () => { const t = tabFromHash(); if (t) { setTab(t); if (t === "map") setMapSeen(true) } }
     window.addEventListener("hashchange", onHash)
-    const off = onOpenMap((req) => { setMapReq({ ...req, nonce: Date.now() }); openTab("map") })
-    return () => { window.removeEventListener("hashchange", onHash); off() }
+    const off = onOpenMap((req) => { setMapReq({ ...req, nonce: Date.now() }); setPoint(null); openTab("map") })
+    const offLoc = onOpenLocation((n) => setPoint(n))
+    const onLocHash = () => setPoint(decodeURIComponent(location.hash.split("/")[1] ?? "") || null)
+    window.addEventListener("hashchange", onLocHash)
+    return () => { window.removeEventListener("hashchange", onHash); window.removeEventListener("hashchange", onLocHash); off(); offLoc() }
   }, [openTab])
+
+  // keep the open location in the URL, after the tab
+  React.useEffect(() => {
+    const want = `#${tab}${point ? `/${encodeURIComponent(point)}` : ""}`
+    if (location.hash !== want && (point || location.hash.includes("/"))) history.replaceState(null, "", want)
+  }, [point, tab])
+  const lastPoint = React.useRef("Seattle")
+  if (point) lastPoint.current = point
 
   React.useEffect(() => {
     // A self-contained copy carries its data inline; the site fetches it from data/.
@@ -133,6 +149,10 @@ export default function App() {
                 </button>
               )
             })}
+            <button type="button" onClick={() => setPoint(lastPoint.current)} title="Locations"
+              className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-sm text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring">
+              <MapPin className="size-4" aria-hidden /><span className="max-lg:hidden">Locations</span>
+            </button>
           </nav>
           <div className="text-sm text-muted-foreground">Issued {issuedLabel(meta.issued)}</div>
         </div>
@@ -155,7 +175,7 @@ export default function App() {
         {data.trends && (
           <Section title="Forecast trends"
             description="Each location's precipitation, snow, strongest gust and average high and low over the chosen window, and how each moved since yesterday's briefing. The column headings open the details.">
-            <TrendsCard data={data} onOpen={(t) => openTab(t)} onLocation={(n) => { setPoint(n); openTab("locations") }} />
+            <TrendsCard data={data} onOpen={(t) => openTab(t)} onLocation={(n) => setPoint(n)} />
           </Section>
         )}
 
@@ -163,7 +183,7 @@ export default function App() {
           {/* the section tabs: a full-width sticky bar of larger, icon-led tabs with an underline on the
               open one, sitting on the bar's bottom edge, rather than a segmented control */}
           <div ref={tabsTop} className="sticky top-0 z-30 -mx-8 border-b bg-background/95 px-8 backdrop-blur max-sm:-mx-4 max-sm:px-4">
-            <div className="overflow-x-auto overflow-y-hidden">
+            <div className="flex items-stretch overflow-x-auto overflow-y-hidden">
               <TabsList variant="line" className="gap-0 p-0 group-data-[orientation=horizontal]/tabs:h-auto">
                 {TABS.map((t) => {
                   const Icon = t.icon
@@ -175,6 +195,11 @@ export default function App() {
                   )
                 })}
               </TabsList>
+              {/* locations open in a side panel rather than a tab */}
+              <button type="button" onClick={() => setPoint(lastPoint.current)}
+                className="ml-auto inline-flex shrink-0 items-center gap-2 px-4 pt-4 pb-3.5 text-[15px] font-medium text-muted-foreground hover:bg-muted/50 hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring max-sm:px-3">
+                <MapPin className="size-[18px]" aria-hidden />Locations
+              </button>
             </div>
           </div>
 
@@ -195,6 +220,7 @@ export default function App() {
                   { id: "pl", label: `Through day ${meta.days}`, src: data.maps.long, alt: "Full-range precipitation by model", note: "Each panel is labeled with the number of days the model covers; mean and spread use only the days every model covers." },
                 ]} />
               <GribAreaMeans data={data} />
+              <EnsembleTable data={data} />
             </Section>
           </TabsContent>
 
@@ -277,18 +303,9 @@ export default function App() {
             </Section>
           </TabsContent>
 
-          <TabsContent value="locations">
-            <Section title={`At ${point}`} first description="Running total, ensemble spread and daily detail for one forecast location."
-              action={<LocationPicker data={data} value={point} onChange={setPoint} />}>
-              <div className="grid gap-4 lg:grid-cols-2">
-                <RunningTotal data={data} point={point} />
-                <EnsemblePlume data={data} point={point} />
-              </div>
-              <DayByDay data={data} point={point} />
-              <EnsembleTable data={data} />
-            </Section>
-          </TabsContent>
         </Tabs>
+
+        <LocationPanel data={data} name={point} onChange={setPoint} onClose={() => setPoint(null)} />
 
         <Separator className="mt-14 mb-6" />
         <footer className="grid gap-6 text-sm text-muted-foreground md:grid-cols-3">

@@ -7,6 +7,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { fmtLevel, legendBins, type Ramp } from "@/lib/ramps"
 import type { Briefing, DailyVars, Model, N } from "@/types"
 import { dayMD } from "@/lib/format"
+import { openLocation } from "@/lib/locationlink"
 
 /** Location × day tables (rain and snow, temperatures, wind): the model picker, the per-model or
  *  multi-model values behind them, cell colouring and the table itself. */
@@ -143,7 +144,9 @@ export function DayMatrix({ dates, rows, leadHead, leadSub, style, fmt, tip, dim
         <tbody>
           {rows.map((r) => (
             <tr key={r.name} className={`border-b last:border-b-0 ${r.group ? "font-medium" : ""}`}>
-              <td className={`sticky left-0 z-10 px-2 py-1 whitespace-nowrap ${r.group ? "bg-muted" : "bg-card"}`}>{r.name}</td>
+              <td className={`sticky left-0 z-10 px-2 py-1 whitespace-nowrap ${r.group ? "bg-muted" : "bg-card"}`}>
+                {r.point ? <button type="button" onClick={() => openLocation(r.point!)} className="rounded text-left hover:underline focus-visible:outline-2 focus-visible:outline-ring">{r.name}</button> : r.name}
+              </td>
               <td className="border-r px-2 py-1 text-center font-medium" style={style(r.lead)}>{fmt(r.lead)}</td>
               {dates.map((_, k) => {
                 const x = r.days[k] ?? null
