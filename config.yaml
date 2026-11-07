@@ -66,28 +66,30 @@ regions:
       - [-123.96, 45.95]
 
 # Forecast points. kind controls which impact thresholds apply. region assigns a point to a
-# comparison region; leave it out for a location that shouldn't count toward any region.
+# comparison region; leave it out for a location that shouldn't count toward any region. area
+# names the part of the region it stands for and zone the wider area it belongs to; together they
+# sum up an impact's locations ("Northern Puget Sound", then "Puget Sound").
 points:
-  - {name: Bellingham,       lat: 48.75, lon: -122.48, kind: lowland, region: wwa}
-  - {name: Everett,          lat: 47.98, lon: -122.20, kind: lowland, region: wwa}
-  - {name: Seattle,          lat: 47.61, lon: -122.33, kind: lowland, region: wwa, plume: true}
-  - {name: Tacoma,           lat: 47.25, lon: -122.44, kind: lowland, region: wwa}
-  - {name: Olympia,          lat: 47.04, lon: -122.90, kind: lowland, region: wwa}
-  - {name: Forks,            lat: 47.95, lon: -124.39, kind: coast,   region: wwa}
-  - {name: Aberdeen,         lat: 46.98, lon: -123.82, kind: coast,   region: wwa}
-  - {name: Stevens Pass,     lat: 47.75, lon: -121.09, kind: pass,    region: wwa, elev_ft: 4061}
-  - {name: Snoqualmie Pass,  lat: 47.42, lon: -121.41, kind: pass,    region: wwa, plume: true, elev_ft: 3022}
-  - {name: White Pass,       lat: 46.64, lon: -121.38, kind: pass,    region: wwa, elev_ft: 4500}
-  - {name: Vancouver WA,     lat: 45.64, lon: -122.66, kind: lowland, region: wwa}
-  - {name: Astoria,          lat: 46.19, lon: -123.83, kind: coast,   region: nwor}
-  - {name: Tillamook,        lat: 45.46, lon: -123.84, kind: coast,   region: nwor}
-  - {name: Portland,         lat: 45.52, lon: -122.68, kind: lowland, region: nwor, plume: true}
-  - {name: Salem,            lat: 44.94, lon: -123.04, kind: lowland, region: nwor}
-  - {name: Corvallis,        lat: 44.56, lon: -123.26, kind: lowland, region: nwor}
-  - {name: Government Camp,  lat: 45.30, lon: -121.75, kind: pass,    region: nwor, plume: true, elev_ft: 3980}
+  - {name: Bellingham,       lat: 48.75, lon: -122.48, kind: lowland, region: wwa, area: Northern Puget Sound, zone: Puget Sound}
+  - {name: Everett,          lat: 47.98, lon: -122.20, kind: lowland, region: wwa, area: Northern Puget Sound, zone: Puget Sound}
+  - {name: Seattle,          lat: 47.61, lon: -122.33, kind: lowland, region: wwa, plume: true, area: Central Puget Sound, zone: Puget Sound}
+  - {name: Tacoma,           lat: 47.25, lon: -122.44, kind: lowland, region: wwa, area: Southern Puget Sound, zone: Puget Sound}
+  - {name: Olympia,          lat: 47.04, lon: -122.90, kind: lowland, region: wwa, area: Southern Puget Sound, zone: Puget Sound}
+  - {name: Forks,            lat: 47.95, lon: -124.39, kind: coast,   region: wwa, area: Northern WA coast, zone: WA coast}
+  - {name: Aberdeen,         lat: 46.98, lon: -123.82, kind: coast,   region: wwa, area: Central WA coast, zone: WA coast}
+  - {name: Stevens Pass,     lat: 47.75, lon: -121.09, kind: pass,    region: wwa, elev_ft: 4061, area: Central WA Cascades, zone: WA Cascades}
+  - {name: Snoqualmie Pass,  lat: 47.42, lon: -121.41, kind: pass,    region: wwa, plume: true, elev_ft: 3022, area: Central WA Cascades, zone: WA Cascades}
+  - {name: White Pass,       lat: 46.64, lon: -121.38, kind: pass,    region: wwa, elev_ft: 4500, area: Southern WA Cascades, zone: WA Cascades}
+  - {name: Vancouver WA,     lat: 45.64, lon: -122.66, kind: lowland, region: wwa, area: Portland metro, zone: Willamette Valley}
+  - {name: Astoria,          lat: 46.19, lon: -123.83, kind: coast,   region: nwor, area: Northern OR coast, zone: OR coast}
+  - {name: Tillamook,        lat: 45.46, lon: -123.84, kind: coast,   region: nwor, area: Northern OR coast, zone: OR coast}
+  - {name: Portland,         lat: 45.52, lon: -122.68, kind: lowland, region: nwor, plume: true, area: Portland metro, zone: Willamette Valley}
+  - {name: Salem,            lat: 44.94, lon: -123.04, kind: lowland, region: nwor, area: Central Willamette Valley, zone: Willamette Valley}
+  - {name: Corvallis,        lat: 44.56, lon: -123.26, kind: lowland, region: nwor, area: Southern Willamette Valley, zone: Willamette Valley}
+  - {name: Government Camp,  lat: 45.30, lon: -121.75, kind: pass,    region: nwor, plume: true, elev_ft: 3980, area: Northern OR Cascades, zone: OR Cascades}
   # outside the comparison regions (no PRISM normals or NWS alerts in Canada)
-  - {name: Vancouver BC,     lat: 49.28, lon: -123.12, kind: lowland}
-  - {name: Whistler BC,      lat: 50.12, lon: -122.95, kind: pass,    elev_ft: 2214}   # village; pass thresholds for snow
+  - {name: Vancouver BC,     lat: 49.28, lon: -123.12, kind: lowland, area: Lower Mainland BC, zone: Southwest BC}
+  - {name: Whistler BC,      lat: 50.12, lon: -122.95, kind: pass,    elev_ft: 2214}   # village; pass thresholds for sno, area: Sea to Sky BC, zone: Southwest BC}
 
 # ----------------------------------------------------------------------------
 # GRIB models — the primary source. NOAA models come from NODD (AWS, with

@@ -5,7 +5,10 @@ export type N = number | null
 export type Tier = "regional" | "blend" | "global"
 
 export interface Region { id: string; name: string; short: string }
-export interface Point { name: string; kind: "lowland" | "coast" | "pass"; region: string | null; plume: boolean; lat: number; lon: number }
+export interface Point {
+  name: string; kind: "lowland" | "coast" | "pass"; region: string | null; plume: boolean; lat: number; lon: number
+  area?: string | null; zone?: string | null   // "Northern Puget Sound" in "Puget Sound"; absent in briefings built before they were added
+}
 
 export interface WindowRegion {
   rid: string; region: string; median: number; lo: number; hi: number

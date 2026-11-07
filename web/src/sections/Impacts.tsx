@@ -87,6 +87,75 @@ const Tag = ({ s }: { s: Status }) =>
   s.tag ? <span className={`shrink-0 rounded px-1.5 py-px text-[10px] leading-4 font-semibold whitespace-nowrap ${TAG[s.tone]}`}>
     {s.tone === "up" ? "↑ " : s.tone === "down" ? "↓ " : ""}{s.tag}</span> : null
 
+/** Area and zone for briefings built before points carried them (config.yaml has the same). */
+const AREA_FALLBACK: Record<string, [string, string]> = {
+  "Bellingham": ["Northern Puget Sound", "Puget Sound"],
+  "Everett": ["Northern Puget Sound", "Puget Sound"],
+  "Seattle": ["Central Puget Sound", "Puget Sound"],
+  "Tacoma": ["Southern Puget Sound", "Puget Sound"],
+  "Olympia": ["Southern Puget Sound", "Puget Sound"],
+  "Forks": ["Northern WA coast", "WA coast"],
+  "Aberdeen": ["Central WA coast", "WA coast"],
+  "Stevens Pass": ["Central WA Cascades", "WA Cascades"],
+  "Snoqualmie Pass": ["Central WA Cascades", "WA Cascades"],
+  "White Pass": ["Southern WA Cascades", "WA Cascades"],
+  "Vancouver WA": ["Portland metro", "Willamette Valley"],
+  "Portland": ["Portland metro", "Willamette Valley"],
+  "Salem": ["Central Willamette Valley", "Willamette Valley"],
+  "Corvallis": ["Southern Willamette Valley", "Willamette Valley"],
+  "Astoria": ["Northern OR coast", "OR coast"],
+  "Tillamook": ["Northern OR coast", "OR coast"],
+  "Government Camp": ["Northern OR Cascades", "OR Cascades"],
+  "Vancouver BC": ["Lower Mainland BC", "Southwest BC"],
+  "Whistler BC": ["Sea to Sky BC", "Southwest BC"],
+}
+
+/** Where a period hit, said briefly: the location when there's one; otherwise the area when they
+ *  share one ("Northern Puget Sound"), the zone when they share that ("Puget Sound"), the two zones
+ *  ("Puget Sound & WA coast"), the region when they're all in one ("Western Washington"), or the
+ *  worst zone and how many more. The count of locations and the worst value follow; hovering
+ *  lists every location with its value. */
+function WhereLabel({ data, pts, unit, muted }: { data: Briefing; pts: { name: string; peak: number | null }[]; unit: string; muted?: boolean }) {
+  if (!pts.length) return <span className="truncate">—</span>
+  const byName = new Map(data.points.map((p) => [p.name, p]))
+  const area = (n: string) => byName.get(n)?.area ?? AREA_FALLBACK[n]?.[0] ?? n
+  const zone = (n: string) => byName.get(n)?.zone ?? AREA_FALLBACK[n]?.[1] ?? area(n)
+  const uniq = (f: (n: string) => string) => [...new Set(pts.map((p) => f(p.name)))]   // worst first, as pts are
+  const areas = uniq(area), zones = uniq(zone)
+  const regions = uniq((n) => byName.get(n)?.region ?? "")
+  const regionName = regions.length === 1 && regions[0] ? data.regions.find((r) => r.id === regions[0])?.name : undefined
+  const place = pts.length === 1 ? pts[0].name
+    : areas.length === 1 ? areas[0]
+    : zones.length === 1 ? zones[0]
+    : zones.length === 2 && (zones[0] + zones[1]).length <= 22 ? `${zones[0]} & ${zones[1]}`
+    : regionName ?? `${zones[0]} +${zones.length - 1} more`
+  const top = pts[0].peak
+  // the place gives way (truncates) before the count and the worst value do
+  const text = (
+    <span className={`flex min-w-0 items-baseline gap-1 ${muted ? "text-muted-foreground" : ""}`}>
+      <span className="truncate">{place}</span>
+      {pts.length > 1 && <span className="shrink-0 text-muted-foreground tabular-nums">({pts.length})</span>}
+      {top != null && unit && <span className="shrink-0 font-semibold tabular-nums">{short(top, unit)}</span>}
+    </span>
+  )
+  if (pts.length === 1) return text
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild><span tabIndex={0} className="min-w-0 cursor-default outline-none focus-visible:underline">{text}</span></TooltipTrigger>
+      <TooltipContent side="right" className="max-w-xs">
+        <div className="grid grid-cols-[auto_auto] gap-x-4 gap-y-0.5 tabular-nums">
+          {pts.map((p) => (
+            <React.Fragment key={p.name}>
+              <span>{p.name} <span className="opacity-60">{area(p.name)}</span></span>
+              <span className="text-right font-semibold">{p.peak != null && unit ? short(p.peak, unit) : ""}</span>
+            </React.Fragment>
+          ))}
+        </div>
+      </TooltipContent>
+    </Tooltip>
+  )
+}
+
 /** One card for everything about impacts: each hazard's share of models over its threshold day
  *  by day (the agreement strip), the periods where enough agree as bars coloured by confidence
  *  with their worst-hit locations beside them, and what changed since yesterday: a tag on each
@@ -221,10 +290,7 @@ export function ImpactBoard({ data }: { data: Briefing }) {
                   return (
                     <div key={i} className={grid}>
                       <div className={`flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 self-stretch py-1 text-[13px] ${pin}`}>
-                        <span className="truncate">
-                          {pts[0].name} <span className="font-semibold tabular-nums">{short(pts[0].peak, e.unit)}</span>
-                          {pts.length > 1 && <span className="text-muted-foreground"> +{pts.length - 1}</span>}
-                        </span>
+                        <WhereLabel data={data} pts={pts} unit={e.unit} />
                         {st && <Tag s={st} />}
                       </div>
                       <div className="relative h-8">
@@ -259,7 +325,7 @@ export function ImpactBoard({ data }: { data: Briefing }) {
                   return (
                     <div key={`d${i}`} className={grid}>
                       <div className={`flex min-w-0 items-center gap-2 self-stretch py-1 text-[13px] text-muted-foreground ${pin}`}>
-                        <span className="truncate">{e.where?.[0]?.name ?? "—"}</span>
+                        <WhereLabel data={data} pts={e.where ?? []} unit={e.unit ?? ""} muted />
                         <span className="shrink-0 rounded border border-dashed border-muted-foreground/60 px-1.5 py-px text-[10px] leading-4 font-semibold">Dropped</span>
                       </div>
                       <div className="relative h-8">
@@ -303,7 +369,7 @@ export function ImpactBoard({ data }: { data: Briefing }) {
             Share of models over the threshold each day; dashed line at {pct(minAg)}
           </span>
           {hasPrev && <span className="flex items-center gap-1.5"><span className="h-3 w-5 rounded-[3px] border border-dashed border-muted-foreground/60" />Yesterday's dates, or dropped</span>}
-          <span>Locations: worst first, peak value</span>
+          <span>Where: the area hit, number of locations and the worst value; hover for each location</span>
         </div>
       </CardContent>
     </Card>
