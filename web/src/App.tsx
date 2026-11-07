@@ -1,6 +1,6 @@
 import * as React from "react"
 
-import { MapIcon } from "lucide-react"
+import { CloudRain, Flame, MapIcon, MapPin, MountainSnow, Telescope, Thermometer, Waves, Wind } from "lucide-react"
 
 import { Separator } from "@/components/ui/separator"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -27,15 +27,15 @@ import type { Briefing } from "@/types"
 const InteractiveMap = React.lazy(() => import("@/sections/InteractiveMap").then((m) => ({ default: m.InteractiveMap })))
 
 const TABS = [
-  { id: "map", label: "Map" },
-  { id: "precip", label: "Precip" },
-  { id: "flood", label: "Flooding" },
-  { id: "wind", label: "Wind" },
-  { id: "snow", label: "Snow & mountains" },
-  { id: "temp", label: "Temperature" },
-  { id: "fire", label: "Wildfire" },
-  { id: "outlooks", label: "Outlooks" },
-  { id: "locations", label: "Locations" },
+  { id: "map", label: "Map", icon: MapIcon },
+  { id: "precip", label: "Precip", icon: CloudRain },
+  { id: "flood", label: "Flooding", icon: Waves },
+  { id: "wind", label: "Wind", icon: Wind },
+  { id: "snow", label: "Snow & mountains", icon: MountainSnow },
+  { id: "temp", label: "Temperature", icon: Thermometer },
+  { id: "fire", label: "Wildfire", icon: Flame },
+  { id: "outlooks", label: "Outlooks", icon: Telescope },
+  { id: "locations", label: "Locations", icon: MapPin },
 ] as const
 type Tab = (typeof TABS)[number]["id"]
 const tabFromHash = (): Tab | null => {
@@ -148,10 +148,20 @@ export default function App() {
         )}
 
         <Tabs value={tab} onValueChange={(v) => openTab(v as Tab, false)} className="mt-14 gap-0">
-          <div ref={tabsTop} className="sticky top-0 z-30 -mx-8 border-b bg-background/95 px-8 py-2.5 backdrop-blur max-sm:-mx-4 max-sm:px-4">
+          {/* the section tabs: a full-width sticky bar of larger, icon-led tabs with an underline on the
+              open one, sitting on the bar's bottom edge, rather than a segmented control */}
+          <div ref={tabsTop} className="sticky top-0 z-30 -mx-8 border-b bg-background/95 px-8 backdrop-blur max-sm:-mx-4 max-sm:px-4">
             <div className="overflow-x-auto overflow-y-hidden">
-              <TabsList className="h-10">
-                {TABS.map((t) => <TabsTrigger key={t.id} value={t.id} className="px-3.5">{t.label}</TabsTrigger>)}
+              <TabsList variant="line" className="gap-0 p-0 group-data-[orientation=horizontal]/tabs:h-auto">
+                {TABS.map((t) => {
+                  const Icon = t.icon
+                  return (
+                    <TabsTrigger key={t.id} value={t.id}
+                      className="h-auto flex-none gap-2 rounded-none px-4 pt-4 pb-3.5 text-[15px] font-medium text-muted-foreground after:bottom-0! after:h-[2.5px]! after:rounded-full hover:bg-muted/50 data-[state=active]:text-foreground max-sm:px-3 [&_svg:not([class*='size-'])]:size-[18px]">
+                      <Icon aria-hidden />{t.label}
+                    </TabsTrigger>
+                  )
+                })}
               </TabsList>
             </div>
           </div>
