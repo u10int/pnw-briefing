@@ -18,9 +18,31 @@ const short = (v: number, unit: string) =>
   unit.startsWith("in") ? `${v.toFixed(1)}″` : unit === "mph" ? `${Math.round(v)} mph` : unit === "°F" ? `${Math.round(v)}°` : peak(v, unit)
 
 type Level = "likely" | "possible"
-const LEVEL: Record<Level, { word: string; bar: string; text: string; tint: string }> = {
-  likely: { word: "Likely", bar: "var(--likely-bar)", text: "#fff", tint: "var(--likely)" },
-  possible: { word: "Possible", bar: "var(--possible-bar)", text: "#3b2400", tint: "var(--possible)" },
+const LEVEL: Record<Level, { word: string; bar: string; text: string; tint: string; pale: string }> = {
+  likely: { word: "Likely", bar: "var(--likely-bar)", text: "#fff", tint: "var(--likely)", pale: "var(--likely-bg)" },
+  possible: { word: "Possible", bar: "var(--possible-bar)", text: "#3b2400", tint: "var(--possible)", pale: "var(--possible-bg)" },
+}
+type Fill = "bold" | "same" | "moved" | "down"
+/** Hue is confidence; the fill is what changed since yesterday: solid for new or upgraded (or
+ *  with no earlier briefing), the pale fill for unchanged, fainter still for moved, light
+ *  stripes for downgraded. Dropped periods are a dashed gray outline. */
+function fillStyle(lv: (typeof LEVEL)[Level], f: Fill): React.CSSProperties {
+  if (f === "bold") return { background: lv.bar, color: lv.text }
+  if (f === "moved") return { background: `color-mix(in srgb, ${lv.pale} 45%, var(--card))`, color: lv.tint }
+  if (f === "down") return { background: `repeating-linear-gradient(135deg, color-mix(in srgb, ${lv.bar} 18%, var(--card)) 0 3px, var(--card) 3px 6px)`, color: lv.tint }
+  return { background: lv.pale, color: lv.tint }
+}
+const fillOf = (st: Status | null): Fill =>
+  !st || st.tone === "new" || st.tone === "up" ? "bold" : st.tone === "down" ? "down" : st.tone === "moved" ? "moved" : "same"
+/** A key swatch in both confidence colours (likely left, possible right), filled like the bars. */
+function Swatch({ fill }: { fill: Fill }) {
+  const edge = "shadow-[inset_0_0_0_1px_rgb(0_0_0/0.08)]"
+  return (
+    <span className="flex h-3 gap-px">
+      <span className={`w-3 rounded-l-[3px] ${edge}`} style={fillStyle(LEVEL.likely, fill)} />
+      <span className={`w-3 rounded-r-[3px] ${edge}`} style={fillStyle(LEVEL.possible, fill)} />
+    </span>
+  )
 }
 const LABEL_OF: Record<string, string> = {
   heavy_rain_24h: "Heavy rain", heavy_rain_72h: "Multi-day rain, flood risk", snow_24h: "Snow",
@@ -214,7 +236,7 @@ export function ImpactBoard({ data }: { data: Briefing }) {
                           <TooltipTrigger asChild>
                             <div tabIndex={0} aria-label={`${e.label}, ${dateRange(e.start, e.end)}: ${label}`}
                               className="absolute top-1 bottom-1 flex items-center overflow-hidden rounded-[4px] px-1.5 text-[11px] font-semibold whitespace-nowrap tabular-nums shadow-[inset_0_0_0_1px_rgb(0_0_0/0.08)] outline-offset-1 hover:brightness-105 focus-visible:outline-2 focus-visible:outline-ring"
-                              style={{ left: b.left, width: b.width, background: lv.bar, color: lv.text }}>
+                              style={{ left: b.left, width: b.width, ...fillStyle(lv, fillOf(st)) }}>
                               {b.cells >= 2 ? label : b.cells >= 1 ? pct(e.agreement) : ""}
                             </div>
                           </TooltipTrigger>
@@ -269,8 +291,13 @@ export function ImpactBoard({ data }: { data: Briefing }) {
 
         {/* key */}
         <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-muted-foreground">
-          <span className="flex items-center gap-1.5"><span className="h-3 w-5 rounded-[3px]" style={{ background: LEVEL.likely.bar }} />Likely (60%+ of models)</span>
-          <span className="flex items-center gap-1.5"><span className="h-3 w-5 rounded-[3px]" style={{ background: LEVEL.possible.bar }} />Possible ({pct(minAg)}+)</span>
+          <span>Red: likely (60%+ of models) · Amber: possible ({pct(minAg)}+)</span>
+          {hasPrev ? <>
+            <span className="flex items-center gap-1.5"><Swatch fill="bold" />New or upgraded</span>
+            <span className="flex items-center gap-1.5"><Swatch fill="same" />Unchanged</span>
+            <span className="flex items-center gap-1.5"><Swatch fill="moved" />Moved</span>
+            <span className="flex items-center gap-1.5"><Swatch fill="down" />Downgraded</span>
+          </> : <span className="flex items-center gap-1.5"><Swatch fill="bold" />Period</span>}
           <span className="flex items-center gap-1.5">
             <span className="flex h-3 items-end gap-px border-b border-muted-foreground/50">{[0.3, 0.7, 1, 0.5].map((h, i) => <span key={i} className="w-1 rounded-t-[1px]" style={{ height: `${h * 100}%`, background: redCell(h).background }} />)}</span>
             Share of models over the threshold each day; dashed line at {pct(minAg)}
