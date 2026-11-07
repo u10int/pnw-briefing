@@ -45,6 +45,7 @@ def verify(now, earlier, max_days=14):
     day1 = {}                                         # (model, day, region) -> [forecast], for the chart
     for b in earlier:
         bd = [str(x)[:10] for x in b.get("dates", [])]
+        skip0 = (b.get("meta") or {}).get("firstDayHours", 24) < 24      # a partial first day isn't a whole day to score
         if not bd:
             continue
         for m in b.get("models", []):
@@ -52,7 +53,7 @@ def verify(now, earlier, max_days=14):
             for p, series in (m.get("data") or {}).items():
                 fc = series.get("precipitation_sum") or []
                 for k, d in enumerate(bd):
-                    if d not in days or k >= len(fc) or fc[k] is None:
+                    if (k == 0 and skip0) or d not in days or k >= len(fc) or fc[k] is None:
                         continue
                     o = o_at.get((p, d))
                     if o is None:
@@ -114,12 +115,13 @@ def verify_temps(now, earlier, max_days=14):
     pairs, tiers, day1 = {}, {}, {}
     for b in earlier:
         bd = [str(x)[:10] for x in b.get("dates", [])]
+        skip0 = (b.get("meta") or {}).get("firstDayHours", 24) < 24      # a partial first day isn't a whole day to score
         for m in b.get("models", []):
             tiers.setdefault(m["label"], m.get("tier"))
             for p, series in (m.get("data") or {}).items():
                 fh, fl = series.get("temperature_2m_max") or [], series.get("temperature_2m_min") or []
                 for k, d in enumerate(bd):
-                    o = o_at.get((p, d))
+                    o = o_at.get((p, d)) if not (k == 0 and skip0) else None
                     if o is None or k >= len(fh) or k >= len(fl) or fh[k] is None or fl[k] is None:
                         continue
                     grp = next((g["id"] for g in LEADS if k in g["leads"]), None)

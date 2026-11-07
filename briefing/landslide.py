@@ -17,6 +17,8 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timedelta, timezone
 
+from .grib import day12
+
 log = logging.getLogger(__name__)
 A, B, N3, N15 = 3.5, 0.67, 3, 15
 
@@ -51,8 +53,9 @@ def compute(models, obs, cfg, start: datetime):
     a, b = float(spec.get("threshold_in", A)), float(spec.get("p15_factor", B))
     ndays = cfg["days"]
     s = start if start.tzinfo else start.replace(tzinfo=timezone.utc)
-    days = [{"start": (s + timedelta(days=d)).isoformat().replace("+00:00", "Z"),
-             "end": (s + timedelta(days=d + 1)).isoformat().replace("+00:00", "Z")} for d in range(ndays)]
+    d0 = day12(s)                       # days run 12Z – 12Z; the first starts at the briefing's start
+    iso = lambda t: t.isoformat().replace("+00:00", "Z")
+    days = [{"start": iso(s if d == 0 else d0 + timedelta(days=d)), "end": iso(d0 + timedelta(days=d + 1))} for d in range(ndays)]
     points = []
     for name in names:
         past = obs["daily"].get(name)

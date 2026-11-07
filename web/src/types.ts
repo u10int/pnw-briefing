@@ -172,6 +172,7 @@ export interface Observed {
 export interface Briefing {
   meta: {
     title: string; issued: string; demo: boolean; days: number; minAgreement: number
+    cycle?: string; firstDayHours?: number          // the edition's model cycle; hours of the first 12Z day it covers
     hasSupplement: boolean; sources: { ncep: string[]; ecmwf: string[] }
   }
   regions: Region[]

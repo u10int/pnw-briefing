@@ -20,6 +20,7 @@ filled and logged; it never fails the briefing.
 from __future__ import annotations
 
 import logging
+import os
 import re
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
@@ -39,10 +40,44 @@ M_S_TO_MPH = 2.23694
 
 # ---------------------------------------------------------------- timing
 
+CYCLE_LAG_H = 3     # an edition is named for the latest 00/06/12/18Z cycle at least this many hours old
+
+
+def cycle_start(now: datetime | None = None) -> datetime:
+    """The edition's cycle (naive UTC): BRIEFING_CYCLE (e.g. 2026-11-07T18Z) when set, otherwise
+    the latest 00/06/12/18Z at least CYCLE_LAG_H hours before now."""
+    env = os.environ.get("BRIEFING_CYCLE", "").strip()
+    if env:
+        return datetime.strptime(env.rstrip("Zz")[:13], "%Y-%m-%dT%H")
+    t = (now or datetime.now(timezone.utc)).replace(tzinfo=None) - timedelta(hours=CYCLE_LAG_H)
+    return t.replace(hour=t.hour // 6 * 6, minute=0, second=0, microsecond=0)
+
+
 def day0(cfg) -> datetime:
-    """First briefing-day boundary: today's 12Z (naive UTC)."""
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
-    return now.replace(hour=12, minute=0, second=0, microsecond=0) - (timedelta(days=1) if now.hour < 12 else timedelta(0))
+    """The briefing's start: its cycle. Days still run 12Z – 12Z, so after a 18Z, 00Z or 06Z cycle
+    the first day is the rest of the current one (see first_day_hours)."""
+    return cycle_start()
+
+
+def day12(start: datetime) -> datetime:
+    """The 12Z that opens the 12Z – 12Z day containing `start`."""
+    return start.replace(hour=12, minute=0, second=0, microsecond=0) - (timedelta(days=1) if start.hour < 12 else timedelta(0))
+
+
+def first_day_hours(start: datetime) -> int:
+    """Hours from the start to the end of its 12Z – 12Z day: 24 for a 12Z start, 6 for 06Z."""
+    return int((day12(start) + timedelta(days=1) - start).total_seconds() // 3600)
+
+
+def day_bounds(lead0: int, ndays: int, h1: int) -> list[int]:
+    """Forecast hours of the day boundaries: the start, then each 12Z (ndays + 1 values)."""
+    return [lead0] + [lead0 + h1 + 24 * k for k in range(ndays)]
+
+
+def day_dates(start: datetime, n: int, tz) -> list:
+    """Local date of each 12Z – 12Z day, the first being the one containing the start."""
+    d0 = day12(start)
+    return [(d0 + timedelta(days=d)).replace(tzinfo=timezone.utc).astimezone(tz).date() for d in range(n)]
 
 
 # "Range request not honored": S3 occasionally answers a byte-range request with a redirect (HTTP
@@ -78,14 +113,17 @@ def _latest_run(spec, start: datetime):
         if run.hour not in cycles:
             continue
         lead0 = int((start - run).total_seconds() // 3600)
-        ndays = min(spec["range_days"], (spec["max_hours"] - lead0) // 24)
+        h1 = first_day_hours(start)
+        avail = spec["max_hours"] - lead0
+        ndays = 0 if avail < h1 else min(spec["range_days"], 1 + (avail - h1) // 24)
         if ndays < 1:
             continue
+        b = day_bounds(lead0, ndays, h1)
         # A cycle that's still being written can be listed before its files are readable, and a
         # fallback source can error outright (Herbie's Azure lookup raises KeyError 'href' for
         # runs it doesn't have). Either way, move on to the previous cycle instead of failing.
         try:
-            ok = all(_readable(spec, run, h) for h in (lead0 + 24 * ndays, lead0 + 24))
+            ok = all(_readable(spec, run, h) for h in (b[-1], b[1]))
         except Exception as e:
             log.info("%s %s: not usable yet (%s)", spec["label"], run.strftime("%HZ"), report.short(e))
             ok = False
@@ -543,11 +581,12 @@ def _point_series(entry, idx, grid):
     return {h: np.array([d[k, i, j] for i, j in idx], dtype="float64") for k, h in enumerate(entry["hours"])}
 
 
-def _daily_points(series, lead0, ndays, npts, reduce):
+def _daily_points(series, bounds, npts, reduce):
     """[point, day] reduction over each 12Z-12Z day (hours a < h <= b); NaN where none."""
+    ndays = len(bounds) - 1
     out = np.full((npts, ndays), np.nan)
     for d in range(ndays):
-        a, b = lead0 + 24 * d, lead0 + 24 * (d + 1)
+        a, b = bounds[d], bounds[d + 1]
         vals = [v for h, v in series.items() if a < h <= b]
         if vals:
             with np.errstate(all="ignore"):
@@ -565,7 +604,7 @@ def hdw_surface(t_f, rh, wind_mph):
     return es * (1 - np.asarray(rh) / 100) * np.asarray(wind_mph) / M_S_TO_MPH
 
 
-def fire_points(model_fields, lat, lon, idx, lead0, ndays):
+def fire_points(model_fields, lat, lon, idx, bounds):
     """Daily minimum humidity, maximum surface Hot-Dry-Windy Index and maximum near-surface smoke
     at each point, from the map fields (whatever hours the model has). Missing inputs give NaN."""
     grid = lat.shape if lat.ndim == 2 else (lat.size, lon.size)
@@ -575,10 +614,10 @@ def fire_points(model_fields, lat, lon, idx, lead0, ndays):
     u, v = _point_series(model_fields.get("u10"), idx, grid), _point_series(model_fields.get("v10"), idx, grid)
     smoke = _point_series(model_fields.get("smoke"), idx, grid)
     hdw = {h: hdw_surface(t[h], rh[h], np.hypot(u[h], v[h])) for h in rh if h in t and h in u and h in v}
-    nan = np.full((npts, ndays), np.nan)
-    return {"relative_humidity_2m_min": _daily_points(rh, lead0, ndays, npts, np.nanmin) if rh else nan,
-            "hdw_max": _daily_points(hdw, lead0, ndays, npts, np.nanmax) if hdw else nan,
-            "smoke_max": _daily_points(smoke, lead0, ndays, npts, np.nanmax) if smoke else nan}
+    nan = np.full((npts, len(bounds) - 1), np.nan)
+    return {"relative_humidity_2m_min": _daily_points(rh, bounds, npts, np.nanmin) if rh else nan,
+            "hdw_max": _daily_points(hdw, bounds, npts, np.nanmax) if hdw else nan,
+            "smoke_max": _daily_points(smoke, bounds, npts, np.nanmax) if smoke else nan}
 
 
 def nearest_index(lat, lon, points):
@@ -592,11 +631,12 @@ def nearest_index(lat, lon, points):
     return [tuple(int(i) for i in np.unravel_index(j, lat.shape)) for j in idx]
 
 
-def _daily_extreme(samples, lead0, ndays, idx, fn):
+def _daily_extreme(samples, bounds, idx, fn):
     """Per point, per day: fn over samples whose valid time falls inside that 12Z-12Z day."""
+    ndays = len(bounds) - 1
     out = np.full((len(idx), ndays), np.nan)
     for d in range(ndays):
-        a, b = lead0 + 24 * d, lead0 + 24 * (d + 1)
+        a, b = bounds[d], bounds[d + 1]
         fields = [samples[h] for h in samples if a < h <= b] if fn is np.nanmax else \
                  [samples[h] for h in samples if a <= h < b]
         if fields:
@@ -639,7 +679,7 @@ def fetch_model(spec, cfg, start, points):
             log.warning("%s: no usable run", spec["label"])
             report.fail(spec["label"], "no complete run found on any source in the last 48 h")
             return None
-        targets = [lead0 + 24 * d for d in range(ndays + 1)]
+        targets = day_bounds(lead0, ndays, first_day_hours(start))
         log.info("%s: %s run, %d days", spec["label"], run.strftime("%Y-%m-%d %HZ"), ndays)
 
         fam = spec["family"]
@@ -670,7 +710,7 @@ def fetch_model(spec, cfg, start, points):
             return la, lo, a, None
 
         lat, lon, cum_all, cum_f = accum("APCP" if fam == "ncep" else "tp")
-        cum = np.maximum(cum_all - cum_all[0], 0)  # from today's 12Z
+        cum = np.maximum(cum_all - cum_all[0], 0)  # from the briefing's start
         acc_fields = {}
         if cum_f is not None:
             acc_fields["apcp"] = {"hours": cum_f[0], "data": (np.maximum(cum_f[1] - cum_all[0], 0) / 25.4).astype("float32")}
@@ -723,13 +763,13 @@ def fetch_model(spec, cfg, start, points):
                    if snow is not None else np.full_like(daily_p, np.nan))
         def at_points(var, fallback):
             if ext_series.get(var):
-                d = extremes.daily(ext_series[var], lead0, ndays, "min" if var == "tmin" else "max")
+                d = extremes.daily(ext_series[var], targets, "min" if var == "tmin" else "max")
                 return np.array([d[:, i, j] for i, j in idx])
             return fallback()
         nan = lambda: np.full_like(daily_p, np.nan)
-        tmax = at_points("tmax", lambda: K_TO_F(_daily_extreme(t2m, lead0, ndays, idx, np.nanmax)) if t2m else nan())
-        tmin = at_points("tmin", lambda: K_TO_F(_daily_extreme(t2m, lead0, ndays, idx, np.nanmin)) if t2m else nan())
-        gmax = at_points("gust", lambda: _daily_extreme(gust, lead0, ndays, idx, np.nanmax) * M_S_TO_MPH if gust else nan())
+        tmax = at_points("tmax", lambda: K_TO_F(_daily_extreme(t2m, targets, idx, np.nanmax)) if t2m else nan())
+        tmin = at_points("tmin", lambda: K_TO_F(_daily_extreme(t2m, targets, idx, np.nanmin)) if t2m else nan())
+        gmax = at_points("gust", lambda: _daily_extreme(gust, targets, idx, np.nanmax) * M_S_TO_MPH if gust else nan())
 
         def wind_from_fields():
             # no interval wind maximum: the strongest of the map's 10 m wind samples (mph) that day
@@ -737,10 +777,10 @@ def fetch_model(spec, cfg, start, points):
             grid = lat.shape if lat.ndim == 2 else (lat.size, lon.size)
             if not w or w[0][2].shape != grid:
                 return nan()
-            d = extremes.daily(w, lead0, ndays, "max")
+            d = extremes.daily(w, targets, "max")
             return np.array([d[:, i, j] for i, j in idx])
         wmax = at_points("wind", wind_from_fields)
-        fire = fire_points(model_fields, lat, lon, idx, lead0, ndays)
+        fire = fire_points(model_fields, lat, lon, idx, targets)
         rain = np.clip(daily_p - np.nan_to_num(daily_s) / 10, 0, None)
 
         n = cfg["days"]
@@ -756,9 +796,9 @@ def fetch_model(spec, cfg, start, points):
                             "wind_speed_10m_max": pad(wmax[k]),
                             **{key: pad(v[k]) for key, v in fire.items()}}
                 for k, p in enumerate(points)}
-        dates = [(start + timedelta(days=d)).replace(tzinfo=timezone.utc).astimezone(tz).date() for d in range(n)]
+        dates = day_dates(start, n, tz)
         return {"id": spec["id"], "label": spec["label"], "source": "grib", "tier": spec.get("tier", "global"),
-                "run": run, "lead0": lead0, "range_days": ndays, "dates": dates, "data": data,
+                "run": run, "lead0": lead0, "range_days": ndays, "targets": targets, "dates": dates, "data": data,
                 "lat": lat, "lon": lon, "precip_mm": cum, "snow_in": snow, "snow_method": snow_method,
                 "fields": model_fields, "ext_series": ext_series, "ivt": ivt}
     except Exception as e:
@@ -780,7 +820,7 @@ def fetch_ensemble(spec, cfg, start, points):
             log.warning("%s: no usable run", spec["label"])
             report.fail(spec["label"], "no complete run found on any source in the last 48 h")
             return None
-        targets = [lead0 + 24 * d for d in range(ndays + 1)]
+        targets = day_bounds(lead0, ndays, first_day_hours(start))
 
         if spec["family"] == "ecmwf":
             # one file per step holds every member; cfgrib returns cf and pf as separate datasets
@@ -829,7 +869,7 @@ def fetch_ensemble(spec, cfg, start, points):
             check_plausible(spec["label"], np.stack(list(per.values())))
             daily_grid = np.diff(np.stack([r[2] for r in res]), axis=1) / 25.4   # [member, day, y, x]
             snow_grid = None
-        dates = [(start + timedelta(days=d)).replace(tzinfo=timezone.utc).astimezone(tz).date() for d in range(ndays)]
+        dates = day_dates(start, ndays, tz)
         n = next(iter(per.values())).shape[0]
         log.info("%s: %s run, %d members, %d days", spec["label"], run.strftime("%Y-%m-%d %HZ"), n, ndays)
         # full grids too, for exceedance odds at every location and on the map

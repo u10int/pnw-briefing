@@ -1,15 +1,18 @@
 #!/usr/bin/env bash
 # Assemble the published site in ./site from today's build and the existing gh-pages contents.
 #
-#   scripts/assemble_site.sh <build-dir> <date> [edition]   e.g. scripts/assemble_site.sh web/dist 2026-11-04 evening
+#   scripts/assemble_site.sh <build-dir> <date> <cycle> [mark]
+#   e.g. scripts/assemble_site.sh web/dist 2026-11-07 2026-11-07T18Z mark
 #
 # - Starts from the current gh-pages tree (if any), so the dated archive carries over.
-# - Replaces the latest page at the site root with today's build.
-# - Adds today's build to archive/<date>/, without the hourly fields (they're large; the
-#   latest page keeps them).
+# - Replaces the latest page at the site root with this build.
+# - Keeps one page per day in archive/<date>/ (without the hourly fields, which are large; the
+#   latest page keeps them): the day's 12Z edition, or the first edition of the day when there
+#   isn't one yet. Earlier days' archives feed the trends, verification and change views.
+# - With "mark", records the edition as archive/editions/<cycle>.json (its briefing.json), which
+#   the workflow's gate checks so each cycle runs once, and which the same cycle's edition the
+#   next day compares against. Edition files older than KEEP_EDITION_DAYS go.
 # - Prunes: archive pages older than 60 days; GeoTIFFs in archive pages older than 14 days.
-# - Records the edition (morning/evening) as archive/editions/<date>-<edition>, which the
-#   workflow's gate checks so each edition runs once a day; markers older than KEEP_DAYS go.
 # - Rebuilds archive/index.html.
 #
 # Publishing ./site as a single fresh commit (see publish_site.sh) keeps gh-pages history from
@@ -18,9 +21,11 @@ set -euo pipefail
 
 BUILD="${1:?build dir}"
 DATE="${2:?date YYYY-MM-DD}"
-EDITION="${3:-}"
+CYCLE="${3:-}"
+MARK="${4:-}"
 SITE="site"
 KEEP_DAYS=60
+KEEP_EDITION_DAYS=4
 KEEP_GRID_DAYS=14
 
 rm -rf "$SITE" && mkdir -p "$SITE"
@@ -37,27 +42,30 @@ fi
 find "$SITE" -mindepth 1 -maxdepth 1 ! -name archive -exec rm -rf {} +
 cp -r "$BUILD/." "$SITE/"
 
-# 3. today's archive copy, without hourly fields
-mkdir -p "$SITE/archive/$DATE"
-rm -rf "${SITE:?}/archive/$DATE/"*
-cp -r "$BUILD/." "$SITE/archive/$DATE/"
-rm -rf "$SITE/archive/$DATE/data/fields" "$SITE/archive/$DATE/data/fields.json"
+# 3. the day's archive copy, without hourly fields: the 12Z edition, or the first of the day
+if [[ "$CYCLE" == *T12Z ]] || [ ! -e "$SITE/archive/$DATE/data/briefing.json" ]; then
+  mkdir -p "$SITE/archive/$DATE"
+  rm -rf "${SITE:?}/archive/$DATE/"*
+  cp -r "$BUILD/." "$SITE/archive/$DATE/"
+  rm -rf "$SITE/archive/$DATE/data/fields" "$SITE/archive/$DATE/data/fields.json"
+  echo "archived as $DATE"
+fi
 
-# 4. edition marker
+# 4. edition record
 mkdir -p "$SITE/archive/editions"
-if [ -n "$EDITION" ]; then
-  date -u +%Y-%m-%dT%H:%M:%SZ > "$SITE/archive/editions/$DATE-$EDITION"
-  echo "marked the $EDITION edition of $DATE"
+if [ "$MARK" = mark ] && [ -n "$CYCLE" ]; then
+  cp "$BUILD/data/briefing.json" "$SITE/archive/editions/$CYCLE.json"
+  echo "recorded the $CYCLE edition"
 fi
 
 # 5. pruning
 cd "$SITE/archive"
-CUTOFF=$(date -u -d "$DATE - $KEEP_DAYS days" +%Y-%m-%d 2>/dev/null || echo "")
-if [ -n "$CUTOFF" ]; then
+ECUT=$(date -u -d "$DATE - $KEEP_EDITION_DAYS days" +%Y-%m-%d 2>/dev/null || echo "")
+if [ -n "$ECUT" ]; then
   for f in editions/*; do
     [ -e "$f" ] || continue
     b=$(basename "$f")
-    if [[ "${b:0:10}" < "$CUTOFF" ]]; then rm -f "$f"; fi
+    if [[ "${b:0:10}" < "$ECUT" ]]; then rm -f "$f"; fi
   done
 fi
 mapfile -t DAYS < <(ls -1d 20*/ 2>/dev/null | sed 's#/$##' | sort -r)

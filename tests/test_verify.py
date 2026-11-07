@@ -66,3 +66,19 @@ def test_urma_reuses_earlier_days(monkeypatch):
     out = urma.collect(cfg, [prev], now=datetime(2026, 11, 7, 21, tzinfo=timezone.utc), ndays=3, max_new=5)
     assert [d.isoformat() for d in fetched] == ["2026-11-06", "2026-11-04"]          # newest first, 11/5 reused
     assert out["dates"] == ["2026-11-04", "2026-11-05", "2026-11-06"] and out["tmax"]["A"] == [50.0, 55.0, 50.0]
+
+
+def test_partial_first_day_is_not_scored():
+    # an 18Z edition: its first day (11/4) is only the rest of the day, so it isn't scored
+    b = {"meta": {"firstDayHours": 18}, "dates": ["2026-11-04", "2026-11-05"], "models": [{"label": "GFS", "tier": "global",
+         "data": {"A": {"precipitation_sum": [0.1, 0.0]}, "B": {"precipitation_sum": [0.1, 0.0]}}}]}
+    v = verify.verify(NOW, [b])
+    s = v["models"][0]["scores"]
+    assert "d1" not in s and s["d23"]["n"] == 2
+
+
+def test_change_compares_whole_days_only():
+    from briefing.change import full_dates
+    assert full_dates({"meta": {"firstDayHours": 6}, "dates": ["2026-11-07", "2026-11-08"]}) == {"2026-11-08"}
+    assert full_dates({"meta": {"firstDayHours": 24}, "dates": ["2026-11-07", "2026-11-08"]}) == {"2026-11-07", "2026-11-08"}
+    assert full_dates({"dates": ["2026-11-07"]}) == {"2026-11-07"}

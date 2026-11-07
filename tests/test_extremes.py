@@ -57,7 +57,7 @@ def test_interval_records_catch_peaks_between_outputs():
 def test_daily_assignment_of_instantaneous_lows():
     # an instantaneous value exactly at 12Z belongs to the following day's low, as before
     entries = [(30, 30, _grid(20)), (24, 24, _grid(30))]
-    d = extremes.daily(entries, 6, 2, "min")
+    d = extremes.daily(entries, [6, 30, 54], "min")
     assert d[0, 0, 0] == 30 and d[1, 0, 0] == 20
 
 

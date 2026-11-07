@@ -2,15 +2,17 @@ name: Daily forecast briefing
 
 on:
   schedule:
-    # GitHub cron times are always UTC: 15:13 UTC = 7:13 AM PST / 8:13 AM PDT. The 12Z HRRR, RRFS, NAM and NBM runs
-    # are complete by then, alongside the 00Z globals and ensembles.
-    # GitHub runs schedules late or not at all when it's busy, so two backup times
-    # follow. Whichever runs first builds the briefing; the others see today's
-    # morning edition on gh-pages and stop. The evening edition comes from an
-    # external scheduler (workflow_dispatch with skip_if_published).
-    - cron: "13 15 * * *"
-    - cron: "13 16 * * *"
-    - cron: "43 17 * * *"
+    # Four editions a day, one per model cycle (00, 06, 12 and 18Z). GitHub cron times are UTC.
+    # The external scheduler starts each edition about 4.5 h after its cycle, once the
+    # high-resolution runs and the GFS are out:
+    #   00Z → 04:30 UTC   06Z → 10:30 UTC   12Z → 16:30 UTC   18Z → 22:30 UTC
+    # (8:30 PM, 2:30 AM, 8:30 AM and 2:30 PM PST; an hour later in PDT). These crons, an hour
+    # after that, are backups only: GitHub can start them hours late or skip them, and each one
+    # stops if its cycle's edition is already published.
+    - cron: "30 5 * * *"
+    - cron: "30 11 * * *"
+    - cron: "30 17 * * *"
+    - cron: "30 23 * * *"
   workflow_dispatch:
     inputs:
       demo:
@@ -22,13 +24,16 @@ on:
         type: boolean
         default: false
       skip_if_published:
-        description: "Skip if this edition (morning or evening) is already published today (for external schedulers)"
+        description: "Skip if this cycle's edition is already published (for external schedulers)"
         type: boolean
         default: false
+      cycle:
+        description: "Model cycle to build, e.g. 2026-11-07T18Z (auto: the latest 00/06/12/18Z at least 3 h old)"
+        type: string
+        default: auto
       edition:
-        description: "Which edition this run is (auto: morning before 2 PM Pacific, evening after)"
-        type: choice
-        options: [auto, morning, evening]
+        description: "Deprecated, ignored (editions now follow the model cycle)"
+        type: string
         default: auto
 
 permissions:
@@ -43,32 +48,29 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       run: ${{ steps.check.outputs.run }}
-      edition: ${{ steps.check.outputs.edition }}
+      cycle: ${{ steps.check.outputs.cycle }}
     steps:
       - id: check
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Two editions a day: morning (before 2 PM Pacific) and evening. Manual runs always go
-          # ahead. A scheduled run, or a dispatch with skip_if_published, stops if its edition is
-          # already out today: the morning edition once anything is archived for today, the
-          # evening edition once its marker (archive/editions/<date>-evening) is published.
-          TODAY=$(TZ=America/Los_Angeles date +%Y-%m-%d)
-          EDITION="${{ inputs.edition }}"
-          # the cron times are morning backups: GitHub can start them hours late, and one that lands
-          # after 2 PM must still count as the morning edition, not build the evening one early
-          if [ "${{ github.event_name }}" = "schedule" ]; then EDITION=morning; fi
-          if [ -z "$EDITION" ] || [ "$EDITION" = "auto" ]; then
-            [ "$(TZ=America/Los_Angeles date +%-H)" -lt 14 ] && EDITION=morning || EDITION=evening
+          # Four editions a day, one per model cycle. An edition is named for the latest
+          # 00/06/12/18Z at least 3 hours old, so a late start still builds the cycle it was meant
+          # for. Manual runs always go ahead; a scheduled run, or a dispatch with
+          # skip_if_published, stops if that cycle's edition (archive/editions/<cycle>.json) is out.
+          CYCLE="${{ inputs.cycle }}"
+          if [ -z "$CYCLE" ] || [ "$CYCLE" = "auto" ]; then
+            T=$(date -u -d '3 hours ago' +%s)
+            H=$(( 10#$(date -u -d "@$T" +%H) / 6 * 6 ))
+            CYCLE="$(date -u -d "@$T" +%Y-%m-%d)T$(printf %02d $H)Z"
           fi
-          echo "edition=$EDITION" >> "$GITHUB_OUTPUT"
-          if [ "$EDITION" = morning ]; then MARK="archive/${TODAY}"; else MARK="archive/editions/${TODAY}-evening"; fi
+          echo "cycle=$CYCLE" >> "$GITHUB_OUTPUT"
           if { [ "${{ github.event_name }}" = "schedule" ] || [ "${{ inputs.skip_if_published }}" = "true" ]; } &&
-             gh api "repos/${GITHUB_REPOSITORY}/contents/${MARK}?ref=gh-pages" --silent 2>/dev/null; then
-            echo "$EDITION briefing for $TODAY already published; skipping"
+             gh api "repos/${GITHUB_REPOSITORY}/contents/archive/editions/${CYCLE}.json?ref=gh-pages" --silent 2>/dev/null; then
+            echo "the $CYCLE edition is already published; skipping"
             echo "run=false" >> "$GITHUB_OUTPUT"
           else
-            echo "building the $EDITION briefing for $TODAY"
+            echo "building the $CYCLE edition"
             echo "run=true" >> "$GITHUB_OUTPUT"
           fi
   build:
@@ -104,26 +106,35 @@ jobs:
 
       - name: Get yesterday's briefing for the change view
         if: ${{ !inputs.page_only }}
+        env:
+          CYCLE: ${{ needs.gate.outputs.cycle }}
         run: |
-          # The newest archived briefing from an earlier day, so a second run on the same day
-          # (manual, or a late schedule) still compares with yesterday rather than with itself.
-          TODAY=$(TZ=America/Los_Angeles date +%Y-%m-%d)
+          # Yesterday's edition from the same cycle (so its first day is just as partial), or
+          # failing that the newest daily archive from an earlier day.
+          C="${CYCLE%Z}"
+          DATE=$(date -u -d "${C/T/ }:00 UTC - 12 hours" +%Y-%m-%d)
+          PREVC="$(date -u -d "${C/T/ }:00 UTC - 24 hours" +%Y-%m-%dT%H)Z"
           rm -f previous.json
           if git fetch --depth=1 origin gh-pages 2>/dev/null; then
-            PREV=$(git ls-tree --name-only origin/gh-pages archive/ 2>/dev/null | sed 's#^archive/##' \
-                   | grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' | awk -v t="$TODAY" '$0 < t' | sort | tail -1)
-            if [ -n "$PREV" ] && git show "origin/gh-pages:archive/$PREV/data/briefing.json" > previous.json 2>/dev/null; then
-              echo "comparing with the briefing from $PREV"
+            if git show "origin/gh-pages:archive/editions/$PREVC.json" > previous.json 2>/dev/null; then
+              echo "comparing with the $PREVC edition"
             else
-              rm -f previous.json
+              PREV=$(git ls-tree --name-only origin/gh-pages archive/ 2>/dev/null | sed 's#^archive/##' \
+                     | grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' | awk -v t="$DATE" '$0 < t' | sort | tail -1)
+              if [ -n "$PREV" ] && git show "origin/gh-pages:archive/$PREV/data/briefing.json" > previous.json 2>/dev/null; then
+                echo "comparing with the briefing from $PREV"
+              else
+                rm -f previous.json
+              fi
             fi
           fi
           ls -la previous.json 2>/dev/null || echo "no earlier briefing yet"
-          # the days before that too: the trends table's run-to-run sparklines and the model
-          # verification (each day's briefing scored against what fell)
+          # one briefing per earlier day (the daily archive keeps each day's 12Z edition): the
+          # trends table's run-to-run sparklines, the model verification and the analysed
+          # temperatures already fetched
           rm -rf history && mkdir -p history
           for D in $(git ls-tree --name-only origin/gh-pages archive/ 2>/dev/null | sed 's#^archive/##' \
-                     | grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' | awk -v t="$TODAY" '$0 < t' | sort | tail -14); do
+                     | grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' | awk -v t="$DATE" '$0 < t' | sort | tail -14); do
             git show "origin/gh-pages:archive/$D/data/briefing.json" > "history/$D.json" 2>/dev/null || rm -f "history/$D.json"
           done
           echo "$(ls history | wc -l) earlier briefings for the trend history"
@@ -141,11 +152,15 @@ jobs:
           # optional: lets a language model word the headline and lead (Settings → Secrets → Actions)
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
-          DATE=$(TZ=America/Los_Angeles date +%Y-%m-%d)
+          C="${{ needs.gate.outputs.cycle }}"; C="${C%Z}"
+          # the briefing's day: the 12Z – 12Z day its cycle falls in (an overnight 06Z edition
+          # belongs to the evening before)
+          DATE=$(date -u -d "${C/T/ }:00 UTC - 12 hours" +%Y-%m-%d)
           echo "DATE=$DATE" >> "$GITHUB_ENV"
+          echo "CYCLE=${{ needs.gate.outputs.cycle }}" >> "$GITHUB_ENV"
           export PYTHONUNBUFFERED=1
           PREV=""; [ -s previous.json ] && PREV="--previous previous.json"
-          python -m briefing.main --out web/public/data $PREV --history history ${{ inputs.demo && '--demo' || '' }}
+          python -m briefing.main --out web/public/data $PREV --history history --cycle "$CYCLE" ${{ inputs.demo && '--demo' || '' }}
 
       - name: Reuse the published briefing data (page-only rebuild)
         if: ${{ inputs.page_only }}
@@ -157,8 +172,9 @@ jobs:
           git fetch --depth=1 origin gh-pages
           rm -rf web/public/data && mkdir -p web/public
           git archive FETCH_HEAD data | tar -x -C web/public
-          DATE=$(python -m briefing.repage web/public/data/briefing.json)
+          read -r DATE CYCLE < <(python -m briefing.repage web/public/data/briefing.json)
           echo "DATE=$DATE" >> "$GITHUB_ENV"
+          echo "CYCLE=$CYCLE" >> "$GITHUB_ENV"
           echo "rebuilding the page for the briefing of $DATE"
 
       - name: Build the page (React + shadcn/ui)
@@ -172,7 +188,7 @@ jobs:
 
       - name: Assemble site (latest page, dated archive, pruning)
         # a page-only rebuild doesn't count as an edition
-        run: scripts/assemble_site.sh web/dist "$DATE" "${{ !inputs.page_only && needs.gate.outputs.edition || '' }}"
+        run: scripts/assemble_site.sh web/dist "$DATE" "$CYCLE" "${{ !inputs.page_only && 'mark' || '' }}"
 
       - name: Publish to gh-pages as a single commit
         env:

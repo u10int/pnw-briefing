@@ -28,6 +28,7 @@ function Overview({ data }: { data: Briefing }) {
       {s.lede && <p className="max-w-[68ch] text-base text-pretty text-muted-foreground">{s.lede}</p>}
       <div className="flex flex-wrap items-center gap-2">
         <RunStatus data={data} />
+        <EditionNote data={data} />
         {data.meta.demo && <Badge variant="possible">Demo data, rendered from synthetic fields</Badge>}
       </div>
     </div>
@@ -66,9 +67,25 @@ function LegacyHeadline({ data }: { data: Briefing }) {
       </p>
       <div className="flex flex-wrap items-center gap-2">
         <RunStatus data={data} />
+        <EditionNote data={data} />
         {data.meta.demo && <Badge variant="possible">Demo data, rendered from synthetic fields</Badge>}
       </div>
     </div>
+  )
+}
+
+/** Which model cycle this edition is built on, and, after a 18Z, 00Z or 06Z cycle, that the first
+ *  day's figures only cover the rest of that day. */
+function EditionNote({ data }: { data: Briefing }) {
+  const c = data.meta.cycle
+  if (!c) return null
+  const t = new Date(c)
+  const local = t.toLocaleTimeString("en-US", { timeZone: "America/Los_Angeles", hour: "numeric" })
+  const partial = (data.meta.firstDayHours ?? 24) < 24
+  return (
+    <span className="text-[13px] text-muted-foreground">
+      {String(t.getUTCHours()).padStart(2, "0")}Z update{partial && <> · the first day covers {local} onward</>}
+    </span>
   )
 }
 

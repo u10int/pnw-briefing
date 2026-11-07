@@ -15,6 +15,14 @@ from datetime import date
 import numpy as np
 
 
+def full_dates(doc) -> set:
+    """The dates a briefing covers whole: all but the first when it started after that day's 12Z
+    (an 18Z, 00Z or 06Z edition's first day is only the rest of the day)."""
+    ds = [str(d)[:10] for d in doc.get("dates") or []]
+    partial = (doc.get("meta") or {}).get("firstDayHours", 24) < 24
+    return set(ds[1:] if partial else ds)
+
+
 def _region_stats(doc, dates, regions, points):
     """Per-model region averages over `dates`, then the median across models; also per-point medians."""
     idx = {d: i for i, d in enumerate(doc["dates"])}
@@ -54,7 +62,8 @@ def compare(now: dict, prev: dict | None, windows: list[dict]):
         return {"prevIssued": prev.get("meta", {}).get("issued"), "windows": [], "events": _events(now, prev)}
     out_w = []
     for w in windows:
-        dates = [d for d in now["dates"][: w["days"]] if d in set(prev["dates"])]
+        both = full_dates(now) & full_dates(prev)        # like for like: whole days in both
+        dates = [d for d in now["dates"][: w["days"]] if str(d)[:10] in both]
         if not dates:
             continue
         a, b = _region_stats(now, dates, regions, points), _region_stats(prev, dates, regions, points)
