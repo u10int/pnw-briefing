@@ -103,7 +103,7 @@ export function TempDepartureCard({ data }: { data: Briefing }) {
         </div>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <Tabs value={String(w.days)} onValueChange={(x) => setWin(Number(x))}>
-            <TabsList>{td.windows.map((x) => <TabsTrigger key={x.days} value={String(x.days)}>{x.label}</TabsTrigger>)}</TabsList>
+            <TabsList>{td.windows.map((x) => <TabsTrigger key={x.days} value={String(x.days)}>{x.label.replace(/^Next /, "")}</TabsTrigger>)}</TabsList>
           </Tabs>
           {show === "dep" ? <RampStrip ramp={TDEP} range={[-20, 20]} unit="°" /> : <RampStrip ramp={TEMP} range={[20, 95]} unit="°" />}
         </div>

@@ -96,3 +96,37 @@ def test_alert_url_uses_the_location_page():
     assert alerts.alert_url(zs, {"Bellingham": page}, ["Bellingham"]) == page
     assert alerts.alert_url(zs) == "https://forecast.weather.gov/showsigwx.php?warnzone=WAZ303"
     assert alerts.alert_url([]) is None
+
+
+def test_afd_sections_parsed_in_order():
+    from briefing import outlooks
+    text = """000
+FXUS66 KSEW 071128
+AFD SEW
+
+.SYNOPSIS...A front brings rain
+tonight.
+
+&&
+
+.SHORT TERM /TONIGHT THROUGH MONDAY/...Rain spreads inland.
+Gusty south winds
+
+- Gusts to 45 mph
+- Coastal flood risk
+
+.AVIATION...MVFR.
+
+&&
+
+.SEW WATCHES/WARNINGS/ADVISORIES...
+WA...Wind Advisory for the coast.
+
+&&
+
+$$
+"""
+    s = outlooks._sections(text)
+    assert [x["title"] for x in s] == ["Synopsis", "Short term (tonight through Monday)", "Aviation", "Watches, warnings and advisories"]
+    assert s[0]["paragraphs"] == ["A front brings rain tonight."]
+    assert s[1]["paragraphs"] == ["Rain spreads inland. Gusty south winds", "- Gusts to 45 mph", "- Coastal flood risk"]

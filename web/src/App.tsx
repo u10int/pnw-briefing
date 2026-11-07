@@ -11,7 +11,7 @@ import { HazardStrip } from "@/sections/Hazards"
 import { NwsAlerts } from "@/sections/Alerts"
 import { TotalChanges } from "@/sections/Changes"
 import { ImpactBoard } from "@/sections/Impacts"
-import { ArCard, AvalancheCard, DiscussionsCard, ForecasterNotes, GradientsCard, LandslideCard, ObservedCard, OddsCard, OutlooksCard, SnowLevelCard, SnowpackCard } from "@/sections/Context"
+import { ArCard, AvalancheCard, ForecasterNotes, FullDiscussions, GradientsCard, LandslideCard, ObservedCard, OddsCard, OutlooksCard, SnowLevelCard, SnowpackCard } from "@/sections/Context"
 import { EnsembleTable, LocationPanel } from "@/sections/Location"
 import { onOpenLocation } from "@/lib/locationlink"
 import { extremeTabs, MapCard } from "@/sections/Maps"
@@ -298,7 +298,7 @@ export default function App() {
               description="The national excessive rainfall and extended outlooks, and the full forecast discussions from the Seattle and Portland offices.">
               {data.outlooks ? <>
                 <OutlooksCard data={data} />
-                <DiscussionsCard data={data} defaultFull />
+                <FullDiscussions data={data} />
               </> : <p className="text-muted-foreground">The outlooks and discussions weren't available for this briefing.</p>}
             </Section>
           </TabsContent>

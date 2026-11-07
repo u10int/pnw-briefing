@@ -246,6 +246,7 @@ export interface Snowpack {
 export interface Discussion {
   office: string; name: string; issued: string | null; url: string
   synopsis: string[] | null; keyMessages: string[] | null; hydrology: string[] | null
+  sections?: { title: string; paragraphs: string[] }[] | null     // the whole discussion; absent before it was added
 }
 export interface Outlooks {
   discussions: Discussion[]

@@ -333,7 +333,16 @@ def outlooks(cfg):
                       "weekend. A stronger atmospheric river may arrive early next week (demo)."],
          "keyMessages": ["Rain heaviest Saturday into Sunday on the coast and in the Olympics (demo).",
                          "Snow levels fall to pass level by Monday (demo)."],
-         "hydrology": ["Rivers stay below flood stage through Sunday; rises are possible next week (demo)."]},
+         "hydrology": ["Rivers stay below flood stage through Sunday; rises are possible next week (demo)."],
+         "sections": [
+             {"title": "Synopsis", "paragraphs": ["A series of Pacific systems brings periods of rain, high mountain snow and breezy winds through the weekend (demo)."]},
+             {"title": "Short term (tonight through Monday)", "paragraphs": [
+                 "A warm front lifts north tonight with steady rain on the coast and in the Olympics. The cold front follows Sunday (demo).",
+                 "- Gusts to 45 mph on the coast Sunday morning (demo)."]},
+             {"title": "Long term (Tuesday through Friday)", "paragraphs": ["Ensembles agree on a stronger atmospheric river midweek (demo)."]},
+             {"title": "Aviation", "paragraphs": ["MVFR ceilings with rain; gusty south winds Sunday (demo)."]},
+             {"title": "Hydrology", "paragraphs": ["Rivers stay below flood stage through Sunday; rises are possible next week (demo)."]},
+         ]},
         {"office": "PQR", "name": "NWS Portland", "issued": iso, "url": "https://forecast.weather.gov/product.php?site=PQR&issuedby=PQR&product=AFD",
          "synopsis": ["Light rain spreads inland this evening; an active pattern continues into next week (demo)."],
          "keyMessages": None, "hydrology": None},
