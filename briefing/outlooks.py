@@ -36,6 +36,35 @@ def _section(text, name):
     return [p for p in paras if p] or None
 
 
+def _sections(text):
+    """Every section of a discussion in order, as [{"title", "paragraphs"}]: ".SHORT TERM /TONIGHT
+    THROUGH MONDAY/..." becomes "Short term (tonight through Monday)". Paragraphs are reflowed;
+    lines that start a list item ("-", "*") stay on their own."""
+    out = []
+    for m in re.finditer(r"^\.([A-Z][A-Z /\-0-9]+?)\.\.\.(.*?)(?=^\.[A-Z][A-Z /\-0-9]+?\.\.\.|^&&|^\$\$|\Z)", text, re.M | re.S):
+        head, body = m.group(1).strip(), m.group(2)
+        if re.search(r"WATCHES/WARNINGS", head):
+            head = "WATCHES, WARNINGS AND ADVISORIES"      # ".SEW WATCHES/WARNINGS/ADVISORIES..."
+        name, _, when = head.partition(" /")             # ".SHORT TERM /TONIGHT THROUGH MONDAY/..."
+        when = re.sub(r"\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b", lambda d: d.group(1).capitalize(),
+                      when.strip(" /").lower())
+        title = name.strip().capitalize() + (f" ({when})" if when else "")
+        paras = []
+        for block in re.split(r"\n\s*\n", body.strip()):
+            lines = [l.strip() for l in block.splitlines() if l.strip()]
+            cur = []
+            for l in lines:
+                if re.match(r"^[-*]\s", l) and cur:
+                    paras.append(" ".join(cur)); cur = []
+                cur.append(l)
+            if cur:
+                paras.append(" ".join(cur))
+        paras = [p for p in paras if p]
+        if paras:
+            out.append({"title": title, "paragraphs": paras})
+    return out or None
+
+
 OFFICE_NAME = {"SEW": "NWS Seattle", "PQR": "NWS Portland", "OTX": "NWS Spokane", "PDT": "NWS Pendleton", "MFR": "NWS Medford"}
 
 
@@ -54,7 +83,7 @@ def discussions(cfg):
                         "issued": p.get("issuanceTime"),
                         "url": f"https://forecast.weather.gov/product.php?site={office}&issuedby={office}&product=AFD",
                         "synopsis": _section(text, "SYNOPSIS"), "keyMessages": _section(text, "KEY MESSAGES"),
-                        "hydrology": _section(text, "HYDROLOGY")})
+                        "hydrology": _section(text, "HYDROLOGY"), "sections": _sections(text)})
         except Exception as e:
             log.warning("AFD %s unavailable (%s)", office, report.short(e))
     return out

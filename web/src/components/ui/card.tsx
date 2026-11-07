@@ -1,12 +1,14 @@
 import * as React from "react"
 import { cn } from "@/lib/utils"
 
+// min-w-0: a card in a grid or flex row never grows past its track to fit one-line (truncated)
+// text, which would push the page wider than a phone screen
 function Card({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="card"
       className={cn(
-        "flex flex-col gap-(--card-gap) rounded-xl border bg-card py-(--card-pad) text-card-foreground shadow-sm [--card-gap:--spacing(5)] [--card-pad:--spacing(5)] sm:[--card-gap:--spacing(6)] sm:[--card-pad:--spacing(6)]",
+        "flex min-w-0 flex-col gap-(--card-gap) rounded-xl border bg-card py-(--card-pad) text-card-foreground shadow-sm [--card-gap:--spacing(5)] [--card-pad:--spacing(5)] sm:[--card-gap:--spacing(6)] sm:[--card-pad:--spacing(6)]",
         className
       )}
       {...props}

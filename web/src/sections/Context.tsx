@@ -1127,6 +1127,52 @@ export function ForecasterNotes({ data, onFull }: { data: Briefing; onFull: () =
   )
 }
 
+/** The full forecast discussions, one office at a time: every section in order (synopsis, short
+ *  and long term, aviation, marine, hydrology…) as readable paragraphs. Falls back to the summary
+ *  card for briefings that only kept the synopsis. */
+export function FullDiscussions({ data }: { data: Briefing }) {
+  const ds = data.outlooks?.discussions ?? []
+  const [office, setOffice] = React.useState(ds[0]?.office ?? "")
+  if (!ds.length) return null
+  if (!ds.some((d) => d.sections?.length)) return <DiscussionsCard data={data} defaultFull />
+  const d = ds.find((x) => x.office === office) ?? ds[0]
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Area forecast discussions</CardTitle>
+        <CardDescription full>The latest discussion from each NWS office, in full.</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <Tabs value={d.office} onValueChange={setOffice}>
+            <TabsList>{ds.map((x) => <TabsTrigger key={x.office} value={x.office}>{OFFICE_NAME[x.office] ?? x.name}</TabsTrigger>)}</TabsList>
+          </Tabs>
+          <a className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground" href={d.url} target="_blank" rel="noopener">
+            Issued {issuedAt(d.issued)} · on weather.gov
+          </a>
+        </div>
+        {d.sections?.length ? (
+          <article className="max-w-3xl space-y-6 text-[15px] leading-relaxed">
+            {d.sections.map((sec, i) => (
+              <section key={i}>
+                <h3 className="mb-2 text-sm font-semibold tracking-wide text-muted-foreground uppercase">{sec.title}</h3>
+                <div className="space-y-3">
+                  {sec.paragraphs.map((p, j) => {
+                    const item = /^[-*]\s/.test(p)
+                    return item
+                      ? <p key={j} className="relative pl-5 before:absolute before:left-1.5 before:text-muted-foreground before:content-['•']">{p.replace(/^[-*]\s+/, "")}</p>
+                      : <p key={j}>{p}</p>
+                  })}
+                </div>
+              </section>
+            ))}
+          </article>
+        ) : <p className="text-muted-foreground">The full text of this discussion wasn't kept; it's on weather.gov.</p>}
+      </CardContent>
+    </Card>
+  )
+}
+
 const ERO_COLORS = ["transparent", "#7cc47c", "#f6e05e", "#e9502e", "#d62fd6"]
 const CPC_BASE: Record<string, Record<string, string>> = {
   temperature: { Above: "#e4572e", Below: "#2b7bba" },
