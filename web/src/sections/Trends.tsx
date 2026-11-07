@@ -112,7 +112,7 @@ function Cell({ name, w, k, s, c, overlap, region, scale, rid, note, pct, hist }
           <div tabIndex={0} className="cursor-default outline-none focus-visible:underline">
             {/* the change in a fixed-width slot before the value, so values line up along the right */}
             <div className="flex items-baseline justify-end tabular-nums whitespace-nowrap">
-              <span className="w-12 shrink-0 pr-1 text-right"><Chg c={shown} k={k} /></span>
+              <span className="w-14 shrink-0 pr-2 text-right"><Chg c={shown} k={k} /></span>
               <span className={`${region ? "font-semibold" : "font-medium"} ${wide ? "underline decoration-muted-foreground/60 decoration-dotted underline-offset-4" : ""}`}>
                 {fmt(s.median, k)}
               </span>
