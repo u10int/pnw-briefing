@@ -37,13 +37,31 @@ function CardTitle({ className, ...props }: React.ComponentProps<"div">) {
   )
 }
 
-function CardDescription({ className, ...props }: React.ComponentProps<"div">) {
+/** A card's explanatory text, cut to its first line with a "More" toggle when it runs longer, so
+ *  the method notes are there when wanted without filling the page. `full` turns that off. */
+function CardDescription({ className, children, full = false, ...props }: React.ComponentProps<"div"> & { full?: boolean }) {
+  const ref = React.useRef<HTMLDivElement>(null)
+  const [open, setOpen] = React.useState(false)
+  const [long, setLong] = React.useState(false)
+  React.useLayoutEffect(() => {
+    const el = ref.current
+    if (!el || full) return
+    const check = () => { if (!open) setLong(el.scrollWidth > el.clientWidth + 1) }
+    check()
+    const ro = new ResizeObserver(check)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [full, open])
   return (
-    <div
-      data-slot="card-description"
-      className={cn("text-sm text-muted-foreground", className)}
-      {...props}
-    />
+    <div data-slot="card-description" className={cn("min-w-0 text-sm text-muted-foreground", className)} {...props}>
+      <div ref={ref} className={full || open ? "" : "min-w-0 truncate"}>{children}</div>
+      {!full && (long || open) && (
+        <button type="button" onClick={() => setOpen((x) => !x)} aria-expanded={open}
+          className="mt-0.5 text-xs font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline focus-visible:outline-2 focus-visible:outline-ring">
+          {open ? "Less" : "More about this"}
+        </button>
+      )}
+    </div>
   )
 }
 

@@ -970,11 +970,30 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
 
   React.useEffect(() => { if (!active) setPlaying(false) }, [active])
 
-  // an "Open on map" link from another tab sets the mode and layer
+  // an "Open on map" link from another tab sets the mode and layer, and can ask for a moment:
+  // the layer (or a fallback) from a model that reaches it, preferring the regional models
+  const pendingTime = React.useRef<number | null>(null)
+  const handled = React.useRef<number | null>(null)
+  const ready = byModel.size > 0
   React.useEffect(() => {
-    if (!request) return
+    if (!request || handled.current === request.nonce) return
+    // a request for a moment waits for the field list (the map may have only just mounted)
+    if (request.mode === "hourly" && request.time && !ready) return
+    handled.current = request.nonce
     setMode(request.mode)
-    if (request.mode === "hourly") {
+    if (request.mode === "hourly" && request.time) {
+      const t = Date.parse(request.time)
+      const covers = (e?: FieldEntry) => !!e?.times.length && Date.parse(e.times[0]) <= t && t <= Date.parse(e.times[e.times.length - 1])
+      for (const lid of [request.layer, ...(request.fallback ?? [])].filter(Boolean) as HLayer[]) {
+        const L = HLAYERS.find((l) => l.id === lid)
+        const ok = L ? [...byModel.entries()].filter(([, v]) => covers(L.primary(v.entries))) : []
+        if (!ok.length) continue
+        const named = [request.model, hModel].find((m) => ok.some(([n]) => n === m))
+        const pick = named ?? (ok.find(([, v]) => v.tier === "regional") ?? ok[0])[0]
+        setLayer(lid); setHModel(pick); pendingTime.current = t; setPlaying(false)
+        break
+      }
+    } else if (request.mode === "hourly") {
       if (request.layer) setLayer(request.layer as HLayer)
       if (request.model) setHModel(request.model)
     } else {
@@ -984,7 +1003,7 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
     }
     if (request.isobars != null) setIsobars(request.isobars)
     if (request.pairs != null) setShowPairs(request.pairs)
-  }, [request?.nonce])
+  }, [request?.nonce, ready])
 
   // ---- totals
   const varOf = (c: Cog): TotVar => c.var as TotVar
@@ -1015,12 +1034,15 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
   // accumulated layers count from the briefing start, 12Z on its first day
   const accStart = timeLabel(`${data.dates[0]}T12:00:00Z`)
 
-  // Keep the clock on one of the main model's steps when the model or layer changes.
+  // Keep the clock on one of the main model's steps when the model or layer changes (or on the
+  // step nearest a moment an "Open on map" link asked for).
   React.useEffect(() => {
     if (!times.length || clock.playing) return
     const ms = msOf(times)
-    clock.set(ms[Math.round(posOf(ms, clock.time ?? ms[0]))], false)
-  }, [times])
+    const want = pendingTime.current
+    if (want != null && want >= ms[0] && want <= ms[ms.length - 1]) pendingTime.current = null
+    clock.set(ms[Math.round(posOf(ms, want ?? clock.time ?? ms[0]))], false)
+  }, [times, request?.nonce])
 
   // Playback moves the clock continuously; the maps blend between forecast steps as it does.
   React.useEffect(() => {

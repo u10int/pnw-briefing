@@ -120,8 +120,20 @@ export default function App() {
       <header className="border-b bg-card">
         <div className="mx-auto flex max-w-[1320px] flex-wrap items-baseline justify-between gap-3 px-8 py-3.5 max-sm:px-4">
           <div className="font-semibold">
-            {meta.title}<span className="ml-2.5 font-normal text-muted-foreground max-sm:hidden">Western Washington and Northwest Oregon</span>
+            {meta.title}<span className="ml-2.5 font-normal text-muted-foreground max-2xl:hidden">Western Washington and Northwest Oregon</span>
           </div>
+          {/* the sections, reachable from the top of the page before scrolling to the tab bar */}
+          <nav aria-label="Sections" className="flex items-center gap-0.5 max-md:hidden">
+            {TABS.map((t) => {
+              const Icon = t.icon
+              return (
+                <button key={t.id} type="button" onClick={() => openTab(t.id)} title={t.label}
+                  className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-sm text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring">
+                  <Icon className="size-4" aria-hidden /><span className="max-lg:hidden">{t.label}</span>
+                </button>
+              )
+            })}
+          </nav>
           <div className="text-sm text-muted-foreground">Issued {issuedLabel(meta.issued)}</div>
         </div>
       </header>
