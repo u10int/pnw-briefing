@@ -171,3 +171,7 @@ export const PTYPE_COLORS: Record<string, string> = {
 /** AR scale colours, rank 0 (below the scale) to 5 (exceptional): the timeline, badges and the map's coastal outlook. */
 export const AR_COLORS = ["#9ca3af", "#4f9fd8", "#3fae6a", "#e9b625", "#f08a24", "#d9342b"]
 export const AR_LABELS = ["Below AR scale", "AR1 Weak", "AR2 Moderate", "AR3 Strong", "AR4 Extreme", "AR5 Exceptional"]
+
+/** Flood categories, 0 below action stage to 4 major (NWS hydrograph colours, softened to read on white). */
+export const FLOOD_COLORS = ["#9ca3af", "#e3b505", "#f08a24", "#d9342b", "#9b4dca"]
+export const FLOOD_LABELS = ["Below action", "Action stage", "Minor flood", "Moderate flood", "Major flood"]

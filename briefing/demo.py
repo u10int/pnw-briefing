@@ -382,3 +382,32 @@ def avalanche(cfg):
                       "bottomLine": "Fresh snow and strong winds have built reactive slabs near and above treeline. "
                                     "Avoid steep, wind-loaded slopes and give cornices a wide berth."})
     return {"center": "NWAC", "url": "https://nwac.us/avalanche-forecast/", "zones": zones, "inSeason": True, "until": None}
+
+
+def rivers(cfg):
+    """Synthetic river gauges for layout tests: one reaching moderate flood, one minor, one action
+    stage and a few quiet ones, each with three days observed and a week forecast."""
+    import math
+    start = _start(cfg).replace(tzinfo=timezone.utc)
+    spec = [("SQUW1", "Skykomish River near Gold Bar (demo)", 47.84, -121.69, {"action": 13, "minor": 15, "moderate": 17, "major": 19}, 9.0, 17.6),
+            ("MVEW1", "Skagit River near Mt Vernon (demo)", 48.445, -122.334, {"action": 23.5, "minor": 28, "moderate": 30, "major": 32}, 12.0, 28.9),
+            ("CGMW1", "Chehalis River near Grand Mound (demo)", 46.78, -123.03, {"action": 14, "minor": 16, "moderate": 17.5, "major": 19}, 9.5, 14.6),
+            ("CRNW1", "Snoqualmie River near Carnation (demo)", 47.66, -121.92, {"action": 50, "minor": 54, "moderate": 56, "major": 58}, 44.0, 49.0),
+            ("SALO3", "Willamette River at Salem (demo)", 44.94, -123.04, {"action": 25, "minor": 28, "moderate": 30, "major": 32}, 9.0, 13.5),
+            ("FSSO3", "Nehalem River near Foss (demo)", 45.70, -123.75, {"action": 14, "minor": 16, "moderate": 18, "major": 20}, 6.0, 12.0)]
+    out = []
+    for lid, name, lat, lon, cats, base, peak in spec:
+        obs = [[(start + timedelta(hours=h)).isoformat().replace("+00:00", "Z"), round(base + 0.3 * math.sin(h / 9), 2)] for h in range(-72, 1)]
+        fc = []
+        for h in range(0, 24 * 7 + 1, 6):
+            rise = (peak - base) * math.exp(-((h - 72) / 30) ** 2)
+            fc.append([(start + timedelta(hours=h)).isoformat().replace("+00:00", "Z"), round(base + rise, 2)])
+        crest = max(fc, key=lambda x: x[1])
+        from .rivers import category
+        out.append({"lid": lid, "name": name, "lat": lat, "lon": lon, "wfo": "SEW" if lat > 46 else "PQR", "state": "WA" if lat > 46 else "OR",
+                    "units": "ft", "categories": cats, "observed": obs, "forecast": fc, "issued": start.isoformat().replace("+00:00", "Z"),
+                    "now": {"stage": obs[-1][1], "time": obs[-1][0], "level": category(obs[-1][1], cats)},
+                    "crest": {"stage": crest[1], "time": crest[0], "level": category(crest[1], cats)},
+                    "record": {"stage": cats["major"] + 3, "time": "2021-11-16T12:00:00Z"}, "url": f"https://water.noaa.gov/gauges/{lid}"})
+    out.sort(key=lambda r: (-(r["crest"]["level"] or 0), r["name"]))
+    return {"source": "Demo river forecasts", "gauges": out}

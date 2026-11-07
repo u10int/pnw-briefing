@@ -21,9 +21,9 @@ import type { MapRequest } from "@/lib/maplink"
 import { GridLayer, type GridDraw } from "@/lib/gl/grid-layer"
 import { ParticleLayer, type WindDraw } from "@/lib/gl/particle-layer"
 import { type Grid, sameGrid } from "@/lib/gl/util"
-import { AR_COLORS, AR_LABELS, FRZ, GUST, IVT, legendBins, PCT, PGRAD, PRECIP, PROB, PTYPE_COLORS, PTYPE_NAMES, type Ramp, REFC, RH, SMOKE, SNOW, SPREAD, TDEP, TEMP, WIND } from "@/lib/ramps"
+import { AR_COLORS, AR_LABELS, FLOOD_COLORS, FLOOD_LABELS, FRZ, GUST, IVT, legendBins, PCT, PGRAD, PRECIP, PROB, PTYPE_COLORS, PTYPE_NAMES, type Ramp, REFC, RH, SMOKE, SNOW, SPREAD, TDEP, TEMP, WIND } from "@/lib/ramps"
 import { contrastTextColor } from "@/lib/contrast"
-import type { ArCoast, Briefing, Cog, ExtremeVar, FieldEntry, FieldsManifest, FieldVar, Gradient } from "@/types"
+import type { ArCoast, Briefing, Cog, ExtremeVar, RiverGauge, Rivers, FieldEntry, FieldsManifest, FieldVar, Gradient } from "@/types"
 import { ptDayHour } from "@/lib/format"
 import { openLocation } from "@/lib/locationlink"
 
@@ -333,8 +333,8 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
         "circle-stroke-color": "#fff", "circle-stroke-width": ["case", [">", ["get", "rank"], 0], 2, 1.2] } })
       const arFont = (m.getStyle().layers.find((l) => l.type === "symbol" && (l.layout as Record<string, unknown> | undefined)?.["text-font"])?.layout as Record<string, unknown> | undefined)?.["text-font"]
       if (m.getStyle().glyphs && Array.isArray(arFont))
-        m.addLayer({ id: "ar-rank", type: "symbol", source: "ar", filter: [">", ["get", "rank"], 0],
-          layout: { "text-field": ["to-string", ["get", "rank"]], "text-font": arFont as string[], "text-size": 11, "text-allow-overlap": true },
+        m.addLayer({ id: "ar-rank", type: "symbol", source: "ar", filter: ["!=", ["get", "num"], ""],
+          layout: { "text-field": ["get", "num"], "text-font": arFont as string[], "text-size": 11, "text-allow-overlap": true },
           paint: { "text-color": ["get", "text"] } })
       resolve(m)
     }))
@@ -511,7 +511,7 @@ const categoryAt = (g: Grid, a: Float32Array, b: Float32Array | null, t: number,
 
 // ------------------------------------------------------------------ totals mode
 
-type TotVar = "precip" | "snow" | "spread" | "pct" | ExtremeVar | "p24" | "p72" | "obs" | "obspct" | "tmaxdep" | "tmindep" | "ar"
+type TotVar = "precip" | "snow" | "spread" | "pct" | ExtremeVar | "p24" | "p72" | "obs" | "obspct" | "tmaxdep" | "tmindep" | "ar" | "rivers"
 type TotGroup = "Totals" | "Extremes" | "Vs normal" | "Odds" | "Observed" | "Outlooks"
 const GROUP_LABEL: Record<TotGroup, string> = {
   Totals: "Totals", Extremes: "Extremes over the window", "Vs normal": "Temperature vs normal", Odds: "Ensemble odds", Observed: "Already fallen (MRMS)",
@@ -533,6 +533,7 @@ const TOT_VARS: { id: TotVar; label: string; group: TotGroup; ramp: Ramp; perMod
   { id: "obspct", label: "Observed, % of normal", group: "Observed", ramp: { ...PCT, label: "Observed precipitation, percent of 1991 – 2020 normal" }, perModel: false, digits: 0, suffix: "% of normal" },
   { id: "tmaxdep", label: "High temp vs normal", group: "Vs normal", ramp: { ...TDEP, label: "Daily high, model-mean departure from 1991 – 2020 normal (window average)" }, perModel: false, digits: 1, suffix: "°F vs normal" },
   { id: "ar", label: "AR outlook (coast)", group: "Outlooks", ramp: { ...IVT, label: "AR scale rank" }, perModel: true, digits: 0 },
+  { id: "rivers", label: "River forecasts", group: "Outlooks", ramp: { ...IVT, label: "Flood category" }, perModel: false, digits: 0 },
   { id: "tmindep", label: "Low temp vs normal", group: "Vs normal", ramp: { ...TDEP, label: "Daily low, model-mean departure from 1991 – 2020 normal (window average)" }, perModel: false, digits: 1, suffix: "°F vs normal" },
 ]
 const MEAN = "Model mean"
@@ -587,7 +588,7 @@ function arView(ar: ArCoast, c: Cog | undefined, windowLabel: string): View | nu
     type: "FeatureCollection",
     features: ar.points.map((p) => {
       const r = rankOf(p.name)
-      return { type: "Feature", properties: { name: p.name, rank: r, color: AR_COLORS[r], text: contrastTextColor(AR_COLORS[r]) },
+      return { type: "Feature", properties: { name: p.name, rank: r, num: r ? String(r) : "", color: AR_COLORS[r], text: contrastTextColor(AR_COLORS[r]) },
                geometry: { type: "Point", coordinates: [p.lon, p.lat] } }
     }),
   } as FC
@@ -607,6 +608,54 @@ function arView(ar: ArCoast, c: Cog | undefined, windowLabel: string): View | nu
     grid: () => ({ key: "ar", t: 0, load: async () => ({ draw: null, bare: true, sample: () => null }) }),
     overlays: () => ({ key: `ar|${c.days}|${c.model}`, t: 0, load: async () => ({ ar: fc, sample }) }),
   }
+}
+
+/** River forecast gauges as pseudo-COG entries: one per window (the official forecasts run about a week). */
+function riverCogs(r: Rivers | null | undefined): Cog[] {
+  if (!r?.gauges.length) return []
+  return [2, 7].map((days) => ({ path: `rivers|${days}`, model: "NWRFC forecast", tier: "official", var: "rivers" as const, days, units: "ft" }))
+}
+
+/** Each forecast gauge coloured by the highest flood category its forecast reaches in the window. */
+function riverView(r: Rivers, c: Cog | undefined, windowLabel: string): View | null {
+  if (!c) return null
+  const end = Date.now() + c.days * 864e5
+  const peak = (g: RiverGauge) => g.forecast.filter(([t]) => Date.parse(t) <= end).reduce<[string, number] | null>((a, x) => (!a || x[1] > a[1] ? x : a), null)
+  const lvl = (g: RiverGauge, v: number) => (["action", "minor", "moderate", "major"] as const).reduce((k, n, i) => (g.categories[n] != null && v >= g.categories[n]! ? i + 1 : k), 0)
+  const rows = r.gauges.map((g) => { const p = peak(g); return { g, p, l: p ? lvl(g, p[1]) : 0 } })
+  const fc = { type: "FeatureCollection", features: rows.sort((a, b) => a.l - b.l).map(({ g, l }) => ({
+    type: "Feature", properties: { name: g.name, rank: l, num: "", color: FLOOD_COLORS[l], text: "#fff" },
+    geometry: { type: "Point", coordinates: [g.lon, g.lat] } })) } as FC
+  const sample = (lon: number, lat: number) => {
+    const k = Math.cos((47 * Math.PI) / 180)
+    let best: (typeof rows)[number] | null = null, bd = 0.012
+    for (const x of rows) { const d = (x.g.lat - lat) ** 2 + ((x.g.lon - lon) * k) ** 2; if (d < bd) { bd = d; best = x } }
+    if (!best) return null
+    const { g, p, l } = best
+    return `${g.name}: now ${g.now.stage?.toFixed(1) ?? "–"} ft; crest ${p ? `${p[1].toFixed(1)} ft ${ptDayHour(p[0])}` : "–"} (${FLOOD_LABELS[l].toLowerCase()})`
+  }
+  return {
+    key: `rivers|${c.days}`,
+    title: `River forecasts, ${windowLabel}`,
+    sub: () => "Northwest River Forecast Center",
+    grid: () => ({ key: "rivers", t: 0, load: async () => ({ draw: null, bare: true, sample: () => null }) }),
+    overlays: () => ({ key: `rivers|${c.days}`, t: 0, load: async () => ({ ar: fc, sample }) }),
+  }
+}
+
+function RiverLegend() {
+  return (
+    <div className="space-y-1.5">
+      <p className="text-xs text-muted-foreground">The highest flood category each gauge's official forecast reaches in the window; hover a gauge for its stage and crest</p>
+      <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs">
+        {FLOOD_LABELS.map((l, k) => (
+          <span key={l} className="flex items-center gap-1.5">
+            <span className={`rounded-full ring-2 ring-white ${k ? "size-3.5" : "size-2.5"}`} style={{ background: FLOOD_COLORS[k] }} />{l}
+          </span>
+        ))}
+      </div>
+    </div>
+  )
 }
 
 function ArLegend() {
@@ -1089,7 +1138,7 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
 
   // ---- totals
   const varOf = (c: Cog): TotVar => c.var as TotVar
-  const allCogs = React.useMemo(() => [...cogs, ...arCogs(data.arCoast)], [cogs, data.arCoast])
+  const allCogs = React.useMemo(() => [...cogs, ...arCogs(data.arCoast), ...riverCogs(data.rivers)], [cogs, data.arCoast, data.rivers])
   const totAvail = TOT_VARS.filter((v) => allCogs.some((c) => varOf(c) === v.id))
   const windows = [...new Set(allCogs.filter((c) => varOf(c) === variable).map((c) => c.days))].sort((a, b) => a - b)
   const d = windows.includes(days) ? days : windows[0]
@@ -1150,6 +1199,7 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
 
   const viewA = mode === "totals"
     ? variable === "ar" ? (data.arCoast ? arView(data.arCoast, pick(model), winLabel(d)) : null)
+    : variable === "rivers" ? (data.rivers ? riverView(data.rivers, pick(model), winLabel(d)) : null)
     : totalsView(pick(model), totRamp, winLabel(d), totDef.digits, totDef.suffix)
     : hA ? hourlyView(hA, byModel.get(hA)!.entries, layer, isobars, showPairs && pairList.length ? pairList : null) : null
   const showB = compare && (mode === "hourly" || perModel)
@@ -1258,7 +1308,7 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
           {showB && <MapPane data={data} view={viewB} clock={clock} opacity={opacity} smooth={smooth} particles={showParticles} particleColor={ink} sync={sync} terrain={terrain} />}
         </div>
 
-        {mode === "totals" ? (variable === "ar" ? <ArLegend /> : <RampLegend ramp={totRamp} every={totRamp.ticks ? 1 : totRamp.levels.length > 16 ? 2 : 1} />) : (
+        {mode === "totals" ? (variable === "ar" ? <ArLegend /> : variable === "rivers" ? <RiverLegend /> : <RampLegend ramp={totRamp} every={totRamp.ticks ? 1 : totRamp.levels.length > 16 ? 2 : 1} />) : (
           <div className="space-y-2">
             {layer === "radar" && <RadarLegend withRefc={!!entriesA.refc} />}
             {smooth && layer === "radar" && !entriesA.refc && <p className="text-xs text-muted-foreground">Precipitation type is a category, so it isn't smoothed.</p>}
@@ -1279,7 +1329,7 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
           </div>
         )}
 
-        {!(mode === "totals" && variable === "ar") && <p className="text-xs text-muted-foreground">
+        {!(mode === "totals" && (variable === "ar" || variable === "rivers")) && <p className="text-xs text-muted-foreground">
           Download as GeoTIFF:{" "}
           {mode === "totals"
             ? options.slice(0, 12).map((c, i) => (
