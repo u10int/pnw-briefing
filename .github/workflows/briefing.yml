@@ -134,6 +134,9 @@ jobs:
       - name: Fetch models and write briefing data
         if: ${{ !inputs.page_only }}
         shell: micromamba-shell {0}
+        env:
+          # optional: lets a language model word the headline and lead (Settings → Secrets → Actions)
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           DATE=$(TZ=America/Los_Angeles date +%Y-%m-%d)
           echo "DATE=$DATE" >> "$GITHUB_ENV"

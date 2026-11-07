@@ -205,6 +205,8 @@ export interface Briefing {
   trends?: { windows: TrendWindow[] }                  // the trends table above the tabs
   arCoast?: ArCoast | null                              // the coastal AR outlook (map layer); absent before it was added
   rivers?: Rivers | null                                // NWRFC river forecasts; absent before they were added
+  // the headline and lead, written at build time from the briefing's facts; absent before it was added
+  summary?: { headline: string; lede: string; source: "openai" | "rules"; model?: string } | null
   verification?: Verification | null                   // recent forecasts scored against MRMS; absent before it was added
   tempVerification?: TempVerification | null           // recent highs and lows scored against URMA; absent before it was added
   // each region's value over the last few briefings, on dates they all share (oldest run first)

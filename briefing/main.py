@@ -17,7 +17,7 @@ import numpy as np
 import yaml
 
 from . import (alerts, analysis, avalanche, change, cogs, context, extremes, fields, impacts, landslide,
-               maps, normals, observed, odds, outlooks, report, rivers, snowpack, tempdep, trends, urma, verify, wildfire)
+               maps, normals, observed, odds, outlooks, report, rivers, snowpack, summary, tempdep, trends, urma, verify, wildfire)
 from .grib import day0
 
 ROOT = Path(__file__).resolve().parent
@@ -275,6 +275,9 @@ def build(cfg: dict, out: Path, demo: bool = False, previous: Path | None = None
     data["observedTemps"] = clean(safe("analysed temperatures (URMA)", lambda: urma.collect(cfg, earlier, demo=demo)))
     if earlier and data["observedTemps"]:
         data["tempVerification"] = clean(safe("temperature verification", lambda: verify.verify_temps(data, earlier)))
+
+    # the headline and lead: facts from the data above, worded by a language model when a key is set
+    data["summary"] = clean(safe("overview", lambda: summary.overview(data, cfg, demo)))
 
     ok = [x["label"] for x in data["status"] if x["ok"]]
     missing = [x["label"] for x in data["status"] if not x["ok"]]
