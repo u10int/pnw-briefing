@@ -106,23 +106,23 @@ function AlertTimeline({ items, snap }: { items: Alert[]; snap: Alerts }) {
         const fits = (w / 100) * px >= (a0.length + a1.length) * 6.5 + 32     // both ends, else just the start
         const fitsOne = (w / 100) * px >= a0.length * 6.5 + 18
         return (
-          <div key={a.id} className="grid grid-cols-1 items-center gap-x-4 gap-y-1.5 border-t py-3 sm:grid-cols-[minmax(0,15rem)_1fr]">
+          <div key={a.id} className="grid grid-cols-1 items-center gap-x-4 gap-y-1 border-t py-2 sm:grid-cols-[minmax(0,15rem)_1fr]">
             <div className="min-w-0">
               <div className="flex items-center gap-2">
                 <span className="size-2.5 shrink-0 rounded-full ring-1 ring-black/15" style={{ background: c.bg }} aria-hidden />
-                <span className="text-sm font-medium">{a.event}</span>
+                <span className="text-sm leading-tight font-medium">{a.event}</span>
                 {a.url && (
                   <a href={a.url} target="_blank" rel="noopener" className="text-muted-foreground hover:text-foreground" aria-label={`Open ${a.event} on weather.gov`}>
                     <ExternalLink className="size-3.5" />
                   </a>
                 )}
               </div>
-              <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
+              <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
                 {a.points.join(", ")}
               </p>
-              <p className="mt-1 text-xs font-medium tabular-nums sm:hidden">{label}</p>
+              <p className="mt-0.5 text-xs font-medium tabular-nums sm:hidden">{label}</p>
             </div>
-            <div className="relative h-9">
+            <div className="relative h-8">
               {grid}
               <Tooltip>
                 <TooltipTrigger asChild>
