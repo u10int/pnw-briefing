@@ -1163,8 +1163,8 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
   const hB = layerModels.find((m) => m.model === hOther && m.model !== hA)?.model ?? layerModels.find((m) => m.model !== hA)?.model
   const primA = hA ? HLAYERS.find((l) => l.id === layer)!.primary(byModel.get(hA)!.entries) : undefined
   const times = React.useMemo(() => primA?.times ?? [], [primA])
-  // accumulated layers count from the briefing start, 12Z on its first day
-  const accStart = timeLabel(`${data.dates[0]}T12:00:00Z`)
+  // accumulated layers count from the briefing start: its model cycle (12Z on the first day for older briefings)
+  const accStart = timeLabel(data.meta.cycle ?? `${data.dates[0]}T12:00:00Z`)
 
   // Keep the clock on one of the main model's steps when the model or layer changes (or on the
   // step nearest a moment an "Open on map" link asked for).

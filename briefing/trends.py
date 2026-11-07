@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import numpy as np
 
+from .change import full_dates
+
 # key: daily series; agg: over the window; kinds: locations a region's value uses; combine: across them
 SPECS = {
     "precip": {"key": "precipitation_sum", "agg": "sum", "kinds": ("lowland", "coast", "pass"), "combine": "mean"},
@@ -96,7 +98,8 @@ def compare(now, prev, windows):
     now_doc = {**now, "points": prev_doc["points"]}
     out = []
     for w in windows:
-        dates = [d for d in now["dates"][: w["days"]] if d in set(prev["dates"])]
+        both = full_dates(now) & full_dates(prev)
+        dates = [d for d in now["dates"][: w["days"]] if str(d)[:10] in both]
         if not dates:
             continue
         a = _window(now_doc, [now["dates"].index(d) for d in dates], names)
@@ -126,10 +129,10 @@ def history(now, earlier, windows, min_share=0.5, max_runs=5):
     names = [p["name"] for p in now["points"]]
     out = []
     for w in windows:
-        dates = list(now["dates"][: w["days"]])
+        dates = [x for x in now["dates"][: w["days"]] if str(x)[:10] in full_dates(now)]
         used = []
         for d in docs[: max_runs - 1]:
-            common = [x for x in dates if x in set(d["dates"])]
+            common = [x for x in dates if str(x)[:10] in full_dates(d)]
             if len(common) < max(1, int(np.ceil(min_share * w["days"]))):
                 break
             dates, used = common, used + [d]

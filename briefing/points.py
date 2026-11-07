@@ -15,6 +15,7 @@ import pandas as pd
 import requests
 
 from . import report
+from .grib import day_dates, first_day_hours
 
 log = logging.getLogger(__name__)
 
@@ -50,8 +51,10 @@ def _first_working(url, params, ids):
 
 
 def _days(df, start, n):
-    """Bin an hourly frame (UTC index, values valid at end of hour) into 12Z-12Z days."""
-    edges = pd.date_range(start, periods=n + 1, freq="24h")
+    """Bin an hourly frame (UTC index, values valid at end of hour) into 12Z-12Z days, the first
+    running from the start to the next 12Z."""
+    h1 = first_day_hours(start)
+    edges = pd.DatetimeIndex([start] + [start + timedelta(hours=h1 + 24 * k) for k in range(n)])
     lab = pd.cut(df.index, edges, right=True, labels=False)
     return df.groupby(lab)
 
@@ -65,7 +68,7 @@ def fetch_deterministic(cfg, start):
     base = {"latitude": ",".join(str(p["lat"]) for p in pts),
             "longitude": ",".join(str(p["lon"]) for p in pts),
             "hourly": ",".join(HOURLY), "forecast_days": n + 2, **UNITS}
-    dates = [(start + timedelta(days=d)).replace(tzinfo=timezone.utc).astimezone(tz).date() for d in range(n)]
+    dates = day_dates(start, n, tz)
     out = []
     for m in sup.get("point_models", []):
         try:
@@ -113,7 +116,7 @@ def fetch_ensembles(cfg, start):
         return []
     pts, n = cfg["points"], cfg["days"]
     tz = ZoneInfo(cfg["timezone"])
-    dates = [(start + timedelta(days=d)).replace(tzinfo=timezone.utc).astimezone(tz).date() for d in range(n)]
+    dates = day_dates(start, n, tz)
     out = []
     for m in sup.get("ensemble_models", []):
         try:

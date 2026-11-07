@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 
 import numpy as np
 
-from .grib import day0, nearest_index
+from .grib import day0, day_bounds, day_dates, first_day_hours, nearest_index
 
 RNG = np.random.default_rng(7)
 # For faking "yesterday's" briefing: issued a day earlier, same weather on the same dates,
@@ -66,7 +66,7 @@ def grib(cfg):
     dom, n = cfg["domain"], cfg["days"]
     start = _start(cfg)
     tz = ZoneInfo(cfg["timezone"])
-    dates = [(start + timedelta(days=d)).replace(tzinfo=timezone.utc).astimezone(tz).date() for d in range(n)]
+    dates = day_dates(start, n, tz)
     out = []
     for spec in cfg["grib_models"]:
         nd = spec["range_days"] if spec["id"] != "ifs" else 9
@@ -74,6 +74,7 @@ def grib(cfg):
         terr = _terrain(la, lo)
         shp = _shape(n, RNG.normal(0, 0.5), RNG.uniform(0.85, 1.2))[:nd]
         daily = shp[:, None, None] * terr[None] * 25.4 * (1 + RNG.normal(0, 0.06, terr.shape))
+        daily[0] *= first_day_hours(start) / 24            # a later cycle's first day is only the rest of it
         cum = np.concatenate([np.zeros_like(daily[:1]), np.cumsum(np.clip(daily, 0, None), axis=0)])
         cold = np.clip((np.exp(-((lo + 121.45) / 0.28) ** 2) * (1.1 + 0.3 * np.sin(la * 3.1))
                         + np.exp(-(((lo + 123.6) / 0.25) ** 2 + ((la - 47.8) / 0.25) ** 2)) - 0.35) * 0.45, 0, None)
@@ -108,7 +109,8 @@ def grib(cfg):
         run = start - timedelta(hours=0 if spec.get("tier") != "global" else 12)
         lead0 = int((start - run).total_seconds() // 3600)
         out.append({"id": spec["id"], "label": spec["label"], "source": "grib", "tier": spec.get("tier", "global"),
-                    "run": run, "lead0": lead0, "range_days": nd, "dates": dates, "data": data,
+                    "run": run, "lead0": lead0, "range_days": nd, "targets": day_bounds(lead0, nd, first_day_hours(start)),
+                    "dates": dates, "data": data,
                     "lat": lat, "lon": lon, "precip_mm": cum, "snow_in": snow,
                     "snow_method": "model snowfall (ASNOW)" if spec["family"] == "ncep" else "snowfall water equivalent at 10:1",
                     "fields": _fields(spec, la, lo, lead0, nd, _outside(cfg, spec)),
@@ -264,7 +266,7 @@ def ensembles(cfg):
     n = cfg["days"]
     start = _start(cfg)
     tz = ZoneInfo(cfg["timezone"])
-    dates = [(start + timedelta(days=d)).replace(tzinfo=timezone.utc).astimezone(tz).date() for d in range(n)]
+    dates = day_dates(start, n, tz)
     oro = {"lowland": 1.0, "coast": 2.1, "pass": 2.5}
     specs = [(e["label"], 31 if e["id"] == "gefs" else 51) for e in cfg.get("grib_ensembles", [])]
     if cfg.get("supplement", {}).get("enabled"):

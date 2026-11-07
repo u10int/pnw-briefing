@@ -36,13 +36,15 @@ def _in_day(start, end, a, b, kind):
     return (a < end <= b) if kind == "max" else (a <= end < b)
 
 
-def daily(entries, lead0, ndays, kind):
-    """Per-day extreme [ndays, y, x] from (start, end, field) entries; NaN for days with none."""
+def daily(entries, bounds, kind):
+    """Per-day extreme [days, y, x] from (start, end, field) entries, for the days between the
+    forecast-hour `bounds` (grib.day_bounds); NaN for days with none."""
     reduce = np.nanmax if kind == "max" else np.nanmin
     shape = entries[0][2].shape
+    ndays = len(bounds) - 1
     out = np.full((ndays, *shape), np.nan, dtype="float32")
     for d in range(ndays):
-        a, b = lead0 + 24 * d, lead0 + 24 * (d + 1)
+        a, b = bounds[d], bounds[d + 1]
         day = [f for s0, e0, f in entries if _in_day(s0, e0, a, b, kind)]
         if day:
             with _quiet():
@@ -50,9 +52,9 @@ def daily(entries, lead0, ndays, kind):
     return out
 
 
-def _cumulative(entries, lead0, ndays, kind):
+def _cumulative(entries, bounds, kind):
     """Extreme over the first d days for d = 1..ndays."""
-    per_day = daily(entries, lead0, ndays, kind)
+    per_day = daily(entries, bounds, kind)
     pick = np.fmax if kind == "max" else np.fmin
     return pick.accumulate(per_day, axis=0).astype("float32")
 
@@ -81,10 +83,18 @@ class _quiet:
         return self._w.__exit__(*a)
 
 
-def compute(m) -> dict:
-    """Window extremes for one GRIB model, in display units (°F, mph)."""
+def _bounds(m):
+    """The model's day boundaries in forecast hours (whole days from lead0 for older dicts)."""
     lead0, nd = m.get("lead0"), int(m.get("range_days") or 0)
     if lead0 is None or nd <= 0:
+        return None
+    return m.get("targets") or [lead0 + 24 * d for d in range(nd + 1)]
+
+
+def compute(m) -> dict:
+    """Window extremes for one GRIB model, in display units (°F, mph)."""
+    bounds = _bounds(m)
+    if not bounds:
         return {}
     shape = analysis._ll2d(m["lat"], m["lon"])[0].shape
     series = {**_from_fields(m), **(m.get("ext_series") or {})}
@@ -92,7 +102,7 @@ def compute(m) -> dict:
     for var in VARS:
         entries = [e for e in series.get(var, []) if e[2].shape == shape]
         if entries:
-            out[var] = _cumulative(entries, lead0, nd, "min" if var == "tmin" else "max")
+            out[var] = _cumulative(entries, bounds, "min" if var == "tmin" else "max")
     missing = [k for k in VARS if k not in out]
     if missing:
         log.info("%s: no window extremes for %s", m["label"], ", ".join(missing))
@@ -101,8 +111,8 @@ def compute(m) -> dict:
 
 def daily_temps(m) -> dict:
     """Per-day high and low [days, y, x] (°F) on the model's grid, for departure from normal."""
-    lead0, nd = m.get("lead0"), int(m.get("range_days") or 0)
-    if lead0 is None or nd <= 0:
+    bounds = _bounds(m)
+    if not bounds:
         return {}
     shape = analysis._ll2d(m["lat"], m["lon"])[0].shape
     series = {**_from_fields(m), **(m.get("ext_series") or {})}
@@ -110,7 +120,7 @@ def daily_temps(m) -> dict:
     for var, kind in (("tmax", "max"), ("tmin", "min")):
         entries = [e for e in series.get(var, []) if e[2].shape == shape]
         if entries:
-            out[var] = daily(entries, lead0, nd, kind)
+            out[var] = daily(entries, bounds, kind)
     return out
 
 

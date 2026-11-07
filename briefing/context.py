@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 
 import numpy as np
 
-from .grib import nearest_index
+from .grib import day12, nearest_index
 
 log = logging.getLogger(__name__)
 
@@ -143,7 +143,7 @@ def ar_coast(grib_models, cfg, start, windows):
         return None
     out = []
     for w in windows:
-        t1 = t0 + timedelta(hours=24 * w["days"])
+        t1 = day12(t0) + timedelta(days=w["days"])           # windows end on a 12Z day boundary
         models = {}
         for label, tier, last, evs in per:
             if last < t1 - timedelta(hours=6):         # the model has to reach the window's end

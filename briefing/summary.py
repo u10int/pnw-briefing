@@ -315,7 +315,8 @@ def _sentence(it) -> str:
     if k == "nws alert":
         return f"{it['alert']} for {_area_phrase(it)} {it['when']}"
     if k == "atmospheric river":
-        return f"A {AR_WORD[int(it['strength'][2])]} atmospheric river reaches the coast {it['when']}"
+        w = AR_WORD[int(it['strength'][2])]
+        return f"{'An' if w[0] in 'aeiou' else 'A'} {w} atmospheric river reaches the coast {it['when']}"
     if k == "snow level reaches the passes":
         return f"Snow level dropping to pass level {it['when']}"
     if k == "temperatures vs normal":

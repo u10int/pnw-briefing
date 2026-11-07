@@ -155,14 +155,17 @@ def _demo_month(month, dom):
     return lat, lon, (_terrain(la, lo) * 175 * season).astype("float32")  # mm/month
 
 
-def summarize(models, cfg, cache: Path, demo: bool = False):
-    """Normals at points, region averages and percent of normal for each window."""
+def summarize(models, cfg, cache: Path, demo: bool = False, first: float = 1.0):
+    """Normals at points, region averages and percent of normal for each window. `first` is the
+    share of the first day the briefing covers (0.25 for a 06Z start), so its normal is scaled."""
     dates = models[0]["dates"]
     try:
         lat, lon, daily = daily_normals(dates, cfg, cache, demo)
     except Exception as e:
         log.warning("normals unavailable (%s); departure from normal is left out", e)
         return None, None
+    daily = daily.copy()
+    daily[0] *= first
     from .grib import nearest_index
     idx = nearest_index(lat, lon, cfg["points"])
     pts = {p["name"]: [float(daily[t, i, j]) for t in range(len(dates))] for p, (i, j) in zip(cfg["points"], idx)}

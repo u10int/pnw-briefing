@@ -18,7 +18,7 @@ import yaml
 
 from . import (alerts, analysis, avalanche, change, cogs, context, extremes, fields, impacts, landslide,
                maps, normals, observed, odds, outlooks, report, rivers, snowpack, summary, tempdep, trends, urma, verify, wildfire)
-from .grib import day0
+from .grib import day0, day12, first_day_hours
 
 ROOT = Path(__file__).resolve().parent
 log = logging.getLogger("briefing")
@@ -60,6 +60,7 @@ def clean(x):
 def collect(cfg: dict, out: Path, demo: bool = False, products: bool = True) -> dict:
     """Fetch, analyse and (when `products`) draw maps and write COGs. Returns the briefing dict."""
     start = day0(cfg)
+    h1 = first_day_hours(start)          # 24 for a 12Z edition; the rest of the day after 18Z, 00Z, 06Z
     if demo:
         from . import demo as src
         grib_models, grib_ens = src.grib(cfg), src.ensembles(cfg)
@@ -77,6 +78,15 @@ def collect(cfg: dict, out: Path, demo: bool = False, products: bool = True) -> 
         m["daily_temps"] = safe(f"{m['label']} daily temperatures", lambda m=m: extremes.daily_temps(m), {})
     models = model_order(grib_models + sup)
     ensembles = grib_ens + sup_ens
+    # After a 00Z or 06Z start (late afternoon or night in Pacific time) the first day's afternoon
+    # has passed, so its "high" would only be the evening's temperature: leave it out.
+    if h1 <= 12:
+        for m in models:
+            for series in (m.get("data") or {}).values():
+                if series.get("temperature_2m_max"):
+                    series["temperature_2m_max"] = [None] + list(series["temperature_2m_max"][1:])
+            if (m.get("daily_temps") or {}).get("tmax") is not None:
+                m["daily_temps"]["tmax"][0] = np.nan
     if not models:
         lines = [f"{k}: {v}" for k, v in report.REASONS.items()] or ["no source reported a reason"]
         report.annotate("error", "No model data arrived", "Every source failed. " + " | ".join(lines))
@@ -108,7 +118,7 @@ def collect(cfg: dict, out: Path, demo: bool = False, products: bool = True) -> 
 
     # ---- normals and departure from normal
     norm_cache = Path(cfg.get("cache_dir", ".cache")) / "prism"
-    norm, norm_grid = safe("normals", lambda: normals.summarize(models, cfg, norm_cache, demo), (None, None))
+    norm, norm_grid = safe("normals", lambda: normals.summarize(models, cfg, norm_cache, demo, first=h1 / 24), (None, None))
     tdep, tnorm_grid = safe("temperature departures", lambda: tempdep.summarize(models, cfg, norm_cache, demo), (None, None))
 
     # ---- forecast context: AR strength, pressure gradients, pass snow level, ensemble odds, and
@@ -118,7 +128,7 @@ def collect(cfg: dict, out: Path, demo: bool = False, products: bool = True) -> 
     grads = safe("pressure gradients", lambda: context.gradients(grib_models, cfg), [])
     snow_lvl = safe("pass snow level", lambda: context.snow_levels(grib_models, cfg))
     ens_odds = safe("ensemble odds", lambda: odds.point_odds(ensembles, cfg))
-    obs, obs_grids = (safe("observed precipitation", lambda: observed.summarize(cfg, start, norm_cache, demo), (None, None))
+    obs, obs_grids = (safe("observed precipitation", lambda: observed.summarize(cfg, day12(start), norm_cache, demo), (None, None))
                       if products else (None, None))
     slide = safe("landslide index", lambda: landslide.compute(models, obs, cfg, start)) if obs else None
 
@@ -180,6 +190,8 @@ def collect(cfg: dict, out: Path, demo: bool = False, products: bool = True) -> 
     nws_alerts = safe("NWS alerts", lambda: alerts.fetch(cfg, demo)) if products else None
     data = {
         "meta": {"title": cfg["title"], "issued": datetime.now(tz), "demo": demo, "days": cfg["days"],
+                 # the edition's model cycle, and how much of the first 12Z – 12Z day it covers
+                 "cycle": start.strftime("%Y-%m-%dT%H:00Z"), "firstDayHours": h1,
                  "minAgreement": cfg["impacts"]["min_agreement"],
                  "hasSupplement": any(m.get("source") == "open-meteo" for m in models),
                  "sources": {"ncep": [m["label"] for m in grib_models if m.get("family") == "ncep"],
@@ -235,6 +247,9 @@ def collect(cfg: dict, out: Path, demo: bool = False, products: bool = True) -> 
 
 def build(cfg: dict, out: Path, demo: bool = False, previous: Path | None = None, history: Path | None = None) -> Path:
     out.mkdir(parents=True, exist_ok=True)
+    if first_day_hours(day0(cfg)) < 24:
+        # after a 18Z, 00Z or 06Z cycle the first window is the rest of today and tomorrow
+        cfg = {**cfg, "windows": [{**w, "label": "Through tomorrow"} if w["days"] == 2 else w for w in cfg["windows"]]}
     data = collect(cfg, out, demo)
 
     # ---- change since the previous briefing
@@ -296,7 +311,11 @@ def main():
     ap.add_argument("--demo", action="store_true")
     ap.add_argument("--previous", type=Path, help="yesterday's briefing.json, for the change view")
     ap.add_argument("--history", type=Path, help="a folder of earlier days' briefing.json files, for the trend sparklines")
+    ap.add_argument("--cycle", help="the edition's model cycle, e.g. 2026-11-07T18Z (default: the latest 00/06/12/18Z at least 3 h old)")
     a = ap.parse_args()
+    if a.cycle:
+        import os
+        os.environ["BRIEFING_CYCLE"] = a.cycle
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     logging.getLogger("herbie").setLevel(logging.WARNING)
     cfg = yaml.safe_load(open(a.config))

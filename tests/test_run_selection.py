@@ -63,3 +63,16 @@ def test_range_redirect_is_retried():
         assert grib._retry(flaky) == "ok" and len(calls) == 2
     finally:
         _t.sleep = sleep
+
+
+def test_cycle_days():
+    # an 18Z edition: the first day is the 18 hours to 12Z, then whole days; dates are the 12Z days'
+    from zoneinfo import ZoneInfo
+    s = datetime(2026, 11, 7, 18)
+    assert grib.first_day_hours(s) == 18 and grib.first_day_hours(datetime(2026, 11, 7, 12)) == 24
+    assert grib.first_day_hours(datetime(2026, 11, 8, 6)) == 6
+    assert grib.day_bounds(6, 3, 18) == [6, 24, 48, 72]
+    tz = ZoneInfo("America/Los_Angeles")
+    assert [str(d) for d in grib.day_dates(datetime(2026, 11, 8, 6), 2, tz)] == ["2026-11-07", "2026-11-08"]
+    assert grib.cycle_start(datetime(2026, 11, 7, 21, 30)) == datetime(2026, 11, 7, 18)
+    assert grib.cycle_start(datetime(2026, 11, 7, 20, 30)) == datetime(2026, 11, 7, 12)

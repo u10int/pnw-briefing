@@ -4,7 +4,7 @@
 
 Re-applies the labels that come straight from config.yaml (the page title, pressure-gradient station names,
 codes, locations, meanings and thresholds), so a config tweak shows up without re-fetching anything, and
-prints the briefing's local date (YYYY-MM-DD) for the dated archive. Everything computed from
+prints the briefing's date (YYYY-MM-DD) and cycle (YYYY-MM-DDTHHZ, possibly empty) for the archive. Everything computed from
 model data stays as published.
 """
 from __future__ import annotations
@@ -36,8 +36,18 @@ def refresh(data: dict, cfg: dict) -> dict:
 
 
 def briefing_date(data: dict, cfg: dict) -> str:
+    """The briefing's day: its first 12Z – 12Z day (an overnight 06Z edition still belongs to the
+    evening before), or the local date it was issued for older briefings."""
+    if data.get("dates") and (data.get("meta") or {}).get("cycle"):
+        return str(data["dates"][0])[:10]
     issued = datetime.fromisoformat(data["meta"]["issued"])
     return issued.astimezone(ZoneInfo(cfg["timezone"])).date().isoformat()
+
+
+def briefing_cycle(data: dict) -> str:
+    """The edition's cycle as YYYY-MM-DDTHHZ ("" for briefings before editions followed cycles)."""
+    c = (data.get("meta") or {}).get("cycle") or ""
+    return f"{c[:13]}Z" if c else ""
 
 
 def main():
@@ -48,7 +58,7 @@ def main():
     cfg = yaml.safe_load(open(a.config))
     data = json.loads(a.briefing.read_text())
     a.briefing.write_text(json.dumps(refresh(data, cfg), separators=(",", ":")))
-    print(briefing_date(data, cfg))
+    print(briefing_date(data, cfg), briefing_cycle(data))
 
 
 if __name__ == "__main__":
