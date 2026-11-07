@@ -124,17 +124,21 @@ function WhereLabel({ data, pts, unit, muted }: { data: Briefing; pts: { name: s
   const areas = uniq(area), zones = uniq(zone)
   const regions = uniq((n) => byName.get(n)?.region ?? "")
   const regionName = regions.length === 1 && regions[0] ? data.regions.find((r) => r.id === regions[0])?.name : undefined
+  // across regions: their short names ("W WA & NW OR"), with a location outside them by its zone
+  const broad = uniq((n) => {
+    const id = byName.get(n)?.region
+    return id ? data.regions.find((r) => r.id === id)?.short ?? id : zone(n).replace(/^Southwest /, "SW ")   // matches "W WA", "NW OR"
+  })
   const place = pts.length === 1 ? pts[0].name
     : areas.length === 1 ? areas[0]
     : zones.length === 1 ? zones[0]
     : zones.length === 2 && (zones[0] + zones[1]).length <= 22 ? `${zones[0]} & ${zones[1]}`
-    : regionName ?? `${zones[0]} +${zones.length - 1} more`
+    : regionName ?? broad.join(" & ")
   const top = pts[0].peak
-  // the place gives way (truncates) before the count and the worst value do
+  // the place gives way (truncates) before the worst value does
   const text = (
     <span className={`flex min-w-0 items-baseline gap-1 ${muted ? "text-muted-foreground" : ""}`}>
       <span className="truncate">{place}</span>
-      {pts.length > 1 && <span className="shrink-0 text-muted-foreground tabular-nums">({pts.length})</span>}
       {top != null && unit && <span className="shrink-0 font-semibold tabular-nums">{short(top, unit)}</span>}
     </span>
   )
@@ -369,7 +373,7 @@ export function ImpactBoard({ data }: { data: Briefing }) {
             Share of models over the threshold each day; dashed line at {pct(minAg)}
           </span>
           {hasPrev && <span className="flex items-center gap-1.5"><span className="h-3 w-5 rounded-[3px] border border-dashed border-muted-foreground/60" />Yesterday's dates, or dropped</span>}
-          <span>Where: the area hit, number of locations and the worst value; hover for each location</span>
+          <span>Where: the area hit and its worst value; hover for each location</span>
         </div>
       </CardContent>
     </Card>
