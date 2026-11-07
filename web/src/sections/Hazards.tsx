@@ -100,6 +100,18 @@ function flood(d: Briefing): Summary {
       lead ??= `Atmospheric river at ${(split ?? best).point} ${when(split ?? best)}, models split on strength`
     }
   } else if (d.ar) lines.push({ icon: Waves, text: "No atmospheric river reaches the coast" })
+  // river forecasts (NWRFC): the worst forecast crest leads when it reaches minor flood or worse
+  const gs = d.rivers?.gauges ?? []
+  const worst = [...gs].filter((g) => (g.crest.level ?? 0) >= 1).sort((a, b) => (b.crest.level ?? 0) - (a.crest.level ?? 0) || a.crest.time.localeCompare(b.crest.time))
+  if (worst.length) {
+    const g = worst[0], lv = g.crest.level ?? 0
+    const more = worst.filter((x) => (x.crest.level ?? 0) >= 2).length - (lv >= 2 ? 1 : 0)
+    const word = ["", "action stage", "minor flood", "moderate flood", "major flood"][lv]
+    lines.unshift({ icon: Waves, text: `${g.name} forecast to crest at ${g.crest.stage.toFixed(1)} ft (${word}) ${day(g.crest.time)}${more > 0 ? `; ${more} more ${more === 1 ? "river reaches" : "rivers reach"} flood stage` : ""}` })
+    if (lv >= 3) tone = "alert"
+    else if (lv >= 2 && tone === "quiet") tone = "watch"
+    if (lv >= 2) lead = `${g.name.replace(/ (near|at|below|above) .*/, "")} forecast to reach ${word} ${day(g.crest.time)}`
+  } else if (gs.length) lines.push({ icon: Waves, text: `No river is forecast to reach action stage (${gs.length} gauges)` })
   const ls = d.landslide
   if (ls) {
     let best: { name: string; k: number; n: number; day: number } | null = null

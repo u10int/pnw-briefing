@@ -19,6 +19,7 @@ import { Headline, WindowCard } from "@/sections/Overview"
 import { TrendsCard } from "@/sections/Trends"
 import { ByLocation, GribAreaMeans, RegionTotals } from "@/sections/Totals"
 import { RainByDayCard } from "@/sections/RainByDay"
+import { RiversCard } from "@/sections/Rivers"
 import { TempDepartureCard } from "@/sections/TempDeparture"
 import { WildfireTab } from "@/sections/Wildfire"
 import { WindByDayCard } from "@/sections/WindByDay"
@@ -226,11 +227,12 @@ export default function App() {
 
           <TabsContent value="flood">
             <Section title="Flooding" first
-              description="What turns rain into a problem: how wet it has already been, how close that puts the Seattle area to the landslide threshold, whether an atmospheric river is coming, and how many ensemble members reach the heavy-rain thresholds."
+              description="What turns rain into a problem: the official river forecasts, how wet it has already been, how close that puts the Seattle area to the landslide threshold, whether an atmospheric river is coming, and how many ensemble members reach the heavy-rain thresholds."
               action={<div className="flex flex-wrap gap-2">
                 <MapLink req={{ mode: "totals", variable: "ar", days: 7 }} label="AR outlook on the map" />
                 <MapLink req={{ mode: "hourly", layer: "ivt", isobars: true }} label="Moisture transport (IVT) on the map" />
               </div>}>
+              <RiversCard data={data} />
               <ObservedCard data={data} />
               <LandslideCard data={data} />
               <ArCard data={data} />

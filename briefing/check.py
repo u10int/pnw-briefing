@@ -23,6 +23,7 @@ HOSTS = {
     "ECMWF open data mirror (Google)": "https://storage.googleapis.com/ecmwf-open-data/",
     "Open-Meteo": "https://api.open-meteo.com/v1/forecast?latitude=47.6&longitude=-122.3&hourly=precipitation&forecast_days=1",
     "NWS API": "https://api.weather.gov/",
+    "NOAA river forecasts (NWPS)": "https://api.water.noaa.gov/nwps/v1/gauges/MVEW1",
     "PRISM": "https://services.nacse.org/prism/data/public/normals/4km/ppt/01",
 }
 

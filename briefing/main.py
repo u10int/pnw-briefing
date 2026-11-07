@@ -17,7 +17,7 @@ import numpy as np
 import yaml
 
 from . import (alerts, analysis, avalanche, change, cogs, context, extremes, fields, impacts, landslide,
-               maps, normals, observed, odds, outlooks, report, snowpack, tempdep, trends, wildfire)
+               maps, normals, observed, odds, outlooks, report, rivers, snowpack, tempdep, trends, wildfire)
 from .grib import day0
 
 ROOT = Path(__file__).resolve().parent
@@ -225,6 +225,7 @@ def collect(cfg: dict, out: Path, demo: bool = False, products: bool = True) -> 
         "avalanche": safe("avalanche danger", lambda: avalanche.fetch(cfg, demo)) if products else None,
         "snowpack": safe("snowpack", lambda: snowpack.fetch(cfg, demo)) if products else None,
         "outlooks": safe("NWS discussions and outlooks", lambda: outlooks.fetch(cfg, demo)) if products else None,
+        "rivers": safe("river forecasts", lambda: rivers.fetch(cfg, demo)) if products else None,
     }
     data = clean(data)
     # window cards for the snow, wind and temperature tabs, from the cleaned per-point series
