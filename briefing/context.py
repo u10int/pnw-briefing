@@ -7,7 +7,7 @@ they cost no extra downloads: hourly for the regional models' first 48 hours, th
 from __future__ import annotations
 
 import logging
-from datetime import timedelta, timezone
+from datetime import datetime, timedelta, timezone
 
 import numpy as np
 
@@ -115,6 +115,58 @@ def ar_events(hours, ivt, step=6):
                         "hours": dur, "rank": rank})
             run = []
     return out
+
+
+def ar_coast(grib_models, cfg, start, windows):
+    """The AR outlook along the coast (cfg["ar_coast"]): for each window and location, each model's
+    AR scale rank (the strongest event that overlaps the window, 0 for none) and the median rank
+    of the models that cover the whole window, with their peak IVT."""
+    pts = cfg.get("ar_coast") or []
+    if not pts:
+        return None
+    t0 = start if start.tzinfo else start.replace(tzinfo=timezone.utc)
+    per = []                                          # (label, tier, last valid time, {point: [events]})
+    for m in grib_models:
+        ivt = m.get("ivt")
+        if not ivt:
+            continue
+        mag = np.hypot(ivt["u"], ivt["v"])
+        hours = ivt["hours"]
+        step = int(np.median(np.diff(hours))) if len(hours) > 1 else 6
+        times = [datetime.fromisoformat(t.replace("Z", "+00:00")) for t in _valid_times(m, hours)]
+        evs = {}
+        for p, (i, j) in zip(pts, nearest_index(ivt["lat"], ivt["lon"], pts)):
+            evs[p["name"]] = [{**e, "t0": times[hours.index(e["start"])], "t1": times[hours.index(e["end"])]}
+                              for e in ar_events(hours, mag[:, i, j], step)]
+        per.append((m["label"], m.get("tier"), times[-1], evs))
+    if not per:
+        return None
+    out = []
+    for w in windows:
+        t1 = t0 + timedelta(hours=24 * w["days"])
+        models = {}
+        for label, tier, last, evs in per:
+            if last < t1 - timedelta(hours=6):         # the model has to reach the window's end
+                continue
+            models[label] = {}
+            for name, es in evs.items():
+                inside = [e for e in es if e["t0"] < t1 and e["t1"] >= t0]
+                best = max(inside, key=lambda e: (e["rank"], e["peak"]), default=None)
+                models[label][name] = {"rank": best["rank"] if best else 0, "peak": best["peak"] if best else None,
+                                       "start": best["t0"].isoformat().replace("+00:00", "Z") if best else None}
+        if not models:
+            continue
+        median = {}
+        for p in pts:
+            rs = [v[p["name"]]["rank"] for v in models.values()]
+            pk = [v[p["name"]]["peak"] for v in models.values() if v[p["name"]]["peak"] is not None]
+            median[p["name"]] = {"rank": int(np.floor(np.median(rs) + 0.5)), "max": int(max(rs)),
+                                 "peak": int(np.median(pk)) if pk else None, "n": len(rs),
+                                 "atLeast1": sum(r >= 1 for r in rs)}
+        out.append({"days": w["days"], "label": w["label"], "models": models, "median": median})
+    log.info("AR coast outlook: %d models, %d coastal locations", len(per), len(pts))
+    return {"points": [{"name": p["name"], "lat": p["lat"], "lon": p["lon"]} for p in pts],
+            "names": AR_NAMES, "tiers": {label: tier for label, tier, _, _ in per}, "windows": out}
 
 
 def atmospheric_rivers(grib_models, cfg):

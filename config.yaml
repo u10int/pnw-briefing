@@ -65,6 +65,28 @@ regions:
       - [-123.97, 45.50]
       - [-123.96, 45.95]
 
+# Atmospheric-river outlook: where the AR scale rank is read along the outer coast, north to south,
+# a little offshore so every model's grid cell is over water. Each model's IVT here gives AR events
+# (Ralph et al. 2019 scale: peak IVT and duration); a window's rank is the strongest event in it.
+ar_coast:
+  - {name: Cape Scott,        lat: 50.70, lon: -128.20}
+  - {name: Brooks Peninsula,  lat: 50.10, lon: -127.95}
+  - {name: Nootka Sound,      lat: 49.55, lon: -126.95}
+  - {name: Tofino,            lat: 49.10, lon: -126.05}
+  - {name: Ucluelet,          lat: 48.85, lon: -125.65}
+  - {name: Port Renfrew,      lat: 48.50, lon: -124.65}
+  - {name: Cape Flattery,     lat: 48.30, lon: -124.90}
+  - {name: La Push,           lat: 47.90, lon: -124.75}
+  - {name: Taholah,           lat: 47.35, lon: -124.45}
+  - {name: Westport,          lat: 46.90, lon: -124.25}
+  - {name: Long Beach,        lat: 46.40, lon: -124.20}
+  - {name: Cannon Beach,      lat: 45.90, lon: -124.10}
+  - {name: Tillamook Bay,     lat: 45.50, lon: -124.10}
+  - {name: Lincoln City,      lat: 44.95, lon: -124.15}
+  - {name: Newport,           lat: 44.60, lon: -124.20}
+  - {name: Florence,          lat: 44.00, lon: -124.25}
+  - {name: Coos Bay,          lat: 43.35, lon: -124.45}
+
 # Forecast points. kind controls which impact thresholds apply. region assigns a point to a
 # comparison region; leave it out for a location that shouldn't count toward any region. area
 # names the part of the region it stands for and zone the wider area it belongs to; together they

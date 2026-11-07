@@ -21,8 +21,9 @@ import type { MapRequest } from "@/lib/maplink"
 import { GridLayer, type GridDraw } from "@/lib/gl/grid-layer"
 import { ParticleLayer, type WindDraw } from "@/lib/gl/particle-layer"
 import { type Grid, sameGrid } from "@/lib/gl/util"
-import { FRZ, GUST, IVT, legendBins, PCT, PGRAD, PRECIP, PROB, PTYPE_COLORS, PTYPE_NAMES, type Ramp, REFC, RH, SMOKE, SNOW, SPREAD, TDEP, TEMP, WIND } from "@/lib/ramps"
-import type { Briefing, Cog, ExtremeVar, FieldEntry, FieldsManifest, FieldVar, Gradient } from "@/types"
+import { AR_COLORS, AR_LABELS, FRZ, GUST, IVT, legendBins, PCT, PGRAD, PRECIP, PROB, PTYPE_COLORS, PTYPE_NAMES, type Ramp, REFC, RH, SMOKE, SNOW, SPREAD, TDEP, TEMP, WIND } from "@/lib/ramps"
+import { contrastTextColor } from "@/lib/contrast"
+import type { ArCoast, Briefing, Cog, ExtremeVar, FieldEntry, FieldsManifest, FieldVar, Gradient } from "@/types"
 import { ptDayHour } from "@/lib/format"
 import { openLocation } from "@/lib/locationlink"
 
@@ -146,9 +147,10 @@ type FC = GeoJSON.FeatureCollection
 interface Loaded {
   draw: GridDraw | null
   note?: string
+  bare?: boolean            // no grid on purpose (the AR outlook is markers only)
   sample: (lon: number, lat: number, t: number, smooth: boolean) => string | null
 }
-interface Overlays { isobars?: FC | null; centers?: FC | null; pairs?: FC | null; freezing?: FC | null; arrows?: FC | null; sample?: (lon: number, lat: number, smooth: boolean) => string | null }
+interface Overlays { isobars?: FC | null; centers?: FC | null; pairs?: FC | null; freezing?: FC | null; arrows?: FC | null; ar?: FC | null; sample?: (lon: number, lat: number, smooth: boolean) => string | null }
 /** One channel's choice for the current time: `key` identifies the data, `t` blends within it. */
 interface Choice<T> { key: string; t: number; load: () => Promise<T> }
 
@@ -324,6 +326,16 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
       m.addSource("points", { type: "geojson", data: { type: "FeatureCollection", features: data.points.map((p) => ({
         type: "Feature", properties: { name: p.name }, geometry: { type: "Point", coordinates: [p.lon, p.lat] } })) } })
       m.addLayer({ id: "points", type: "circle", source: "points", paint: { "circle-radius": 3.5, "circle-color": "#fff", "circle-stroke-color": "#1b1f24", "circle-stroke-width": 1.5 } })
+      // the coastal AR outlook: a marker per coastal location in its rank's colour, above everything
+      m.addSource("ar", { type: "geojson", data: EMPTY })
+      m.addLayer({ id: "ar", type: "circle", source: "ar", paint: {
+        "circle-radius": ["case", [">", ["get", "rank"], 0], 8.5, 4], "circle-color": ["get", "color"],
+        "circle-stroke-color": "#fff", "circle-stroke-width": ["case", [">", ["get", "rank"], 0], 2, 1.2] } })
+      const arFont = (m.getStyle().layers.find((l) => l.type === "symbol" && (l.layout as Record<string, unknown> | undefined)?.["text-font"])?.layout as Record<string, unknown> | undefined)?.["text-font"]
+      if (m.getStyle().glyphs && Array.isArray(arFont))
+        m.addLayer({ id: "ar-rank", type: "symbol", source: "ar", filter: [">", ["get", "rank"], 0],
+          layout: { "text-field": ["to-string", ["get", "rank"]], "text-font": arFont as string[], "text-size": 11, "text-allow-overlap": true },
+          paint: { "text-color": ["get", "text"] } })
       resolve(m)
     }))
     sync.add(m)
@@ -360,7 +372,7 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
         first = false
         loaded.current = { v, t }
         grid.setDraw(v?.draw ?? null, t)
-        setStatus(v?.draw ? { kind: "ready" } : { kind: "empty", note: v?.note })
+        setStatus(v?.draw || v?.bare ? { kind: "ready" } : { kind: "empty", note: v?.note })
       },
       (t) => { loaded.current.t = t; grid.setT(t) },
       () => { first = false; setStatus({ kind: "error" }) },
@@ -374,6 +386,7 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
           ;(m.getSource("pairs") as GeoJSONSource).setData(o?.pairs ?? EMPTY)
           ;(m.getSource("freezing") as GeoJSONSource).setData(o?.freezing ?? EMPTY)
           ;(m.getSource("arrows") as GeoJSONSource).setData(o?.arrows ?? EMPTY)
+          ;(m.getSource("ar") as GeoJSONSource | undefined)?.setData(o?.ar ?? EMPTY)
         })
       },
       () => {},
@@ -498,10 +511,11 @@ const categoryAt = (g: Grid, a: Float32Array, b: Float32Array | null, t: number,
 
 // ------------------------------------------------------------------ totals mode
 
-type TotVar = "precip" | "snow" | "spread" | "pct" | ExtremeVar | "p24" | "p72" | "obs" | "obspct" | "tmaxdep" | "tmindep"
-type TotGroup = "Totals" | "Extremes" | "Vs normal" | "Odds" | "Observed"
+type TotVar = "precip" | "snow" | "spread" | "pct" | ExtremeVar | "p24" | "p72" | "obs" | "obspct" | "tmaxdep" | "tmindep" | "ar"
+type TotGroup = "Totals" | "Extremes" | "Vs normal" | "Odds" | "Observed" | "Outlooks"
 const GROUP_LABEL: Record<TotGroup, string> = {
   Totals: "Totals", Extremes: "Extremes over the window", "Vs normal": "Temperature vs normal", Odds: "Ensemble odds", Observed: "Already fallen (MRMS)",
+  Outlooks: "Outlooks",
 }
 /** Window products: precipitation totals, extremes, ensemble odds and observed rainfall. `digits` for hover. */
 const TOT_VARS: { id: TotVar; label: string; group: TotGroup; ramp: Ramp; perModel: boolean; digits: number; suffix?: string }[] = [
@@ -518,6 +532,7 @@ const TOT_VARS: { id: TotVar; label: string; group: TotGroup; ramp: Ramp; perMod
   { id: "obs", label: "Observed precipitation", group: "Observed", ramp: { ...PRECIP, label: "Observed precipitation (MRMS)" }, perModel: false, digits: 2 },
   { id: "obspct", label: "Observed, % of normal", group: "Observed", ramp: { ...PCT, label: "Observed precipitation, percent of 1991 – 2020 normal" }, perModel: false, digits: 0, suffix: "% of normal" },
   { id: "tmaxdep", label: "High temp vs normal", group: "Vs normal", ramp: { ...TDEP, label: "Daily high, model-mean departure from 1991 – 2020 normal (window average)" }, perModel: false, digits: 1, suffix: "°F vs normal" },
+  { id: "ar", label: "AR outlook (coast)", group: "Outlooks", ramp: { ...IVT, label: "AR scale rank" }, perModel: true, digits: 0 },
   { id: "tmindep", label: "Low temp vs normal", group: "Vs normal", ramp: { ...TDEP, label: "Daily low, model-mean departure from 1991 – 2020 normal (window average)" }, perModel: false, digits: 1, suffix: "°F vs normal" },
 ]
 const MEAN = "Model mean"
@@ -548,6 +563,66 @@ function totalsView(c: Cog | undefined, ramp: Ramp, windowLabel: string, digits 
       },
     }),
   }
+}
+
+/** The coastal AR outlook as pseudo-COG entries (one per window and model, "Model mean" being the
+ *  median rank), so the variable, window and model pickers treat it like any other product. */
+function arCogs(ar: ArCoast | null | undefined): Cog[] {
+  if (!ar) return []
+  return ar.windows.flatMap((w) => [
+    { path: `ar|${w.days}|${MEAN}`, model: MEAN, tier: "consensus", var: "ar" as const, days: w.days, units: "", members: Object.keys(w.models) },
+    ...Object.keys(w.models).map((m) => ({ path: `ar|${w.days}|${m}`, model: m, tier: ar.tiers[m] ?? "global", var: "ar" as const, days: w.days, units: "" })),
+  ])
+}
+
+/** Markers along the coast in each location's AR rank colour: the median rank across the models
+ *  that reach the window's end, or one model's rank, with the peak IVT on hover. */
+function arView(ar: ArCoast, c: Cog | undefined, windowLabel: string): View | null {
+  const w = c && ar.windows.find((x) => x.days === c.days)
+  if (!c || !w) return null
+  const mean = c.model === MEAN
+  const rankOf = (name: string) => (mean ? w.median[name]?.rank : w.models[c.model]?.[name]?.rank) ?? 0
+  const peakOf = (name: string) => (mean ? w.median[name]?.peak : w.models[c.model]?.[name]?.peak) ?? null
+  const fc = {
+    type: "FeatureCollection",
+    features: ar.points.map((p) => {
+      const r = rankOf(p.name)
+      return { type: "Feature", properties: { name: p.name, rank: r, color: AR_COLORS[r], text: contrastTextColor(AR_COLORS[r]) },
+               geometry: { type: "Point", coordinates: [p.lon, p.lat] } }
+    }),
+  } as FC
+  const sample = (lon: number, lat: number) => {
+    const k = Math.cos((47 * Math.PI) / 180)
+    let best: (typeof ar.points)[number] | null = null, bd = 0.09
+    for (const p of ar.points) { const d = (p.lat - lat) ** 2 + ((p.lon - lon) * k) ** 2; if (d < bd) { bd = d; best = p } }
+    if (!best) return null
+    const r = rankOf(best.name), pk = peakOf(best.name)
+    const agree = mean && w.median[best.name] ? `, ${w.median[best.name].atLeast1} of ${w.median[best.name].n} models reach AR1+` : ""
+    return `${best.name}: ${AR_LABELS[r]}${pk ? ` (peak IVT ${pk})` : ""}${agree}`
+  }
+  return {
+    key: `ar|${c.days}|${c.model}`,
+    title: `${mean ? "Model median" : c.model}, ${windowLabel}`,
+    sub: () => (mean ? `Median AR rank of ${c.members?.length ?? 0} models` : "Strongest AR event in the window"),
+    grid: () => ({ key: "ar", t: 0, load: async () => ({ draw: null, bare: true, sample: () => null }) }),
+    overlays: () => ({ key: `ar|${c.days}|${c.model}`, t: 0, load: async () => ({ ar: fc, sample }) }),
+  }
+}
+
+function ArLegend() {
+  return (
+    <div className="space-y-1.5">
+      <p className="text-xs text-muted-foreground">AR scale rank at the coast: the strongest atmospheric-river event in the window (peak IVT and how long it lasts)</p>
+      <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs">
+        {AR_LABELS.map((l, r) => (
+          <span key={l} className="flex items-center gap-1.5">
+            <span className={`grid place-items-center rounded-full text-[10px] font-semibold ring-2 ring-white ${r ? "size-4" : "size-2.5"}`}
+              style={{ background: AR_COLORS[r], color: contrastTextColor(AR_COLORS[r]) }}>{r || ""}</span>{l}
+          </span>
+        ))}
+      </div>
+    </div>
+  )
 }
 
 // ------------------------------------------------------------------ hourly mode
@@ -1014,10 +1089,11 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
 
   // ---- totals
   const varOf = (c: Cog): TotVar => c.var as TotVar
-  const totAvail = TOT_VARS.filter((v) => cogs.some((c) => varOf(c) === v.id))
-  const windows = [...new Set(cogs.filter((c) => varOf(c) === variable).map((c) => c.days))].sort((a, b) => a - b)
+  const allCogs = React.useMemo(() => [...cogs, ...arCogs(data.arCoast)], [cogs, data.arCoast])
+  const totAvail = TOT_VARS.filter((v) => allCogs.some((c) => varOf(c) === v.id))
+  const windows = [...new Set(allCogs.filter((c) => varOf(c) === variable).map((c) => c.days))].sort((a, b) => a - b)
   const d = windows.includes(days) ? days : windows[0]
-  const options = cogs.filter((c) => varOf(c) === variable && c.days === d)
+  const options = allCogs.filter((c) => varOf(c) === variable && c.days === d)
   const pick = (name: string) => options.find((o) => o.model === name) ?? options.find((o) => o.model === MEAN) ?? options[0]
   // the compare pane never shows the same model as the main one
   const pickOther = (name: string) => {
@@ -1073,11 +1149,13 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
   }, [playing, times, mode])
 
   const viewA = mode === "totals"
-    ? totalsView(pick(model), totRamp, winLabel(d), totDef.digits, totDef.suffix)
+    ? variable === "ar" ? (data.arCoast ? arView(data.arCoast, pick(model), winLabel(d)) : null)
+    : totalsView(pick(model), totRamp, winLabel(d), totDef.digits, totDef.suffix)
     : hA ? hourlyView(hA, byModel.get(hA)!.entries, layer, isobars, showPairs && pairList.length ? pairList : null) : null
   const showB = compare && (mode === "hourly" || perModel)
   const viewB = !showB ? null : mode === "totals"
-    ? totalsView(pickOther(other), totRamp, winLabel(d), totDef.digits, totDef.suffix)
+    ? variable === "ar" ? (data.arCoast ? arView(data.arCoast, pickOther(other), winLabel(d)) : null)
+    : totalsView(pickOther(other), totRamp, winLabel(d), totDef.digits, totDef.suffix)
     : hB ? hourlyView(hB, byModel.get(hB)!.entries, layer, isobars, showPairs && pairList.length ? pairList : null) : null
 
   if (!cogs.length && !fields.length) return null
@@ -1113,7 +1191,7 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
               <Select value={variable} onValueChange={(v) => setVariable(v as TotVar)}>
                 <SelectTrigger className="w-full sm:w-[190px]" aria-label="Variable"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {(["Totals", "Extremes", "Vs normal", "Odds", "Observed"] as const).map((g) => [g, totAvail.filter((v) => v.group === g)] as const).filter(([, vs]) => vs.length).map(([g, vs]) => (
+                  {(["Totals", "Extremes", "Vs normal", "Odds", "Observed", "Outlooks"] as const).map((g) => [g, totAvail.filter((v) => v.group === g)] as const).filter(([, vs]) => vs.length).map(([g, vs]) => (
                     <SelectGroup key={g}>
                       <SelectLabel>{GROUP_LABEL[g]}</SelectLabel>
                       {vs.map((v) => <SelectItem key={v.id} value={v.id}>{v.label}</SelectItem>)}
@@ -1180,7 +1258,7 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
           {showB && <MapPane data={data} view={viewB} clock={clock} opacity={opacity} smooth={smooth} particles={showParticles} particleColor={ink} sync={sync} terrain={terrain} />}
         </div>
 
-        {mode === "totals" ? <RampLegend ramp={totRamp} every={totRamp.ticks ? 1 : totRamp.levels.length > 16 ? 2 : 1} /> : (
+        {mode === "totals" ? (variable === "ar" ? <ArLegend /> : <RampLegend ramp={totRamp} every={totRamp.ticks ? 1 : totRamp.levels.length > 16 ? 2 : 1} />) : (
           <div className="space-y-2">
             {layer === "radar" && <RadarLegend withRefc={!!entriesA.refc} />}
             {smooth && layer === "radar" && !entriesA.refc && <p className="text-xs text-muted-foreground">Precipitation type is a category, so it isn't smoothed.</p>}
@@ -1201,7 +1279,7 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
           </div>
         )}
 
-        <p className="text-xs text-muted-foreground">
+        {!(mode === "totals" && variable === "ar") && <p className="text-xs text-muted-foreground">
           Download as GeoTIFF:{" "}
           {mode === "totals"
             ? options.slice(0, 12).map((c, i) => (
@@ -1211,7 +1289,7 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
                 <React.Fragment key={e.path}>{i > 0 && ", "}<a className="underline underline-offset-2 hover:text-foreground" href={fieldUrl(e)} download>{hA} {e.var}</a></React.Fragment>
               ))}
           {mode === "hourly" && " (one band per forecast time)"}.
-        </p>
+        </p>}
       </CardContent>
     </Card>
   )
