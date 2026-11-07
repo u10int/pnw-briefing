@@ -9,16 +9,15 @@ import { issuedLabel } from "@/lib/format"
 import { type MapRequest, onOpenMap, openOnMap } from "@/lib/maplink"
 import { HazardStrip } from "@/sections/Hazards"
 import { NwsAlerts } from "@/sections/Alerts"
-import { TotalChanges } from "@/sections/Changes"
 import { ImpactBoard } from "@/sections/Impacts"
 import { ArCard, AvalancheCard, ForecasterNotes, FullDiscussions, GradientsCard, LandslideCard, ObservedCard, OddsCard, OutlooksCard, SnowLevelCard, SnowpackCard } from "@/sections/Context"
-import { EnsembleTable, LocationPanel } from "@/sections/Location"
+import { LocationPanel } from "@/sections/Location"
 import { onOpenLocation } from "@/lib/locationlink"
 import { extremeTabs, MapCard } from "@/sections/Maps"
-import { Headline, WindowCard } from "@/sections/Overview"
+import { Headline } from "@/sections/Overview"
 import { TrendsCard } from "@/sections/Trends"
 import { VerificationCard } from "@/sections/Verify"
-import { ByLocation, GribAreaMeans, RegionTotals } from "@/sections/Totals"
+import { ByLocation, RegionTotals } from "@/sections/Totals"
 import { RainByDayCard } from "@/sections/RainByDay"
 import { RiversCard } from "@/sections/Rivers"
 import { TempDepartureCard } from "@/sections/TempDeparture"
@@ -217,23 +216,17 @@ export default function App() {
 
           <TabsContent value="precip">
             <Section title="Precipitation" first
-              description="How much falls, when and where: each location and day, the regional and per-location totals for every model, and the model maps."
+              description="How much falls, when and where: region totals for each window, each location and day, every model's total at each location, the model maps, and how the models have been doing lately."
               action={<MapLink req={{ mode: "totals", variable: "precip", days: 7 }} label="Precipitation totals on the map" />}>
-              <div className="grid gap-4 md:grid-cols-3">
-                {data.windows.map((w) => <WindowCard key={w.days} w={w} data={data} />)}
-              </div>
-              <RainByDayCard data={data} />
-              <VerificationCard data={data} />
-              <TotalChanges data={data} />
               <RegionTotals data={data} />
+              <RainByDayCard data={data} />
               <ByLocation data={data} />
               <MapCard title="Precipitation maps" description="Each model on its own grid, then the mean and spread on a common grid."
                 tabs={[
                   { id: "p48", label: "Next 48 hours", src: data.maps.short, alt: "48-hour precipitation by model, with mean and spread", note: "Liquid equivalent. Spread is the highest minus the lowest model at each grid cell. Regional models next to the blend and the global models, over the same two 12Z – 12Z days." },
                   { id: "pl", label: `Through day ${meta.days}`, src: data.maps.long, alt: "Full-range precipitation by model", note: "Each panel is labeled with the number of days the model covers; mean and spread use only the days every model covers." },
                 ]} />
-              <GribAreaMeans data={data} />
-              <EnsembleTable data={data} />
+              <VerificationCard data={data} />
             </Section>
           </TabsContent>
 

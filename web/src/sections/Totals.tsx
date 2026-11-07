@@ -6,7 +6,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { blueCell, inch, median } from "@/lib/format"
-import type { Briefing, N, Tier } from "@/types"
+import type { Briefing, N, Tier, Window } from "@/types"
+import { Delta, PctNormal } from "@/components/Delta"
 import { contrastTextColor } from "@/lib/contrast"
 
 const REGION_VAR: Record<string, string> = { wwa: "var(--wwa)", nwor: "var(--nwor)" }
@@ -37,61 +38,153 @@ function ModelName({ label, tier, source }: { label: string; tier: Tier; source:
   )
 }
 
-/** Dumbbells: one row per model, one panel per window, W WA and NW OR joined by a line. */
+function RangeBar({ lo, hi, median, scale, color }: { lo: number; hi: number; median: number; scale: number; color: string }) {
+  const pct = (v: number) => `${Math.min(100, (100 * v) / scale)}%`
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <div className="relative mt-1.5 h-4 w-full cursor-default" aria-label={`Range ${lo.toFixed(1)} to ${hi.toFixed(1)} in`}>
+          <div className="absolute top-[7px] h-0.5 w-full rounded bg-border" />
+          <div className="absolute top-1 h-2 rounded-full opacity-30" style={{ left: pct(lo), width: `max(4px, ${pct(hi - lo)})`, background: color }} />
+          <div className="absolute top-0 h-4 w-[3px] -translate-x-1/2 rounded-sm" style={{ left: pct(median), background: color }} />
+        </div>
+      </TooltipTrigger>
+      <TooltipContent>
+        Models range {lo.toFixed(1)} – {hi.toFixed(1)} in; median {median.toFixed(1)} in
+      </TooltipContent>
+    </Tooltip>
+  )
+}
+
+/** One window's headline: each region's model median, the range across models, its share of
+ *  normal and the change since yesterday. */
+function WindowSummary({ w, data }: { w: Window; data: Briefing }) {
+  const norm = data.normals?.windows.find((x) => x.days === w.days)
+  const chg = data.change?.windows.find((x) => x.days === w.days)
+  return (
+    <div className="space-y-3">
+      {w.regions.map((r) => (
+        <div key={r.rid}>
+          <div className="flex items-baseline justify-between gap-3">
+            <span className="flex min-w-0 items-center gap-1.5 text-[13px] text-muted-foreground">
+              <span className="size-2.5 shrink-0 rounded-full" style={{ background: REGION_VAR[r.rid] }} />
+              <span className="truncate">{r.region}</span>
+            </span>
+            <span className="text-2xl font-semibold tracking-tight tabular-nums">
+              {r.median.toFixed(1)}<span className="ml-0.5 text-sm font-medium text-muted-foreground">in</span>
+            </span>
+          </div>
+          <RangeBar lo={r.lo} hi={r.hi} median={r.median} scale={w.scale} color={REGION_VAR[r.rid]} />
+          {(norm || chg) && (
+            <div className="mt-1 flex flex-wrap justify-between gap-x-3 text-xs">
+              <PctNormal pct={norm?.regions[r.rid]?.pct} />
+              {chg?.regions[r.rid] && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="cursor-default"><Delta value={chg.regions[r.rid].delta} /></span>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    Same {chg.overlapDays} days in yesterday's briefing: {chg.regions[r.rid].prev.toFixed(1)} in → {chg.regions[r.rid].now.toFixed(1)} in
+                  </TooltipContent>
+                </Tooltip>
+              )}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+type Panel = { t: Briefing["totals"][number]; w: Window | undefined; rows: { model: string; regions: Record<string, N> }[] }
+
+/** Region totals for every window in one place: the headline per window (median, model range,
+ *  share of normal, change since yesterday), then each model's total as a dumbbell, averaged
+ *  over the region's forecast locations. */
 export function RegionTotals({ data }: { data: Briefing }) {
-  const order = data.models.map((m) => m.label)
-  const tiers = Object.fromEntries(data.models.map((m) => [m.label, m]))
+  const [win, setWin] = React.useState(String(data.totals[Math.min(1, data.totals.length - 1)].days))
+  const info: Record<string, { tier: Tier; source: string }> = Object.fromEntries(data.models.map((m) => [m.label, { tier: m.tier, source: m.source }]))
+  const panels: Panel[] = data.totals.map((t) => ({
+    t, w: data.windows.find((w) => w.days === t.days),
+    rows: t.rows.map((r) => ({ model: r.model, regions: r.regions })),
+  }))
+  const order = data.models.map((m) => m.label).filter((m) => panels.some((p) => p.rows.some((r) => r.model === m)))
   const ROW = 30
+  const chg = data.change?.windows[0]
+  const labels = (
+    <div>
+      {order.map((m) => (
+        <div key={m} className="flex items-center text-[13px]" style={{ height: ROW }}>
+          <ModelName label={m} tier={info[m]?.tier ?? "global"} source={info[m]?.source ?? "grib"} />
+        </div>
+      ))}
+    </div>
+  )
+  const byModel = (
+    <p className="text-[13px] font-medium">
+      By model <span className="font-normal text-muted-foreground">· average of the region's forecast locations</span>
+    </p>
+  )
+  const sel = panels.find((p) => String(p.t.days) === win) ?? panels[0]
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Region totals for each window</CardTitle>
+        <CardTitle>Region totals</CardTitle>
         <CardDescription>
-          Average of the forecast locations in each region. A model appears only in windows it fully covers.
+          The median across models for each region and window, with the range across models, the share of normal and the change since yesterday; below, each model's own total.
         </CardDescription>
-        <CardAction className="flex flex-wrap gap-4 text-sm text-muted-foreground">
-          {data.regions.map((r) => (
-            <span key={r.id} className="inline-flex items-center gap-1.5">
-              <span className="size-2.5 rounded-full" style={{ background: REGION_VAR[r.id] }} />{r.name}
-            </span>
-          ))}
-        </CardAction>
       </CardHeader>
-      <CardContent className="overflow-x-auto">
-        <div className="grid min-w-[880px] grid-cols-[180px_repeat(3,minmax(0,1fr))] gap-x-6">
+      <CardContent>
+        {/* wide: every window side by side */}
+        <div className="grid grid-cols-[170px_repeat(3,minmax(0,1fr))] gap-x-6 max-md:hidden">
           <div />
-          {data.totals.map((t) => <div key={t.days} className="pb-2 text-sm font-medium">{t.label}</div>)}
-          <div>
-            {order.map((m) => (
-              <div key={m} className="flex items-center text-[13px]" style={{ height: ROW }}>
-                <ModelName label={m} tier={tiers[m].tier} source={tiers[m].source} />
-              </div>
-            ))}
-          </div>
-          {data.totals.map((t) => (
-            <DumbbellPanel key={t.days} t={t} order={order} regions={data.regions} row={ROW} />
+          {panels.map(({ t, w }) => (
+            <div key={t.days} className="flex items-baseline justify-between gap-2 border-b pb-2">
+              <span className="text-sm font-semibold">{t.label}</span>
+              <span className="text-xs text-muted-foreground">{w?.regions[0]?.n ?? 0} models</span>
+            </div>
           ))}
+          <div />
+          {panels.map(({ t, w }) => <div key={t.days} className="pt-3">{w && <WindowSummary w={w} data={data} />}</div>)}
+          <div className="col-span-full mt-5 mb-2">{byModel}</div>
+          {labels}
+          {panels.map((p) => <DumbbellPanel key={p.t.days} rows={p.rows} order={order} regions={data.regions} row={ROW} label={p.t.label} />)}
         </div>
-        {data.meta.hasSupplement && (
-          <p className="mt-3 text-xs text-muted-foreground">* from Open-Meteo; all other models are read from GRIB.</p>
-        )}
+        {/* narrow: one window at a time */}
+        <div className="space-y-4 md:hidden">
+          <Tabs value={win} onValueChange={setWin}>
+            <TabsList>{panels.map(({ t }) => <TabsTrigger key={t.days} value={String(t.days)}>{t.label.replace("Next ", "")}</TabsTrigger>)}</TabsList>
+          </Tabs>
+          {sel.w && <WindowSummary w={sel.w} data={data} />}
+          {byModel}
+          <div className="grid grid-cols-[150px_minmax(0,1fr)] gap-x-3">
+            {labels}
+            <DumbbellPanel rows={sel.rows} order={order} regions={data.regions} row={ROW} label={sel.t.label} />
+          </div>
+        </div>
+        <p className="mt-4 text-xs text-muted-foreground">
+          Range bars span the models, with the median marked.
+          {chg && <> Changes compare the same days in yesterday's briefing.</>}
+          {data.meta.hasSupplement && <> * from Open-Meteo; all other models are read from GRIB.</>}
+          {" "}A model appears only in windows it fully covers.
+        </p>
       </CardContent>
     </Card>
   )
 }
 
-function DumbbellPanel({ t, order, regions, row: ROW }: {
-  t: Briefing["totals"][number]; order: string[]; regions: Briefing["regions"]; row: number
+function DumbbellPanel({ rows: list, order, regions, row: ROW, label }: {
+  rows: Panel["rows"]; order: string[]; regions: Briefing["regions"]; row: number; label: string
 }) {
   const [ref, W] = useWidth<HTMLDivElement>()
   const PAD = 8
-  const rows = Object.fromEntries(t.rows.map((r) => [r.model, r]))
-  const vmax = niceMax(Math.max(0.1, ...t.rows.flatMap((r) => Object.values(r.regions).map((v) => v ?? 0))))
+  const rows = Object.fromEntries(list.map((r) => [r.model, r]))
+  const vmax = niceMax(Math.max(0.1, ...list.flatMap((r) => Object.values(r.regions).map((v) => v ?? 0))))
   const x = (v: number) => PAD + ((W - 2 * PAD) * v) / vmax
   const H = order.length * ROW
   return (
     <div ref={ref} className="min-w-0">
-      <svg width={W} height={H + 22} className="block overflow-visible" role="img" aria-label={`${t.label} totals by model`}>
+      <svg width={W} height={H + 22} className="block overflow-visible" role="img" aria-label={`${label} totals by model`}>
         {[0, vmax / 2, vmax].map((tk) => (
           <g key={tk}>
             <line x1={x(tk)} x2={x(tk)} y1={0} y2={H} stroke="var(--border)" />
@@ -142,6 +235,8 @@ export function ByLocation({ data }: { data: Briefing }) {
   const max = Math.max(0.1, ...vals) * 0.95
   const meds = pts.map((p) => median(t.rows.map((r) => r.points[p])))
   const models = Object.fromEntries(data.models.map((m) => [m.label, m]))
+  const ens = data.ensembles.filter((e) => e.dates.length >= t.days)
+  const ensPts = pts.filter((p) => ens.some((e) => e.points[p]))
   const cell = (v: N, p: string) => {
     const x = value(v, p)
     return { style: showPct ? pctCell(x) : blueCell(x, max), text: x == null ? "–" : showPct ? `${Math.round(x)}` : inch(x) }
@@ -153,6 +248,7 @@ export function ByLocation({ data }: { data: Briefing }) {
         <CardDescription>
           {showPct ? "Each model's total as a percent of the 1991 – 2020 normal for the same days." : "Totals in inches."} The
           Median row is the median across models{chg ? "; the row below it is the change in that median since yesterday" : ""}.
+          {ens.length > 0 && <> Hover an ensemble median for the 10th – 90th percentile range{ensPts.length < pts.length ? ` (ensembles are computed for ${ensPts.join(", ")})` : ""}.</>}
         </CardDescription>
         <CardAction className="flex flex-wrap justify-start gap-2 @xl/card-header:justify-end">
           {data.normals && (
@@ -221,6 +317,38 @@ export function ByLocation({ data }: { data: Briefing }) {
                 })}
               </TableRow>
             )}
+            {ens.length > 0 && (
+              <TableRow className="hover:bg-transparent border-0">
+                <TableCell colSpan={pts.length + 1} className="sticky left-0 bg-card px-0 pt-3 pb-1 text-xs font-medium text-muted-foreground">Ensemble medians</TableCell>
+              </TableRow>
+            )}
+            {ens.map((e) => (
+              <TableRow key={e.label} className="hover:bg-transparent border-0">
+                <TableCell className="sticky left-0 z-10 bg-card py-1 pr-3 whitespace-nowrap">
+                  {e.label} <span className="text-muted-foreground">({e.members})</span>
+                </TableCell>
+                {pts.map((p) => {
+                  const s = e.points[p]
+                  if (!s) return <TableCell key={p} />
+                  const k = t.days - 1
+                  const c = cell(s.p50[k], p)
+                  const lo = value(s.p10[k], p), hi = value(s.p90[k], p)
+                  return (
+                    <TableCell key={p} className="rounded-[3px] p-0 text-center tabular-nums" style={c.style}>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span tabIndex={0} className="block cursor-default px-1 py-1.5 outline-none focus-visible:outline-2 focus-visible:outline-ring">{c.text}</span>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          {e.label} at {p}: median {c.text}{showPct ? "%" : " in"}
+                          {lo != null && hi != null && <>, 10th – 90th percentile {showPct ? `${Math.round(lo)} – ${Math.round(hi)}%` : `${inch(lo)} – ${inch(hi)} in`}</>}
+                        </TooltipContent>
+                      </Tooltip>
+                    </TableCell>
+                  )
+                })}
+              </TableRow>
+            ))}
           </TableBody>
         </Table>
       </CardContent>
@@ -238,52 +366,3 @@ export function pctCell(v: N) {
   return { background: BRBG[k], color: contrastTextColor(BRBG[k]) }
 }
 
-export function GribAreaMeans({ data }: { data: Briefing }) {
-  if (!data.gribAreaMeans.length) return null
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Gridded area means</CardTitle>
-        <CardDescription>Mean over every grid cell inside each region, from the GRIB fields (in).</CardDescription>
-      </CardHeader>
-      <CardContent>
-        <Table>
-          <TableHeader>
-            <TableRow className="hover:bg-transparent">
-              <TableHead colSpan={2} />
-              {data.windows.map((w) => (
-                <TableHead key={w.days} colSpan={data.regions.length} className="border-l text-center font-semibold text-foreground">
-                  {w.label}
-                </TableHead>
-              ))}
-            </TableRow>
-            <TableRow>
-              <TableHead>Model</TableHead>
-              <TableHead>Run</TableHead>
-              {data.windows.flatMap((w) => data.regions.map((r, i) => (
-                <TableHead key={`${w.days}-${r.id}`} className={`text-right ${i === 0 ? "border-l" : ""}`}>
-                  <span className="inline-flex items-center gap-1.5">
-                    <span className="size-2 rounded-full" style={{ background: REGION_VAR[r.id] }} />{r.short}
-                  </span>
-                </TableHead>
-              )))}
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {data.gribAreaMeans.map((row) => (
-              <TableRow key={row.model}>
-                <TableCell><ModelName label={row.model} tier={row.tier} source="grib" /></TableCell>
-                <TableCell className="text-muted-foreground tabular-nums">{row.run}</TableCell>
-                {row.windows.flatMap((w, wi) => data.regions.map((r, i) => (
-                  <TableCell key={`${wi}-${r.id}`} className={`text-right tabular-nums ${i === 0 ? "border-l" : ""} ${w[r.id] == null ? "text-muted-foreground" : ""}`}>
-                    {w[r.id] == null ? "–" : w[r.id]!.toFixed(2)}
-                  </TableCell>
-                )))}
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </CardContent>
-    </Card>
-  )
-}
