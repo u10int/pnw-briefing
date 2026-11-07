@@ -115,8 +115,8 @@ const AREA_FALLBACK: Record<string, [string, string]> = {
 /** Where a period hit, said briefly: the location when there's one; otherwise the area when they
  *  share one ("Northern Puget Sound"), the zone when they share that ("Puget Sound"), the two zones
  *  ("Puget Sound & WA coast"), the region when they're all in one ("Western Washington"), or the
- *  worst zone and how many more. The count of locations and the worst value follow; hovering
- *  lists every location with its value. */
+ *  worst zone and how many more. Hovering lists every location with its value; the worst value
+ *  itself sits on the line below (PeakLine). */
 function WhereLabel({ data, pts, unit, muted }: { data: Briefing; pts: { name: string; peak: number | null }[]; unit: string; muted?: boolean }) {
   if (!pts.length) return <span className="truncate">—</span>
   const byName = new Map(data.points.map((p) => [p.name, p]))
@@ -136,14 +136,7 @@ function WhereLabel({ data, pts, unit, muted }: { data: Briefing; pts: { name: s
     : zones.length === 1 ? zones[0]
     : zones.length === 2 && (zones[0] + zones[1]).length <= 22 ? `${zones[0]} & ${zones[1]}`
     : regionName ?? broad.join(" & ")
-  const top = pts[0].peak
-  // the place gives way (truncates) before the worst value does
-  const text = (
-    <span className={`flex min-w-0 items-baseline gap-1 ${muted ? "text-muted-foreground" : ""}`}>
-      <span className="truncate">{place}</span>
-      {top != null && unit && <span className="shrink-0 font-semibold tabular-nums">{short(top, unit)}</span>}
-    </span>
-  )
+  const text = <span className={`block truncate ${muted ? "text-muted-foreground" : ""}`}>{place}</span>
   if (pts.length === 1)
     return <button type="button" onClick={() => openLocation(pts[0].name)} className="min-w-0 rounded text-left hover:underline focus-visible:outline-2 focus-visible:outline-ring">{text}</button>
   return (
@@ -153,13 +146,25 @@ function WhereLabel({ data, pts, unit, muted }: { data: Briefing; pts: { name: s
         <div className="grid grid-cols-[auto_auto] gap-x-4 gap-y-0.5 tabular-nums">
           {pts.map((p) => (
             <React.Fragment key={p.name}>
-              <span>{p.name} <span className="opacity-60">{area(p.name)}</span></span>
+              <span>{p.name}</span>
               <span className="text-right font-semibold">{p.peak != null && unit ? short(p.peak, unit) : ""}</span>
             </React.Fragment>
           ))}
         </div>
       </TooltipContent>
     </Tooltip>
+  )
+}
+
+/** The line under a period's place: its worst value, small and muted, then any change tag. */
+function PeakLine({ pts, unit, children }: { pts: { peak: number | null }[]; unit: string; children?: React.ReactNode }) {
+  const top = pts[0]?.peak
+  const value = top != null && unit ? short(top, unit) : null
+  if (value == null && !children) return null
+  return (
+    <div className="mt-0.5 flex items-center gap-1.5 text-xs leading-4 text-muted-foreground tabular-nums">
+      {value}{children}
+    </div>
   )
 }
 
@@ -296,20 +301,20 @@ export function ImpactBoard({ data }: { data: Briefing }) {
                   const label = `${lv.word} ${pct(e.agreement)}`
                   return (
                     <div key={i} className={grid}>
-                      <div className={`flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 self-stretch py-1 text-[13px] ${pin}`}>
+                      <div className={`flex min-w-0 flex-col justify-center self-stretch py-1 text-[13px] leading-tight ${pin}`}>
                         <WhereLabel data={data} pts={pts} unit={e.unit} />
-                        {st && <Tag s={st} />}
+                        <PeakLine pts={pts} unit={e.unit}>{st && <Tag s={st} />}</PeakLine>
                       </div>
-                      <div className="relative h-8">
+                      <div className="relative min-h-8 self-stretch">
                         {dayLines}
                         {st?.prev && (() => { const p = span(st.prev[0], st.prev[1]); return (
-                          <div className="absolute top-1 bottom-1 rounded-[4px] border border-dashed border-muted-foreground/60" style={{ left: p.left, width: p.width }} aria-hidden />
+                          <div className="absolute top-1/2 h-7 -translate-y-1/2 rounded-[4px] border border-dashed border-muted-foreground/60" style={{ left: p.left, width: p.width }} aria-hidden />
                         ) })()}
                         <Tooltip>
                           <TooltipTrigger asChild>
                             <button type="button" aria-label={`${e.label}, ${dateRange(e.start, e.end)}: ${label}. Show it on the map`}
                               onClick={() => openOnMap(mapRequestFor(e))}
-                              className="absolute top-1 bottom-1 flex cursor-pointer items-center overflow-hidden rounded-[4px] px-1.5 text-[11px] font-semibold whitespace-nowrap tabular-nums shadow-[inset_0_0_0_1px_rgb(0_0_0/0.08)] outline-offset-1 hover:brightness-105 focus-visible:outline-2 focus-visible:outline-ring"
+                              className="absolute top-1/2 h-7 -translate-y-1/2 flex cursor-pointer items-center overflow-hidden rounded-[4px] px-1.5 text-[11px] font-semibold whitespace-nowrap tabular-nums shadow-[inset_0_0_0_1px_rgb(0_0_0/0.08)] outline-offset-1 hover:brightness-105 focus-visible:outline-2 focus-visible:outline-ring"
                               style={{ left: b.left, width: b.width, ...fillStyle(lv, fillOf(st)) }}>
                               {b.cells >= 2 ? label : b.cells >= 1 ? pct(e.agreement) : ""}
                             </button>
@@ -333,16 +338,18 @@ export function ImpactBoard({ data }: { data: Briefing }) {
                   const was = e.prevLevel ? LEVEL[e.prevLevel].word : "Flagged"
                   return (
                     <div key={`d${i}`} className={grid}>
-                      <div className={`flex min-w-0 items-center gap-2 self-stretch py-1 text-[13px] text-muted-foreground ${pin}`}>
+                      <div className={`flex min-w-0 flex-col justify-center self-stretch py-1 text-[13px] leading-tight text-muted-foreground ${pin}`}>
                         <WhereLabel data={data} pts={e.where ?? []} unit={e.unit ?? ""} muted />
-                        <span className="shrink-0 rounded border border-dashed border-muted-foreground/60 px-1.5 py-px text-[10px] leading-4 font-semibold">Dropped</span>
+                        <PeakLine pts={e.where ?? []} unit={e.unit ?? ""}>
+                          <span className="shrink-0 rounded border border-dashed border-muted-foreground/60 px-1.5 py-px text-[10px] leading-4 font-semibold">Dropped</span>
+                        </PeakLine>
                       </div>
-                      <div className="relative h-8">
+                      <div className="relative min-h-8 self-stretch">
                         {dayLines}
                         <Tooltip>
                           <TooltipTrigger asChild>
                             <div tabIndex={0} aria-label={`${e.label}, ${dateRange(e.start, e.end)}: dropped`}
-                              className="absolute top-1 bottom-1 flex items-center overflow-hidden rounded-[4px] border border-dashed border-muted-foreground/60 px-1.5 text-[11px] font-medium whitespace-nowrap text-muted-foreground outline-none focus-visible:outline-2 focus-visible:outline-ring"
+                              className="absolute top-1/2 h-7 -translate-y-1/2 flex items-center overflow-hidden rounded-[4px] border border-dashed border-muted-foreground/60 px-1.5 text-[11px] font-medium whitespace-nowrap text-muted-foreground outline-none focus-visible:outline-2 focus-visible:outline-ring"
                               style={{ left: b.left, width: b.width }}>
                               {b.cells >= 2 ? `was ${was.toLowerCase()}` : ""}
                             </div>
