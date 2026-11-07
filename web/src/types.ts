@@ -85,6 +85,15 @@ export interface Verification {
   chart: { dates: string[]; observed: Record<string, (number | null)[]>; day1: Record<string, Record<string, (number | null)[]>> }
 }
 
+export interface TempScore { mae: number; maeHi: number; maeLo: number; biasHi: number; biasLo: number; within: number; n: number; days: number }
+type HiLo = { hi: (number | null)[]; lo: (number | null)[] }
+export interface TempVerification {
+  from: string; to: string; nDays: number; within: number; source: string
+  leads: { id: string; label: string; leads: number[] }[]
+  models: { model: string; tier: string | null; scores: Record<string, TempScore> }[]
+  chart: { dates: string[]; observed: Record<string, HiLo>; day1: Record<string, Record<string, HiLo>> }
+}
+
 export interface ArCoastRank { rank: number; peak: number | null; start: string | null }
 export interface ArCoast {
   points: { name: string; lat: number; lon: number }[]
@@ -197,6 +206,7 @@ export interface Briefing {
   arCoast?: ArCoast | null                              // the coastal AR outlook (map layer); absent before it was added
   rivers?: Rivers | null                                // NWRFC river forecasts; absent before they were added
   verification?: Verification | null                   // recent forecasts scored against MRMS; absent before it was added
+  tempVerification?: TempVerification | null           // recent highs and lows scored against URMA; absent before it was added
   // each region's value over the last few briefings, on dates they all share (oldest run first)
   trendHistory?: { windows: { days: number; from: string; to: string; nDays: number; runs: (string | null)[]; regions: Record<string, ByVar<(number | null)[]>> }[] }
   ar?: AtmosphericRivers | null
