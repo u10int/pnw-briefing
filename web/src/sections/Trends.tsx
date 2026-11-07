@@ -35,8 +35,9 @@ function Chg({ c, k }: { c: TrendChangeVar | undefined; k: TrendVar }) {
   const d = k === "precip" || k === "snow" ? Math.abs(c.delta).toFixed(Math.abs(c.delta) < 1 ? (k === "precip" ? 2 : 1) : 1).replace(/^0\./, ".")
     : Math.round(Math.abs(c.delta)).toString()
   return (
-    <span className="inline-flex items-center text-xs font-medium tabular-nums" style={{ color: UP_COLOR[k][up ? 0 : 1] }}>
-      <Icon className="size-3" aria-hidden />{up ? "+" : "−"}{d}{k === "tmax" || k === "tmin" ? "°" : ""}
+    <span className="text-xs font-medium tabular-nums" style={{ color: UP_COLOR[k][up ? 0 : 1] }}>
+      {/* plain inline text, so it sits on the value's baseline; the arrow rides on the text */}
+      <Icon className="mr-px inline size-3 align-[-1px]" aria-hidden />{up ? "+" : "−"}{d}{k === "tmax" || k === "tmin" ? "°" : ""}
     </span>
   )
 }
@@ -78,8 +79,8 @@ function Cell({ name, w, ks, stats, chg, overlap, region, scale, rid, note }: {
             {ks.map((k, i) => (
               <React.Fragment key={k}>
                 {i > 0 && <span className="px-1 text-muted-foreground">/</span>}
-                <span className="w-12 pr-1 text-right"><Chg c={quiet ? undefined : chg?.[k]} k={k} /></span>
-                <span className={`min-w-[2.75rem] text-right ${quiet ? "text-muted-foreground" : region ? "font-semibold" : "font-medium"}`}>
+                <span className="w-12 shrink-0 pr-1 text-right"><Chg c={quiet ? undefined : chg?.[k]} k={k} /></span>
+                <span className={`text-right ${quiet ? "text-muted-foreground" : region ? "font-semibold" : "font-medium"}`}>
                   {quiet ? "0" : stats?.[k] ? fmt(stats[k]!.median, k) : "–"}
                 </span>
               </React.Fragment>
