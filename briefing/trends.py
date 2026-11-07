@@ -47,7 +47,7 @@ def _stats(xs):
 
 
 def _window(doc, cols, names):
-    """{"points": {name: {var: stats}}, "regions": {rid: {var: stats}}}."""
+    """{"points": {name: {var: stats}}, "regions": {rid or "zone:<name>": {var: stats}}}."""
     mv = _model_values(doc, cols, names)
     pts = {n: {} for n in names}
     regs = {}
@@ -57,8 +57,13 @@ def _window(doc, cols, names):
             s = _stats([v[n] for v in mv[var].values() if n in v])
             if s:
                 pts[n][var] = s
-        for r in doc["regions"]:
-            members = [n for n in names if kind[n].get("region") == r["id"] and kind[n]["kind"] in spec["kinds"]]
+        # regions, then a group per zone for locations outside every region (e.g. Southwest BC),
+        # keyed "zone:<name>"
+        groups = [(r["id"], lambda n, rid=r["id"]: kind[n].get("region") == rid) for r in doc["regions"]]
+        groups += [(f"zone:{z}", lambda n, z=z: not kind[n].get("region") and kind[n].get("zone") == z)
+                   for z in dict.fromkeys(kind[n].get("zone") for n in names if not kind[n].get("region") and kind[n].get("zone"))]
+        for gid, inside in groups:
+            members = [n for n in names if inside(n) and kind[n]["kind"] in spec["kinds"]]
             per_model = []
             for v in mv[var].values():
                 xs = [v[n] for n in members if n in v]
@@ -67,7 +72,7 @@ def _window(doc, cols, names):
                     per_model.append(float(_AGG[spec["combine"]](xs)))
             s = _stats(per_model)
             if s:
-                regs.setdefault(r["id"], {})[var] = s
+                regs.setdefault(gid, {})[var] = s
     return {"points": {n: v for n, v in pts.items() if v}, "regions": regs}
 
 

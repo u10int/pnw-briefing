@@ -22,7 +22,7 @@ const fmt = (v: number, k: TrendVar) =>
 const FLAT: Record<TrendVar, number> = { precip: 0.05, snow: 0.2, gust: 1, tmax: 0.5, tmin: 0.5 }
 const UP_COLOR: Record<TrendVar, [string, string]> = {          // [up, down]
   precip: ["var(--wetter)", "var(--drier)"], snow: ["var(--wetter)", "var(--drier)"],
-  gust: ["var(--foreground)", "var(--foreground)"], tmax: ["#c0392b", "#2c6fbb"], tmin: ["#c0392b", "#2c6fbb"],
+  gust: ["#c2410c", "#0f766e"], tmax: ["#c0392b", "#2c6fbb"], tmin: ["#c0392b", "#2c6fbb"],   // gust: stronger orange, calmer teal
 }
 
 /** The change since yesterday, compact: arrow and signed amount, coloured by direction. */
@@ -51,13 +51,17 @@ function Cell({ name, w, ks, stats, chg, overlap, region }: {
     <td className="px-3 py-2">
       <Tooltip>
         <TooltipTrigger asChild>
-          <div tabIndex={0} className="flex cursor-default flex-wrap items-baseline justify-end gap-x-1.5 tabular-nums outline-none focus-visible:underline">
-            {quiet ? <span className="text-muted-foreground">0</span> : have.map((k, i) => (
-              <span key={k} className="inline-flex items-baseline gap-1 whitespace-nowrap">
-                {i > 0 && <span className="text-muted-foreground">/</span>}
-                <span className={region ? "font-semibold" : "font-medium"}>{fmt(stats![k]!.median, k)}</span>
-                <Chg c={chg?.[k]} k={k} />
-              </span>
+          {/* each value in a right-aligned slot and its change in a fixed-width slot after it, so
+              values line up down the column whether or not they changed */}
+          <div tabIndex={0} className="flex cursor-default items-baseline justify-end tabular-nums whitespace-nowrap outline-none focus-visible:underline">
+            {ks.map((k, i) => (
+              <React.Fragment key={k}>
+                {i > 0 && <span className="px-1 text-muted-foreground">/</span>}
+                <span className={`min-w-[2.75rem] text-right ${quiet ? "text-muted-foreground" : region ? "font-semibold" : "font-medium"}`}>
+                  {quiet ? "0" : stats?.[k] ? fmt(stats[k]!.median, k) : "–"}
+                </span>
+                <span className="w-12 pl-1 text-left"><Chg c={quiet ? undefined : chg?.[k]} k={k} /></span>
+              </React.Fragment>
             ))}
           </div>
         </TooltipTrigger>
@@ -89,12 +93,13 @@ export function TrendsCard({ data, onOpen }: { data: Briefing; onOpen: (t: Tab) 
   const c = data.change?.trends?.windows.find((x) => x.days === w.days)
 
   // regions in order, then anything outside them grouped by zone (e.g. Southwest BC)
+  // `rid` keys the group's own row: a region id, or "zone:<name>" for locations outside every region
   const groups: { key: string; name: string; rid?: string; points: string[] }[] = data.regions.map((r) => ({
     key: r.id, name: r.name, rid: r.id, points: data.points.filter((p) => p.region === r.id).map((p) => p.name),
   }))
   for (const p of data.points.filter((p) => !p.region)) {
     const z = p.zone ?? "Other"
-    const g = groups.find((x) => x.key === z) ?? (groups.push({ key: z, name: z, points: [] }), groups[groups.length - 1])
+    const g = groups.find((x) => x.key === z) ?? (groups.push({ key: z, name: z, rid: `zone:${z}`, points: [] }), groups[groups.length - 1])
     g.points.push(p.name)
   }
 

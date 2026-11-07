@@ -35,3 +35,11 @@ def test_compare_same_dates():
     assert w["overlapDays"] == 2
     assert w["points"]["Pass"]["snow"] == {"now": 1.5, "prev": 0.0, "delta": 1.5}
     assert w["regions"]["wwa"]["snow"]["delta"] == 1.5
+
+
+def test_zone_group_for_locations_outside_regions():
+    doc = {**DOC, "points": DOC["points"] + [{"name": "Whistler", "kind": "pass", "region": None, "zone": "Southwest BC"}],
+           "models": [{"label": "A", "data": {**DOC["models"][0]["data"], "Whistler": {"snowfall_sum": [4, 4, 4]}}}]}
+    w2 = trends.summarize(doc, WINS)["windows"][0]
+    assert w2["regions"]["zone:Southwest BC"]["snow"]["median"] == 8
+    assert "precip" not in w2["regions"]["zone:Southwest BC"]       # Whistler has no precip series here
