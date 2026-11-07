@@ -77,6 +77,13 @@ export interface RiverGauge {
   record: { stage: number; time: string } | null; url: string
 }
 export interface Rivers { source: string; gauges: RiverGauge[] }
+export interface VerifyScore { mae: number; bias: number | null; pod: number | null; far: number | null; n: number; days: number; obs: number; fc: number }
+export interface Verification {
+  from: string; to: string; nDays: number; wet: number
+  leads: { id: string; label: string; leads: number[] }[]
+  models: { model: string; tier: string | null; scores: Record<string, VerifyScore> }[]
+  chart: { dates: string[]; observed: Record<string, (number | null)[]>; day1: Record<string, Record<string, (number | null)[]>> }
+}
 
 export interface ArCoastRank { rank: number; peak: number | null; start: string | null }
 export interface ArCoast {
@@ -186,9 +193,10 @@ export interface Briefing {
   normals: Normals | null
   alerts: Alerts | null
   change: Change | null
-  trends?: { windows: TrendWindow[] }
-  arCoast?: ArCoast | null
-  rivers?: Rivers | null                                // NWRFC river forecasts; absent before they were added                              // the coastal AR outlook (map layer); absent before it was added                  // the trends table above the tabs
+  trends?: { windows: TrendWindow[] }                  // the trends table above the tabs
+  arCoast?: ArCoast | null                              // the coastal AR outlook (map layer); absent before it was added
+  rivers?: Rivers | null                                // NWRFC river forecasts; absent before they were added
+  verification?: Verification | null                   // recent forecasts scored against MRMS; absent before it was added
   // each region's value over the last few briefings, on dates they all share (oldest run first)
   trendHistory?: { windows: { days: number; from: string; to: string; nDays: number; runs: (string | null)[]; regions: Record<string, ByVar<(number | null)[]>> }[] }
   ar?: AtmosphericRivers | null

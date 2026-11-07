@@ -111,7 +111,7 @@ def compare(now, prev, windows):
     return {"windows": out}
 
 
-def history(now, earlier, windows, min_share=0.5):
+def history(now, earlier, windows, min_share=0.5, max_runs=5):
     """How each region's values moved over the last few briefings, for the table's sparklines.
 
     `earlier` are previous briefings (any order). For each window, briefings are taken newest
@@ -128,7 +128,7 @@ def history(now, earlier, windows, min_share=0.5):
     for w in windows:
         dates = list(now["dates"][: w["days"]])
         used = []
-        for d in docs:
+        for d in docs[: max_runs - 1]:
             common = [x for x in dates if x in set(d["dates"])]
             if len(common) < max(1, int(np.ceil(min_share * w["days"]))):
                 break

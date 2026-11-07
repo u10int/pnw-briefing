@@ -116,10 +116,11 @@ jobs:
             fi
           fi
           ls -la previous.json 2>/dev/null || echo "no earlier briefing yet"
-          # the few days before that too, for the trends table's run-to-run sparklines
+          # the days before that too: the trends table's run-to-run sparklines and the model
+          # verification (each day's briefing scored against what fell)
           rm -rf history && mkdir -p history
           for D in $(git ls-tree --name-only origin/gh-pages archive/ 2>/dev/null | sed 's#^archive/##' \
-                     | grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' | awk -v t="$TODAY" '$0 < t' | sort | tail -5); do
+                     | grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' | awk -v t="$TODAY" '$0 < t' | sort | tail -14); do
             git show "origin/gh-pages:archive/$D/data/briefing.json" > "history/$D.json" 2>/dev/null || rm -f "history/$D.json"
           done
           echo "$(ls history | wc -l) earlier briefings for the trend history"
