@@ -4,6 +4,7 @@ import { DayHead } from "@/components/DayHead"
 import { Card, CardContent } from "@/components/ui/card"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { dateRange, dayShort, issuedLabel, peak, redCell } from "@/lib/format"
+import { type MapRequest, openOnMap } from "@/lib/maplink"
 import type { Briefing, EventChange, ImpactEvent } from "@/types"
 
 /** Rain first, then winter hazards, then wind and heat (the order of impacts.HAZARDS); anything else after, by first date. */
@@ -304,17 +305,19 @@ export function ImpactBoard({ data }: { data: Briefing }) {
                         ) })()}
                         <Tooltip>
                           <TooltipTrigger asChild>
-                            <div tabIndex={0} aria-label={`${e.label}, ${dateRange(e.start, e.end)}: ${label}`}
-                              className="absolute top-1 bottom-1 flex items-center overflow-hidden rounded-[4px] px-1.5 text-[11px] font-semibold whitespace-nowrap tabular-nums shadow-[inset_0_0_0_1px_rgb(0_0_0/0.08)] outline-offset-1 hover:brightness-105 focus-visible:outline-2 focus-visible:outline-ring"
+                            <button type="button" aria-label={`${e.label}, ${dateRange(e.start, e.end)}: ${label}. Show it on the map`}
+                              onClick={() => openOnMap(mapRequestFor(e))}
+                              className="absolute top-1 bottom-1 flex cursor-pointer items-center overflow-hidden rounded-[4px] px-1.5 text-[11px] font-semibold whitespace-nowrap tabular-nums shadow-[inset_0_0_0_1px_rgb(0_0_0/0.08)] outline-offset-1 hover:brightness-105 focus-visible:outline-2 focus-visible:outline-ring"
                               style={{ left: b.left, width: b.width, ...fillStyle(lv, fillOf(st)) }}>
                               {b.cells >= 2 ? label : b.cells >= 1 ? pct(e.agreement) : ""}
-                            </div>
+                            </button>
                           </TooltipTrigger>
                           <TooltipContent className="max-w-xs space-y-1">
                             <p className="font-semibold">{e.label} · {dateRange(e.start, e.end)}</p>
                             <p>{lv.word}: {pct(e.agreement)} of {e.n_models} models over the threshold</p>
                             {st && <p>{st.detail}</p>}
                             <p className="opacity-80">{pts.slice(0, 6).map((p) => `${p.name} ${short(p.peak, e.unit)}`).join(" · ")}{pts.length > 6 ? ` · +${pts.length - 6}` : ""}</p>
+                            <p className="pt-0.5 opacity-80">Click to see it on the map</p>
                           </TooltipContent>
                         </Tooltip>
                       </div>
@@ -374,10 +377,29 @@ export function ImpactBoard({ data }: { data: Briefing }) {
           </span>
           {hasPrev && <span className="flex items-center gap-1.5"><span className="h-3 w-5 rounded-[3px] border border-dashed border-muted-foreground/60" />Yesterday's dates, or dropped</span>}
           <span>Where: the area hit and its worst value; hover for each location</span>
+          <span>Click a bar to see it on the map</span>
         </div>
       </CardContent>
     </Card>
   )
+}
+
+/** Where a period shows best on the hourly map, and when: the layer for its hazard (with fallbacks
+ *  for days only the global models reach) on the afternoon of its first day, or the early morning
+ *  for a freeze. */
+const MAP_LAYER: Record<string, { layer: NonNullable<MapRequest["layer"]>; fallback: NonNullable<MapRequest["layer"]>[]; hourZ: number }> = {
+  heavy_rain_24h: { layer: "radar", fallback: ["ivt", "apcp"], hourZ: 24 },
+  heavy_rain_72h: { layer: "ivt", fallback: ["radar", "apcp"], hourZ: 24 },
+  snow_24h: { layer: "asnow", fallback: ["frz"], hourZ: 24 },
+  wind: { layer: "gust", fallback: ["wind", "pgrad"], hourZ: 24 },
+  freezing_precip: { layer: "radar", fallback: ["t2m"], hourZ: 18 },
+  hard_freeze: { layer: "t2m", fallback: [], hourZ: 38 },     // 6 AM Pacific the next morning
+  heat: { layer: "t2m", fallback: [], hourZ: 24 },
+}
+function mapRequestFor(e: ImpactEvent): MapRequest {
+  const m = MAP_LAYER[e.hazard] ?? { layer: "radar" as const, fallback: [], hourZ: 24 }
+  const t = Date.parse(`${e.start}T00:00:00Z`) + m.hourZ * 3600e3     // 24Z = 4 PM Pacific on the start day
+  return { mode: "hourly", layer: m.layer, fallback: m.fallback, time: new Date(t).toISOString() }
 }
 
 /** The change record for a current event (same hazard and dates). */

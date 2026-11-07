@@ -1,6 +1,6 @@
 import * as React from "react"
 
-import { MapIcon } from "lucide-react"
+import { CloudRain, Flame, MapIcon, MapPin, MountainSnow, Telescope, Thermometer, Waves, Wind } from "lucide-react"
 
 import { Separator } from "@/components/ui/separator"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -11,7 +11,7 @@ import { HazardStrip } from "@/sections/Hazards"
 import { NwsAlerts } from "@/sections/Alerts"
 import { TotalChanges } from "@/sections/Changes"
 import { ImpactBoard } from "@/sections/Impacts"
-import { ArCard, AvalancheCard, DiscussionsCard, GradientsCard, LandslideCard, ObservedCard, OddsCard, OutlooksCard, SnowLevelCard, SnowpackCard } from "@/sections/Context"
+import { ArCard, AvalancheCard, DiscussionsCard, ForecasterNotes, GradientsCard, LandslideCard, ObservedCard, OddsCard, OutlooksCard, SnowLevelCard, SnowpackCard } from "@/sections/Context"
 import { DayByDay, EnsemblePlume, EnsembleTable, LocationPicker, RunningTotal } from "@/sections/Location"
 import { extremeTabs, MapCard } from "@/sections/Maps"
 import { Headline, WindowCard } from "@/sections/Overview"
@@ -23,18 +23,19 @@ import { WildfireTab } from "@/sections/Wildfire"
 import { WindByDayCard } from "@/sections/WindByDay"
 import type { Briefing } from "@/types"
 
-// MapLibre is large; load it only when the Map tab is first opened.
+// MapLibre is large; it loads with the Map tab, which is the first tab and opens by default.
 const InteractiveMap = React.lazy(() => import("@/sections/InteractiveMap").then((m) => ({ default: m.InteractiveMap })))
 
 const TABS = [
-  { id: "precip", label: "Precip" },
-  { id: "flood", label: "Flooding" },
-  { id: "wind", label: "Wind" },
-  { id: "snow", label: "Snow & mountains" },
-  { id: "temp", label: "Temperature" },
-  { id: "fire", label: "Wildfire" },
-  { id: "map", label: "Map" },
-  { id: "locations", label: "Locations" },
+  { id: "map", label: "Map", icon: MapIcon },
+  { id: "precip", label: "Precip", icon: CloudRain },
+  { id: "flood", label: "Flooding", icon: Waves },
+  { id: "wind", label: "Wind", icon: Wind },
+  { id: "snow", label: "Snow & mountains", icon: MountainSnow },
+  { id: "temp", label: "Temperature", icon: Thermometer },
+  { id: "fire", label: "Wildfire", icon: Flame },
+  { id: "outlooks", label: "Outlooks", icon: Telescope },
+  { id: "locations", label: "Locations", icon: MapPin },
 ] as const
 type Tab = (typeof TABS)[number]["id"]
 const tabFromHash = (): Tab | null => {
@@ -79,7 +80,7 @@ export default function App() {
   const [data, setData] = React.useState<Briefing | null>(null)
   const [error, setError] = React.useState<string | null>(null)
   const [point, setPoint] = React.useState("Seattle")
-  const [tab, setTab] = React.useState<Tab>(() => tabFromHash() ?? "precip")
+  const [tab, setTab] = React.useState<Tab>(() => tabFromHash() ?? "map")
   const [mapSeen, setMapSeen] = React.useState(tab === "map")
   const [mapReq, setMapReq] = React.useState<(MapRequest & { nonce: number }) | null>(null)
   const tabsTop = React.useRef<HTMLDivElement>(null)
@@ -119,8 +120,20 @@ export default function App() {
       <header className="border-b bg-card">
         <div className="mx-auto flex max-w-[1320px] flex-wrap items-baseline justify-between gap-3 px-8 py-3.5 max-sm:px-4">
           <div className="font-semibold">
-            {meta.title}<span className="ml-2.5 font-normal text-muted-foreground max-sm:hidden">Western Washington and Northwest Oregon</span>
+            {meta.title}<span className="ml-2.5 font-normal text-muted-foreground max-2xl:hidden">Western Washington and Northwest Oregon</span>
           </div>
+          {/* the sections, reachable from the top of the page before scrolling to the tab bar */}
+          <nav aria-label="Sections" className="flex items-center gap-0.5 max-md:hidden">
+            {TABS.map((t) => {
+              const Icon = t.icon
+              return (
+                <button key={t.id} type="button" onClick={() => openTab(t.id)} title={t.label}
+                  className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-sm text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring">
+                  <Icon className="size-4" aria-hidden /><span className="max-lg:hidden">{t.label}</span>
+                </button>
+              )
+            })}
+          </nav>
           <div className="text-sm text-muted-foreground">Issued {issuedLabel(meta.issued)}</div>
         </div>
       </header>
@@ -130,6 +143,7 @@ export default function App() {
 
         <div className="space-y-4">
           <HazardStrip data={data} onOpen={(t) => openTab(t)} />
+          <ForecasterNotes data={data} onFull={() => openTab("outlooks")} />
           <NwsAlerts data={data} />
         </div>
 
@@ -137,14 +151,6 @@ export default function App() {
           description={`Each hazard's share of models over its threshold day by day, the periods where at least ${Math.round(meta.minAgreement * 100)}% agree at a forecast location, and what changed since yesterday. Thresholds differ for lowland, coast and pass locations; regional models count for the days they cover. Hover anything for details.`}>
           <ImpactBoard data={data} />
         </Section>
-
-        {data.outlooks && (
-          <Section title="What NWS forecasters say"
-            description="The latest discussions from the Seattle and Portland offices, and the national rainfall and extended outlooks.">
-            <DiscussionsCard data={data} />
-            <OutlooksCard data={data} />
-          </Section>
-        )}
 
         {data.trends && (
           <Section title="Forecast trends"
@@ -154,10 +160,20 @@ export default function App() {
         )}
 
         <Tabs value={tab} onValueChange={(v) => openTab(v as Tab, false)} className="mt-14 gap-0">
-          <div ref={tabsTop} className="sticky top-0 z-30 -mx-8 border-b bg-background/95 px-8 py-2.5 backdrop-blur max-sm:-mx-4 max-sm:px-4">
+          {/* the section tabs: a full-width sticky bar of larger, icon-led tabs with an underline on the
+              open one, sitting on the bar's bottom edge, rather than a segmented control */}
+          <div ref={tabsTop} className="sticky top-0 z-30 -mx-8 border-b bg-background/95 px-8 backdrop-blur max-sm:-mx-4 max-sm:px-4">
             <div className="overflow-x-auto overflow-y-hidden">
-              <TabsList className="h-10">
-                {TABS.map((t) => <TabsTrigger key={t.id} value={t.id} className="px-3.5">{t.label}</TabsTrigger>)}
+              <TabsList variant="line" className="gap-0 p-0 group-data-[orientation=horizontal]/tabs:h-auto">
+                {TABS.map((t) => {
+                  const Icon = t.icon
+                  return (
+                    <TabsTrigger key={t.id} value={t.id}
+                      className="h-auto flex-none gap-2 rounded-none px-4 pt-4 pb-3.5 text-[15px] font-medium text-muted-foreground after:bottom-0! after:h-[2.5px]! after:rounded-full hover:bg-muted/50 data-[state=active]:text-foreground max-sm:px-3 [&_svg:not([class*='size-'])]:size-[18px]">
+                      <Icon aria-hidden />{t.label}
+                    </TabsTrigger>
+                  )
+                })}
               </TabsList>
             </div>
           </div>
@@ -249,6 +265,16 @@ export default function App() {
                 </React.Suspense>
               </Section>
             )}
+          </TabsContent>
+
+          <TabsContent value="outlooks">
+            <Section title="Outlooks and discussions" first
+              description="The national excessive rainfall and extended outlooks, and the full forecast discussions from the Seattle and Portland offices.">
+              {data.outlooks ? <>
+                <OutlooksCard data={data} />
+                <DiscussionsCard data={data} defaultFull />
+              </> : <p className="text-muted-foreground">The outlooks and discussions weren't available for this briefing.</p>}
+            </Section>
           </TabsContent>
 
           <TabsContent value="locations">

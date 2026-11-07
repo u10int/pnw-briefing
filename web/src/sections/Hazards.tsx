@@ -295,14 +295,15 @@ export function HazardStrip({ data, onOpen }: { data: Briefing; onOpen: (tab: Ha
   return (
     // each card spans five shared rows (header, badge, figure, chart, notes) through subgrid, so the
     // charts and notes line up across a row of cards whatever the caption lengths
-    <div className="grid gap-x-3 gap-y-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+    // on phones the cards are a row you swipe through, a peek of the next one showing
+    <div className="grid gap-x-3 gap-y-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 max-sm:-mx-4 max-sm:auto-cols-[82%] max-sm:grid-flow-col max-sm:grid-rows-[repeat(5,auto)] max-sm:snap-x max-sm:snap-mandatory max-sm:scroll-px-4 max-sm:overflow-x-auto max-sm:px-4 max-sm:pb-2">
       {items.map((h) => {
         const tone = TONE[h.tone]
         const Icon = h.icon, ToneIcon = tone.icon
         const v = vis[h.tab]
         return (
           <button key={h.tab} type="button" onClick={() => onOpen(h.tab)} aria-label={`${h.title}: ${tone.label}. Open the ${h.title} tab`}
-                  className="group row-span-5 grid grid-rows-subgrid gap-y-0 rounded-xl border bg-card p-4 text-left shadow-xs transition-[background-color,box-shadow] hover:bg-muted/30 hover:shadow-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
+                  className="group row-span-5 grid snap-start grid-rows-subgrid gap-y-0 rounded-xl border bg-card p-4 text-left shadow-xs transition-[background-color,box-shadow] hover:bg-muted/30 hover:shadow-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
             <div className="flex items-center gap-2">
               <Icon className="size-[18px] shrink-0 text-foreground" strokeWidth={1.75} />
               <span className="min-w-0 flex-1 font-medium leading-tight">{h.title}</span>

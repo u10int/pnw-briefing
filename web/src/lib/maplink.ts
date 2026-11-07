@@ -8,6 +8,10 @@ export interface MapRequest {
   isobars?: boolean
   pairs?: boolean
   model?: string
+  /** hourly mode: the moment to show (ISO). The map picks a model whose forecast reaches it,
+   *  trying `fallback` layers in turn when no model has `layer` that far out. */
+  time?: string
+  fallback?: NonNullable<MapRequest["layer"]>[]
 }
 
 const EVENT = "briefing:open-map"
