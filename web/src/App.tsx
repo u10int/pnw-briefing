@@ -107,6 +107,16 @@ export default function App() {
     return () => { window.removeEventListener("hashchange", onHash); window.removeEventListener("hashchange", onLocHash); off(); offLoc() }
   }, [openTab])
 
+  // on a phone the tab bar scrolls sideways: bring the open tab into view when it changes
+  React.useEffect(() => {
+    const bar = tabsTop.current?.querySelector<HTMLElement>(".overflow-x-auto")
+    const on = bar?.querySelector<HTMLElement>('[role=tab][data-state=active]')
+    if (!bar || !on || bar.scrollWidth <= bar.clientWidth) return
+    const left = on.offsetLeft - bar.offsetLeft, right = left + on.offsetWidth
+    if (left < bar.scrollLeft || right > bar.scrollLeft + bar.clientWidth)
+      bar.scrollTo({ left: Math.max(0, left - 24), behavior: "smooth" })
+  }, [tab, data])
+
   // keep the open location in the URL, after the tab
   React.useEffect(() => {
     const want = `#${tab}${point ? `/${encodeURIComponent(point)}` : ""}`
@@ -184,7 +194,7 @@ export default function App() {
               open one, sitting on the bar's bottom edge, rather than a segmented control */}
           <div ref={tabsTop} className="sticky top-0 z-30 -mx-8 border-b bg-background/95 px-8 backdrop-blur max-sm:-mx-4 max-sm:px-4">
             <div className="flex items-stretch overflow-x-auto overflow-y-hidden">
-              <TabsList variant="line" className="gap-0 p-0 group-data-[orientation=horizontal]/tabs:h-auto">
+              <TabsList variant="line" className="max-w-none shrink-0 justify-start gap-0 p-0 group-data-[orientation=horizontal]/tabs:h-auto">
                 {TABS.map((t) => {
                   const Icon = t.icon
                   return (
