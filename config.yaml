@@ -191,7 +191,7 @@ supplement:
     - {ids: [icon_seamless, icon_global],           label: DWD ICON, tier: global}
     - {ids: [ukmo_seamless, ukmo_global_deterministic_10km], label: UK Met Office, tier: global}
     - {ids: [meteofrance_seamless, meteofrance_arpege_world], label: Météo-France, tier: global}
-    - {ids: [jma_seamless, jma_gsm],                label: JMA, tier: global}
+    - {ids: [jma_seamless, jma_gsm],                label: JMA, tier: global, timing: false}   # 3 – 6-hourly steps over the region
   ensemble_models:
     - {ids: [gem_global],                           label: Canadian GEPS}
 

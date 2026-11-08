@@ -74,11 +74,22 @@ def fetch_deterministic(cfg, start):
         try:
             mid, js = _first_working(FORECAST_URL, base, m["ids"])
             data = {}
+            hourly = {"gust": {}, "rate": {}}
+            hrs = None
             for p, loc in zip(pts, js):
                 h = loc["hourly"]
                 df = pd.DataFrame({k: h.get(k) for k in HOURLY}, index=pd.to_datetime(h["time"])).astype(float)
                 # surface Hot-Dry-Windy Index: VPD (kPa -> hPa) times wind (mph -> m/s)
                 df["hdw"] = df["vapour_pressure_deficit"] * 10 * df["wind_speed_10m"] / 2.23694
+                if m.get("timing", True):
+                    # the next 54 hours, hour by hour, for when the peaks come (timing.py)
+                    h0 = pd.Timestamp(start.astimezone(timezone.utc).replace(tzinfo=None) if start.tzinfo else start)   # naive UTC
+                    w = df[(df.index > h0) & (df.index <= h0 + pd.Timedelta(hours=54))]
+                    hrs = hrs if hrs is not None else w.index
+                    w = w.reindex(hrs)
+                    num = lambda col: [None if not np.isfinite(x) else round(float(x), 3) for x in w[col].to_numpy(dtype=float)]
+                    hourly["gust"][p["name"]] = num("wind_gusts_10m")
+                    hourly["rate"][p["name"]] = num("precipitation")      # the hour ending at each time
                 g = _days(df, start, n)
                 agg = pd.DataFrame({
                     "precipitation_sum": g["precipitation"].sum(min_count=1),
@@ -102,7 +113,9 @@ def fetch_deterministic(cfg, start):
                 report.fail(m["label"], "no data over the region")
                 continue
             out.append({"id": mid, "label": m["label"], "source": "open-meteo", "tier": m.get("tier", "global"),
-                        "run": None, "range_days": rng, "dates": dates, "data": data})
+                        "run": None, "range_days": rng, "dates": dates, "data": data,
+                        "hourly": {"times": [t.strftime("%Y-%m-%dT%H:00Z") for t in hrs], "step": [1] * len(hrs), **hourly}
+                        if hrs is not None and len(hrs) else None})
             log.info("supplement %s (%s): %d days", m["label"], mid, rng)
         except Exception as e:
             log.warning("supplement %s: skipped (%s)", m["label"], e)

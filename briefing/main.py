@@ -124,7 +124,7 @@ def collect(cfg: dict, out: Path, demo: bool = False, products: bool = True) -> 
     # ---- forecast context: AR strength, pressure gradients, pass snow level, ensemble odds, and
     # how much has already fallen (observed). Each is optional; a failure leaves it out.
     # when the strongest gusts and heaviest precipitation come at each location (next 2 days)
-    peak_timing = safe("peak timing", lambda: timing.compute(grib_models, cfg, start))
+    peak_timing = safe("peak timing", lambda: timing.compute(models, cfg, start))
     ar = safe("atmospheric rivers", lambda: context.atmospheric_rivers(grib_models, cfg))
     ar_out = safe("AR coast outlook", lambda: context.ar_coast(grib_models, cfg, start, analysis.windows(cfg)))
     grads = safe("pressure gradients", lambda: context.gradients(grib_models, cfg), [])

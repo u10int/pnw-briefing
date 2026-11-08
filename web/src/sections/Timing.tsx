@@ -50,6 +50,8 @@ export function inWindow(data: Briefing, v: Var, list: PeakPeriod[] | undefined)
   return (list ?? []).filter((e) => { const [a, b] = spanOf(v, e); return b > t0 && a < t1 })
 }
 
+/** The current time: a red line, so it can't be mistaken for a peak marker. */
+const NOW = "#e5484d"
 const PRECIP_BAR = { moderate: "#9cc5ef", heavy: "#2563c9" }
 const barStyle = (v: Var, e: PeakPeriod): React.CSSProperties =>
   v === "gust" ? rampCell(e.peak, GUST) : { background: e.heavy ? PRECIP_BAR.heavy : PRECIP_BAR.moderate, color: e.heavy ? "#fff" : "#10243f" }
@@ -82,7 +84,7 @@ export function PeakTimingCard({ data, v }: { data: Briefing; v: Var }) {
   const lines = (
     <div className="pointer-events-none absolute inset-0" aria-hidden>
       {ticks.map((x) => <div key={x} className={`absolute inset-y-0 border-l ${isMidnight(x) ? "border-border" : "border-dashed border-border/60"}`} style={{ left: `${pct(x)}%` }} />)}
-      {nowAt != null && <div className="absolute inset-y-0 border-l-2 border-foreground/60" style={{ left: `${nowAt}%` }} />}
+      {nowAt != null && <div className="absolute inset-y-0 border-l-2" style={{ left: `${nowAt}%`, borderColor: NOW }} />}
     </div>
   )
   const what = v === "gust"
@@ -93,7 +95,7 @@ export function PeakTimingCard({ data, v }: { data: Briefing; v: Var }) {
       <CardHeader>
         <CardTitle>{v === "gust" ? "When the strongest gusts come" : "When the heaviest precipitation comes"}</CardTitle>
         <CardDescription>
-          The next {WINDOW_H} hours at the locations where {what}, in the median of the hourly models ({t.models.join(", ")}). Each bar is how long it lasts; the tick marks the peak. Hover for details.
+          The next {WINDOW_H} hours at the locations where {what}, from the median of {t.models.length} models with hourly output ({t.models.join(", ")}). Each bar is how long it lasts and the dot marks the peak; the red line is now. Hover for details.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -101,13 +103,16 @@ export function PeakTimingCard({ data, v }: { data: Briefing; v: Var }) {
           <div className="space-y-1">
             <div className="grid grid-cols-[7.5rem_1fr] gap-3 sm:grid-cols-[11rem_1fr]">
               <div />
-              <div ref={ref} className="relative h-9 text-[11px] leading-tight text-muted-foreground">
+              <div ref={ref} className="relative h-[3.25rem] text-[11px] leading-tight text-muted-foreground">
                 {ticks.map((x) => (
                   <span key={x} className={`absolute top-0 -translate-x-1/2 whitespace-nowrap tabular-nums ${isMidnight(x) ? "font-medium text-foreground" : ""}`}
                         style={{ left: `${pct(x)}%`, display: px < 420 && !isMidnight(x) && tickLabel(x) !== "Noon" ? "none" : undefined }}>
                     {isMidnight(x) ? <>{ptDay(x)}<span className="block text-center font-normal text-muted-foreground">Midnight</span></> : <span className="mt-[15px] block">{tickLabel(x)}</span>}
                   </span>
                 ))}
+                {nowAt != null && (
+                  <span className="absolute bottom-0 -translate-x-1/2 rounded-sm px-1 text-[10px] font-semibold leading-4 text-white uppercase" style={{ left: `${nowAt}%`, background: NOW }}>Now</span>
+                )}
               </div>
             </div>
             {rows.map(({ p, es }) => (
@@ -117,17 +122,34 @@ export function PeakTimingCard({ data, v }: { data: Briefing; v: Var }) {
                   {lines}
                   {es.map((e, i) => {
                     const [a, b] = spanOf(v, e)
-                    const l = pct(a), r = pct(b), w = Math.max(r - l, 0.8)
-                    const pk = ((pct(Date.parse(e.peakTime)) - l) / w) * 100
+                    const l = pct(a), w = Math.max(pct(b) - l, 0)
+                    // in pixels, with a minimum width so a one-hour bar still shows
+                    const lx = (l / 100) * px, wx = Math.max((w / 100) * px, 8)
+                    const pkx = ((pct(Date.parse(e.peakTime)) - l) / 100) * px
                     const text = peakText(v, e).replace(" (heavy)", "")
-                    const fits = (w / 100) * px >= text.length * 6.2 + 12
+                    const tw = text.length * 6.2
+                    const fits = wx >= tw + 22
+                    // otherwise the value goes beside the bar: after it, or before it near the right edge,
+                    // and not at all if it would run into the next bar (the tooltip still has it)
+                    const after = lx + wx + 4 + tw <= px
+                    const next = es[i + 1] ? (pct(spanOf(v, es[i + 1])[0]) / 100) * px : Infinity
+                    const outside = !fits && (after ? lx + wx + 4 + tw < next - 2 : lx - 4 - tw >= 0)
+                    const peakLeft = pkx < wx / 2
                     return (
-                      <Tooltip key={i}>
+                      <React.Fragment key={i}>
+                      {outside && (
+                        <span className="pointer-events-none absolute top-1/2 z-[1] -translate-y-1/2 rounded-sm bg-card px-0.5 text-[11px] font-medium whitespace-nowrap text-muted-foreground tabular-nums"
+                          style={after ? { left: lx + wx + 4 } : { right: px - lx + 4 }}>{text}</span>
+                      )}
+                      <Tooltip>
                         <TooltipTrigger asChild>
                           <div tabIndex={0} aria-label={`${p.name}: ${periodLine(v, e)}`}
-                            className="absolute top-1/2 flex h-6 -translate-y-1/2 items-center overflow-hidden rounded-[4px] px-1.5 text-[11px] font-semibold whitespace-nowrap tabular-nums shadow-[inset_0_0_0_1px_rgb(0_0_0/0.08)] outline-offset-1 focus-visible:outline-2 focus-visible:outline-ring"
-                            style={{ left: `${l}%`, width: `${w}%`, ...barStyle(v, e) }}>
-                            {pk >= 0 && pk <= 100 && <span className="absolute inset-y-0 w-0.5 bg-current opacity-60" style={{ left: `${pk}%` }} aria-hidden />}
+                            className={`absolute top-1/2 flex h-6 -translate-y-1/2 items-center overflow-hidden rounded-[4px] px-1.5 text-[11px] font-semibold whitespace-nowrap tabular-nums shadow-[inset_0_0_0_1px_rgb(0_0_0/0.08)] outline-offset-1 focus-visible:outline-2 focus-visible:outline-ring ${peakLeft ? "justify-end" : "justify-start"}`}
+                            style={{ left: lx, width: wx, ...barStyle(v, e) }}>
+                            {/* the peak: a dot in the bar's text colour (the now line is a red rule) */}
+                            {pkx >= 0 && pkx <= wx && (
+                              <span className="absolute top-1/2 size-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-current" style={{ left: Math.min(Math.max(pkx, 4), wx - 4) }} aria-hidden />
+                            )}
                             {fits && <span className="relative">{text}</span>}
                           </div>
                         </TooltipTrigger>
@@ -138,6 +160,7 @@ export function PeakTimingCard({ data, v }: { data: Briefing; v: Var }) {
                           <p className="opacity-80">{e.models} of {e.of} hourly models reach it{spread(e) ? `; ${spread(e)}` : ""}</p>
                         </TooltipContent>
                       </Tooltip>
+                      </React.Fragment>
                     )
                   })}
                 </div>
