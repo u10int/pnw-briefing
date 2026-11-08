@@ -108,6 +108,13 @@ export interface PeakPeriod {
   start: string; end: string; peak: number; peakTime: string; models: number; of: number
   peakFrom: string | null; peakTo: string | null; total?: number; heavy?: boolean
 }
+export interface FrontFrame {
+  kind: "analysis" | "forecast"; valid: string; day?: number
+  fronts: { type: "cold" | "warm" | "stationary" | "occluded" | "trough" | "dryline" | "squall"; coords: [number, number][] }[]
+}
+/** WPC surface fronts: the last day's analyses (every 3 h), then the forecast chart's days 1 – 3. */
+export interface Fronts { source: string; frames: FrontFrame[] }
+
 export interface PeakTiming {
   hours: number; models: string[]
   weighted?: string[]                                  // the high-resolution models, counted double
@@ -229,6 +236,7 @@ export interface Briefing {
   rivers?: Rivers | null                                // NWRFC river forecasts; absent before they were added
   // the headline and lead, written at build time from the briefing's facts; absent before it was added
   summary?: { headline: string; lede: string; source: "openai" | "rules"; model?: string } | null
+  fronts?: Fronts | null                               // WPC surface fronts for the map; absent before it was added
   timing?: PeakTiming | null                           // when gusts and heavy precipitation peak, by location; absent before it was added
   verification?: Verification | null                   // recent forecasts scored against MRMS; absent before it was added
   tempVerification?: TempVerification | null           // recent highs and lows scored against URMA; absent before it was added

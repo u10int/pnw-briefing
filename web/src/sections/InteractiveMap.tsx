@@ -28,8 +28,9 @@ import { ParticleLayer, type WindDraw } from "@/lib/gl/particle-layer"
 import { type Grid, sameGrid } from "@/lib/gl/util"
 import { AR_COLORS, AR_LABELS, FLOOD_COLORS, FLOOD_LABELS, FRZ, GUST, IVT, legendBins, PCT, PGRAD, PRECIP, PROB, PTYPE_COLORS, PTYPE_NAMES, type Ramp, REFC, RH, SMOKE, SNOW, SPREAD, TDEP, TEMP, WIND } from "@/lib/ramps"
 import { contrastTextColor } from "@/lib/contrast"
-import type { ArCoast, Briefing, Cog, Convective, ExtremeVar, RiverGauge, Rivers, FieldEntry, FieldsManifest, FieldVar, Gradient } from "@/types"
+import type { ArCoast, Briefing, Cog, Convective, ExtremeVar, FrontFrame, Fronts, RiverGauge, Rivers, FieldEntry, FieldsManifest, FieldVar, Gradient } from "@/types"
 import { ptDayHour } from "@/lib/format"
+import { addFrontLayers, FRONT_COLORS, FRONT_LAYERS, frontFrame, frontGeoJSON } from "@/lib/fronts"
 import { openLocation } from "@/lib/locationlink"
 
 // ------------------------------------------------------------------ map plumbing
@@ -239,10 +240,10 @@ function chevronImage(): ImageData {
 
 type Status = { kind: "loading" | "ready" | "error" | "empty"; note?: string }
 
-function MapPane({ data, view, clock, opacity, smooth, particles, particleColor, sync, terrain, sat }: {
+function MapPane({ data, view, clock, opacity, smooth, particles, particleColor, sync, terrain, sat, fronts }: {
   data: Briefing; view: View | null; clock: Clock; opacity: number; smooth: boolean
   particles: boolean; particleColor: [number, number, number, number]; sync: ReturnType<typeof useCameraSync>
-  terrain: boolean; sat: { kind: SatKind; times: SatTimes } | null
+  terrain: boolean; sat: { kind: SatKind; times: SatTimes } | null; fronts: Fronts | null
 }) {
   const el = React.useRef<HTMLDivElement>(null)
   const ready = React.useRef<Promise<maplibregl.Map> | null>(null)
@@ -353,6 +354,9 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
       m.addLayer({ id: "ar", type: "circle", source: "ar", paint: {
         "circle-radius": ["case", [">", ["get", "rank"], 0], 8.5, 4], "circle-color": ["get", "color"],
         "circle-stroke-color": "#fff", "circle-stroke-width": ["case", [">", ["get", "rank"], 0], 2, 1.2] } })
+      // WPC fronts, over everything but the labels and markers (hidden until turned on); highs and
+      // lows come from the models' own pressure fields
+      addFrontLayers(m, labels)
       const arFont = (m.getStyle().layers.find((l) => l.type === "symbol" && (l.layout as Record<string, unknown> | undefined)?.["text-font"])?.layout as Record<string, unknown> | undefined)?.["text-font"]
       if (m.getStyle().glyphs && Array.isArray(arFont))
         m.addLayer({ id: "ar-rank", type: "symbol", source: "ar", filter: ["!=", ["get", "num"], ""],
@@ -492,6 +496,25 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
     return () => { stop = true; unsub(); hideAll() }
   }, [sat?.kind, sat?.times])
 
+  // WPC fronts: the analysis or forecast frame nearest the clock, swapped in as the clock moves
+  const [frontLabel, setFrontLabel] = React.useState<string | null>(null)
+  React.useEffect(() => {
+    const vis = (on: boolean) => ready.current?.then((m) => FRONT_LAYERS.forEach((id) => m.getLayer(id) && m.setLayoutProperty(id, "visibility", on ? "visible" : "none")))
+    if (!fronts) { vis(false); setFrontLabel(null); return }
+    vis(true)
+    let shown: FrontFrame | null | undefined
+    const update = () => {
+      const fr = frontFrame(fronts, clock.time)
+      if (fr === shown) return
+      shown = fr
+      ready.current?.then((m) => (m.getSource("fronts") as GeoJSONSource | undefined)?.setData(frontGeoJSON(fr)))
+      setFrontLabel(fr ? `Fronts: WPC ${fr.kind === "analysis" ? "analysis" : "forecast"}, ${timeLabel(fr.valid)}` : "Fronts: none within a few hours of this time")
+    }
+    update()
+    const unsub = clock.subscribe(update)
+    return () => { unsub(); vis(false) }
+  }, [fronts])
+
   return (
     <div className="relative overflow-hidden rounded-lg border">
       <div ref={el} className="h-[520px] w-full max-sm:h-[420px]" role="region" aria-label={`Map: ${view?.title ?? ""}`} />
@@ -499,6 +522,7 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
         <div className="font-medium">{view?.title}</div>
         {sub && <div className="text-muted-foreground">{sub}</div>}
         {satLabel && <div className="text-muted-foreground">{satLabel}</div>}
+        {frontLabel && <div className="text-muted-foreground">{frontLabel}</div>}
       </div>
       {status.kind !== "ready" && (
         <div className="pointer-events-none absolute inset-0 grid place-items-center p-6 text-center text-sm text-muted-foreground">
@@ -517,6 +541,28 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
 }
 
 // ------------------------------------------------------------------ legends
+
+/** Front symbols, drawn as on the map. */
+function FrontLegend() {
+  const pip = (d: string, color: string) => <path d={d} fill={color} />
+  const tri = (x: number, c: string, up = true) => pip(up ? `M${x - 5.5} 8 L${x} 0.5 L${x + 5.5} 8 Z` : `M${x - 5.5} 8 L${x} 15.5 L${x + 5.5} 8 Z`, c)
+  const semi = (x: number, c: string) => pip(`M${x - 5.5} 8 A5.5 5.5 0 0 1 ${x + 5.5} 8 Z`, c)
+  const items: [string, React.ReactNode][] = [
+    ["Cold", <>{<line x1="0" y1="8" x2="36" y2="8" stroke={FRONT_COLORS.cold} strokeWidth="2.4" />}{tri(10, FRONT_COLORS.cold)}{tri(26, FRONT_COLORS.cold)}</>],
+    ["Warm", <>{<line x1="0" y1="8" x2="36" y2="8" stroke={FRONT_COLORS.warm} strokeWidth="2.4" />}{semi(10, FRONT_COLORS.warm)}{semi(26, FRONT_COLORS.warm)}</>],
+    ["Occluded", <>{<line x1="0" y1="8" x2="36" y2="8" stroke={FRONT_COLORS.occluded} strokeWidth="2.4" />}{tri(10, FRONT_COLORS.occluded)}{semi(26, FRONT_COLORS.occluded)}</>],
+    ["Stationary", <>{<line x1="0" y1="8" x2="36" y2="8" stroke={FRONT_COLORS.warm} strokeWidth="2.4" />}<line x1="0" y1="8" x2="18" y2="8" stroke={FRONT_COLORS.cold} strokeWidth="2.4" />{tri(9, FRONT_COLORS.cold, false)}{semi(27, FRONT_COLORS.warm)}</>],
+    ["Trough", <line x1="0" y1="8" x2="36" y2="8" stroke={FRONT_COLORS.trough} strokeWidth="1.7" strokeDasharray="5 4" />],
+  ]
+  return (
+    <div className="space-y-1.5">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+        {items.map(([label, svg]) => <span key={label} className="flex items-center gap-1.5"><svg width="36" height="16" viewBox="0 0 36 16" aria-hidden>{svg}</svg>{label}</span>)}
+      </div>
+      <p className="text-xs text-muted-foreground">Fronts from the Weather Prediction Center: its surface analyses every 3 hours for the last day, then its forecast chart once a day for days 1 – 3, so they move in steps rather than with each model hour. Symbols point the way the front is moving.</p>
+    </div>
+  )
+}
 
 function RampLegend({ ramp, every = 1, note }: { ramp: Ramp; every?: number; note?: string }) {
   const bins = legendBins(ramp, undefined, every)
@@ -1266,6 +1312,8 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
   const [terrain, setTerrain] = useStoredFlag("pnw-briefing.map.terrain", true)
   const [satKind, setSatKind] = React.useState<SatKind | "off">("off")
   const [showPairs, setShowPairs] = useStoredFlag("pnw-briefing.map.pairs", true)
+  const [showFronts, setShowFronts] = useStoredFlag("pnw-briefing.map.fronts", false)
+  const frontsOn = showFronts && data.fronts?.frames.length ? data.fronts : null
   const pairList = React.useMemo(() => (data.gradients ?? []).filter((g) => g.locs && g.series.length), [data])
   const [compare, setCompare] = React.useState(false)
   const clock = React.useMemo(() => new Clock(), [])
@@ -1502,7 +1550,9 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
           )}
           <div className="max-sm:w-full sm:ml-auto">
             <MapOptions
-              overlays={mode === "hourly" ? [
+              overlays={[
+                !!data.fronts?.frames.length && <OptionRow key="fronts" id="fronts" label="Fronts (WPC)" checked={showFronts} onChange={setShowFronts} />,
+              ...(mode === "hourly" ? [
                 entriesA.mslp && <OptionRow key="iso" id="isobars" label="Isobars" checked={isobars} onChange={setIsobars} />,
                 pairList.length > 0 && <OptionRow key="pairs" id="pairs" label="Gradient pairs" checked={showPairs} onChange={setShowPairs} />,
                 hasWind && <OptionRow key="part" id="particles" label={layer === "ivt" ? "Moisture particles" : "Wind particles"} checked={particles} onChange={setParticles} />,
@@ -1518,8 +1568,8 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
                     </Select>
                   </div>
                 ),
-              ].filter(Boolean) : []}
-              active={mode === "hourly" ? [entriesA.mslp && isobars, pairList.length > 0 && showPairs, hasWind && particles, satAll && satKind !== "off"].filter(Boolean).length : 0}
+              ] : [])].filter(Boolean)}
+              active={(frontsOn ? 1 : 0) + (mode === "hourly" ? [entriesA.mslp && isobars, pairList.length > 0 && showPairs, hasWind && particles, satAll && satKind !== "off"].filter(Boolean).length : 0)}
               display={<>
                 <OptionRow id="terrain" label="Terrain" checked={terrain} onChange={setTerrain} />
                 <OptionRow id="smooth" label="Smooth" checked={smooth} onChange={setSmooth} />
@@ -1535,10 +1585,11 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
         {mode === "hourly" && times.length > 0 && <TimeBar times={times} clock={clock} playing={playing} setPlaying={setPlaying} />}
 
         <div className={`grid gap-3 ${showB ? "lg:grid-cols-2" : ""}`}>
-          <MapPane data={data} view={viewA} clock={clock} opacity={opacity} smooth={smooth} particles={showParticles} particleColor={ink} sync={sync} terrain={terrain} sat={sat} />
-          {showB && <MapPane data={data} view={viewB} clock={clock} opacity={opacity} smooth={smooth} particles={showParticles} particleColor={ink} sync={sync} terrain={terrain} sat={sat} />}
+          <MapPane data={data} view={viewA} clock={clock} opacity={opacity} smooth={smooth} particles={showParticles} particleColor={ink} sync={sync} terrain={terrain} sat={sat} fronts={frontsOn} />
+          {showB && <MapPane data={data} view={viewB} clock={clock} opacity={opacity} smooth={smooth} particles={showParticles} particleColor={ink} sync={sync} terrain={terrain} sat={sat} fronts={frontsOn} />}
         </div>
 
+        {frontsOn && <FrontLegend />}
         {mode === "totals" ? (variable === "ar" ? <ArLegend /> : variable === "rivers" ? <RiverLegend /> : variable === "storms" ? <StormLegend day={d} /> : <RampLegend ramp={totRamp} every={totRamp.ticks ? 1 : totRamp.levels.length > 16 ? 2 : 1} />) : (
           <div className="space-y-2">
             {layer === "radar" && <RadarLegend withRefc={!!entriesA.refc} />}

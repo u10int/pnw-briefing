@@ -464,3 +464,23 @@ def convective(cfg):
                          "location": "Forks", "county": "Clallam", "state": "WA", "comments": "Measured gust (demo)."},
                         {"type": "hail", "time": iso(now - timedelta(hours=5)), "lat": 47.0, "lon": -123.8, "mag": "75",
                          "location": "Aberdeen", "county": "Grays Harbor", "state": "WA", "comments": "Pea to dime size hail (demo)."}]}
+
+
+def fronts(cfg):
+    """A Pacific cold front and occlusion moving onshore: three analyses up to now, then three
+    forecast frames."""
+    now = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
+    now -= timedelta(hours=now.hour % 3)
+    frames = []
+    for k, (h, kind) in enumerate([(-6, "analysis"), (-3, "analysis"), (0, "analysis"), (12, "forecast"), (24, "forecast"), (48, "forecast")]):
+        dx = 1.1 * k if h <= 0 else 1.1 * 2 + h / 12 * 2.2
+        lo = [-134.0 + dx * 0.6, 50.5]
+        frames.append({"kind": kind, "valid": (now + timedelta(hours=h)).isoformat(), **({"day": k - 2} if kind == "forecast" else {}),
+                       "fronts": [
+                           {"type": "occluded", "coords": [lo, [lo[0] + 2.5, 50.0], [lo[0] + 4.0, 48.8]]},
+                           {"type": "cold", "coords": [[lo[0] + 4.0, 48.8], [-128.5 + dx, 46.5], [-130.0 + dx, 43.5], [-133.0 + dx, 40.0]]},
+                           {"type": "warm", "coords": [[lo[0] + 4.0, 48.8], [-124.0 + dx * 0.8, 48.0], [-121.0 + dx * 0.8, 46.8]]},
+                           {"type": "trough", "coords": [[-136.0 + dx, 47.5], [-138.0 + dx, 44.0]]},
+                           {"type": "stationary", "coords": [[-118.0, 51.5], [-114.0, 50.0], [-110.0, 49.5]]},
+                       ]})
+    return {"source": "NOAA/NWS Weather Prediction Center (demo)", "frames": frames}
