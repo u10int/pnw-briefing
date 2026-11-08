@@ -16,6 +16,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { FALLBACK, STYLE_URL, withKey } from "@/lib/basemap"
 import { loadCog } from "@/lib/cog"
 import { MRMS_MODEL } from "@/lib/mrms-name"
+import { nearestFrame, preload, SAT_KINDS, type SatKind, satTimes, satUrl } from "@/lib/satellite"
 import { bicubicAt, contourLines, fieldUrl, gridPos, loadField, nearestAt, nearestTime, type Elevation, elevationFor, pressureCenters, pressureGradient, windArrows, windFrom } from "@/lib/fields"
 import { GRAD_COLORS, gradLevel, pairName, seriesAt } from "@/lib/gradients"
 import type { MapRequest } from "@/lib/maplink"
@@ -235,10 +236,10 @@ function chevronImage(): ImageData {
 
 type Status = { kind: "loading" | "ready" | "error" | "empty"; note?: string }
 
-function MapPane({ data, view, clock, opacity, smooth, particles, particleColor, sync, terrain }: {
+function MapPane({ data, view, clock, opacity, smooth, particles, particleColor, sync, terrain, sat }: {
   data: Briefing; view: View | null; clock: Clock; opacity: number; smooth: boolean
   particles: boolean; particleColor: [number, number, number, number]; sync: ReturnType<typeof useCameraSync>
-  terrain: boolean
+  terrain: boolean; sat: { kind: SatKind; times: string[] } | null
 }) {
   const el = React.useRef<HTMLDivElement>(null)
   const ready = React.useRef<Promise<maplibregl.Map> | null>(null)
@@ -429,12 +430,49 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
     ready.current?.then((m) => m.getLayer("hillshade") && m.setLayoutProperty("hillshade", "visibility", terrain ? "visible" : "none"))
   }, [terrain])
 
+  // Satellite imagery under the data: the frame nearest the clock (within 20 minutes), one image
+  // for the whole domain, decoded before it's swapped in; the next frames load ahead in playback.
+  const [satLabel, setSatLabel] = React.useState<string | null>(null)
+  React.useEffect(() => {
+    const d = data.domain
+    const box = { west: d.lon_min, south: d.lat_min, east: d.lon_max, north: d.lat_max }
+    const corners: [[number, number], [number, number], [number, number], [number, number]] =
+      [[box.west, box.north], [box.east, box.north], [box.east, box.south], [box.west, box.south]]
+    let shown: string | null = null, want: string | null = null, stop = false
+    const hide = () => ready.current?.then((m) => m.getLayer("sat") && m.setLayoutProperty("sat", "visibility", "none"))
+    if (!sat || !sat.times.length) { hide(); setSatLabel(null); return }
+    const update = () => {
+      const i = clock.time == null ? -1 : nearestFrame(sat.times, clock.time)
+      if (i < 0) { want = null; shown = null; hide(); setSatLabel(null); return }
+      const url = satUrl(sat.kind, sat.times[i], box)
+      if (clock.playing) for (const k of [1, 2, 3]) if (sat.times[i + k]) preload(satUrl(sat.kind, sat.times[i + k], box)).catch(() => {})
+      if (url === shown || url === want) return
+      want = url
+      preload(url).then(() => ready.current!).then((m) => {
+        if (stop || want !== url) return
+        const src = m.getSource("sat") as maplibregl.ImageSource | undefined
+        if (src) src.updateImage({ url, coordinates: corners })
+        else {
+          m.addSource("sat", { type: "image", url, coordinates: corners })
+          m.addLayer({ id: "sat", type: "raster", source: "sat", paint: { "raster-opacity": 0.9, "raster-fade-duration": 0 } }, "grid")
+        }
+        m.setLayoutProperty("sat", "visibility", "visible")
+        shown = url
+        setSatLabel(`${SAT_KINDS[sat.kind].label} satellite, ${timeLabel(sat.times[i])}`)
+      }).catch(() => {})
+    }
+    update()
+    const unsub = clock.subscribe(update)
+    return () => { stop = true; unsub(); hide() }
+  }, [sat?.kind, sat?.times])
+
   return (
     <div className="relative overflow-hidden rounded-lg border">
       <div ref={el} className="h-[520px] w-full max-sm:h-[420px]" role="region" aria-label={`Map: ${view?.title ?? ""}`} />
       <div className="pointer-events-none absolute top-2 left-2 max-w-[70%] rounded-md bg-card/95 px-2.5 py-1.5 text-xs shadow-sm ring-1 ring-border">
         <div className="font-medium">{view?.title}</div>
         {sub && <div className="text-muted-foreground">{sub}</div>}
+        {satLabel && <div className="text-muted-foreground">{satLabel}</div>}
       </div>
       {status.kind !== "ready" && (
         <div className="pointer-events-none absolute inset-0 grid place-items-center p-6 text-center text-sm text-muted-foreground">
@@ -977,6 +1015,21 @@ function useMrms(data: Briefing, on: boolean): FieldEntry | null {
   return entry
 }
 
+/** GOES frame times from nowCOAST (about the last 7 hours), refreshed every 5 minutes while the
+ *  hourly map is open; null when the service can't be reached (the option is then hidden). */
+function useSatTimes(on: boolean): Record<SatKind, string[]> | null {
+  const [times, setTimes] = React.useState<Record<SatKind, string[]> | null>(null)
+  React.useEffect(() => {
+    if (!on) return
+    let stop = false
+    const load = () => satTimes().then((t) => { if (!stop && Object.values(t).some((x) => x.length)) setTimes(t) }).catch(() => {})
+    load()
+    const id = setInterval(load, 5 * 60e3)
+    return () => { stop = true; clearInterval(id) }
+  }, [on])
+  return times
+}
+
 function useFields(data: Briefing): FieldEntry[] {
   const inline = (data as unknown as { _fields?: FieldsManifest })._fields
   const [list, setList] = React.useState<FieldEntry[]>(inline?.fields ?? [])
@@ -1109,6 +1162,7 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
   const [smooth, setSmooth] = useStoredFlag("pnw-briefing.map.smooth", false)
   const [particles, setParticles] = useStoredFlag("pnw-briefing.map.particles", true)
   const [terrain, setTerrain] = useStoredFlag("pnw-briefing.map.terrain", true)
+  const [satKind, setSatKind] = React.useState<SatKind | "off">("off")
   const [showPairs, setShowPairs] = useStoredFlag("pnw-briefing.map.pairs", true)
   const pairList = React.useMemo(() => (data.gradients ?? []).filter((g) => g.locs && g.series.length), [data])
   const [compare, setCompare] = React.useState(false)
@@ -1122,6 +1176,8 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
 
   // hourly state
   const mrms = useMrms(data, mode === "hourly" && active)
+  const satAll = useSatTimes(mode === "hourly" && active)
+  const sat = React.useMemo(() => (satAll && satKind !== "off" && satAll[satKind].length ? { kind: satKind, times: satAll[satKind] } : null), [satAll, satKind])
   const byModel = React.useMemo(() => {
     const m = new Map<string, { tier: string; entries: Record<string, FieldEntry> }>()
     for (const e of mrms ? [mrms, ...fields] : fields) {
@@ -1342,8 +1398,20 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
                 entriesA.mslp && <OptionRow key="iso" id="isobars" label="Isobars" checked={isobars} onChange={setIsobars} />,
                 pairList.length > 0 && <OptionRow key="pairs" id="pairs" label="Gradient pairs" checked={showPairs} onChange={setShowPairs} />,
                 hasWind && <OptionRow key="part" id="particles" label={layer === "ivt" ? "Moisture particles" : "Wind particles"} checked={particles} onChange={setParticles} />,
+                satAll && (
+                  <div key="sat" className="flex items-center justify-between gap-4 py-1">
+                    <Label className="font-normal">Satellite</Label>
+                    <Select value={satKind} onValueChange={(v) => setSatKind(v as SatKind | "off")}>
+                      <SelectTrigger size="sm" className="w-[130px]" aria-label="Satellite imagery"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="off">Off</SelectItem>
+                        {(Object.keys(SAT_KINDS) as SatKind[]).map((k) => <SelectItem key={k} value={k}>{SAT_KINDS[k].label}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                ),
               ].filter(Boolean) : []}
-              active={mode === "hourly" ? [entriesA.mslp && isobars, pairList.length > 0 && showPairs, hasWind && particles].filter(Boolean).length : 0}
+              active={mode === "hourly" ? [entriesA.mslp && isobars, pairList.length > 0 && showPairs, hasWind && particles, satAll && satKind !== "off"].filter(Boolean).length : 0}
               display={<>
                 <OptionRow id="terrain" label="Terrain" checked={terrain} onChange={setTerrain} />
                 <OptionRow id="smooth" label="Smooth" checked={smooth} onChange={setSmooth} />
@@ -1359,8 +1427,8 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
         {mode === "hourly" && times.length > 0 && <TimeBar times={times} clock={clock} playing={playing} setPlaying={setPlaying} />}
 
         <div className={`grid gap-3 ${showB ? "lg:grid-cols-2" : ""}`}>
-          <MapPane data={data} view={viewA} clock={clock} opacity={opacity} smooth={smooth} particles={showParticles} particleColor={ink} sync={sync} terrain={terrain} />
-          {showB && <MapPane data={data} view={viewB} clock={clock} opacity={opacity} smooth={smooth} particles={showParticles} particleColor={ink} sync={sync} terrain={terrain} />}
+          <MapPane data={data} view={viewA} clock={clock} opacity={opacity} smooth={smooth} particles={showParticles} particleColor={ink} sync={sync} terrain={terrain} sat={sat} />
+          {showB && <MapPane data={data} view={viewB} clock={clock} opacity={opacity} smooth={smooth} particles={showParticles} particleColor={ink} sync={sync} terrain={terrain} sat={sat} />}
         </div>
 
         {mode === "totals" ? (variable === "ar" ? <ArLegend /> : variable === "rivers" ? <RiverLegend /> : <RampLegend ramp={totRamp} every={totRamp.ticks ? 1 : totRamp.levels.length > 16 ? 2 : 1} />) : (
