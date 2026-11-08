@@ -89,7 +89,13 @@ class Clock {
   time: number | null = null
   playing = false
   version = 0
+  /** Channels still loading the data for the current time; playback waits for them. */
+  busy = new Set<object>()
   private subs = new Set<() => void>()
+  hold(who: object, on: boolean) {
+    if (on) this.busy.add(who)
+    else this.busy.delete(who)
+  }
   set(time: number | null, playing = this.playing) {
     this.time = time
     this.playing = playing
@@ -173,27 +179,30 @@ class Channel<T> {
   private pending: string | null = null
   private seq = 0
   private t = 0
-  constructor(private apply: (v: T | null, t: number) => void, private setT: (t: number) => void, private fail?: () => void) {}
+  constructor(private apply: (v: T | null, t: number) => void, private setT: (t: number) => void, private fail?: () => void,
+              private busy?: (on: boolean) => void) {}
+  private settle() { this.pending = null; this.busy?.(false) }
   push(c: Choice<T> | null) {
     if (!c) {
-      if (this.key !== "") { this.seq++; this.key = ""; this.pending = null; this.apply(null, 0) }
+      if (this.key !== "") { this.seq++; this.key = ""; this.settle(); this.apply(null, 0) }
       return
     }
     this.t = c.t
     if (c.key === this.key) {
-      if (this.pending) { this.seq++; this.pending = null }
+      if (this.pending) { this.seq++; this.settle() }
       this.setT(c.t)
       return
     }
     if (c.key === this.pending) return
     const s = ++this.seq
     this.pending = c.key
+    this.busy?.(true)
     c.load().then(
-      (v) => { if (s === this.seq) { this.key = c.key; this.pending = null; this.apply(v, this.t) } },
-      () => { if (s === this.seq) { this.key = c.key; this.pending = null; this.fail?.() } },
+      (v) => { if (s === this.seq) { this.key = c.key; this.settle(); this.apply(v, this.t) } },
+      () => { if (s === this.seq) { this.key = c.key; this.settle(); this.fail?.() } },
     )
   }
-  cancel() { this.seq++; this.pending = null }
+  cancel() { this.seq++; this.settle() }
 }
 
 // ------------------------------------------------------------------ the map pane
@@ -376,6 +385,7 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
       },
       (t) => { loaded.current.t = t; grid.setT(t) },
       () => { first = false; setStatus({ kind: "error" }) },
+      (on) => clock.hold(gridCh, on),
     )
     const ovCh = new Channel<Overlays>(
       (o) => {
@@ -391,7 +401,7 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
       },
       () => {},
     )
-    const windCh = new Channel<WindDraw>((w, t) => pl.setWind(w, t), (t) => pl.setT(t))
+    const windCh = new Channel<WindDraw>((w, t) => pl.setWind(w, t), (t) => pl.setT(t), undefined, (on) => clock.hold(windCh, on))
     const update = () => {
       const v = viewRef.current!
       const interp = clock.playing
@@ -930,7 +940,7 @@ function hourlyView(model: string, entries: Record<string, FieldEntry>, layer: H
       const i = Math.floor(posOf(msOf(prim.times), time))
       for (const e of [prim, entries.ptype, entries.v10, entries.u10, entries.ivtv]) {
         if (!e) continue
-        for (let k = 1; k <= 3; k++) {
+        for (let k = 1; k <= 6; k++) {
           const iso = prim.times[i + k]
           if (!iso) break
           const j = nearestTime(e.times, iso, 0.6)
@@ -1167,14 +1177,24 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
   const accStart = timeLabel(data.meta.cycle ?? `${data.dates[0]}T12:00:00Z`)
 
   // Keep the clock on one of the main model's steps when the model or layer changes (or on the
-  // step nearest a moment an "Open on map" link asked for).
+  // step nearest a moment an "Open on map" link asked for). Switching to "Through time" starts at
+  // the current hour when the forecast covers it.
+  const startNow = React.useRef(true)
+  const lastMode = React.useRef(mode)
+  if (lastMode.current !== mode) { lastMode.current = mode; if (mode === "hourly") startNow.current = true }
   React.useEffect(() => {
-    if (!times.length || clock.playing) return
+    if (!times.length || clock.playing || mode !== "hourly") return
     const ms = msOf(times)
     const want = pendingTime.current
     if (want != null && want >= ms[0] && want <= ms[ms.length - 1]) pendingTime.current = null
-    clock.set(ms[Math.round(posOf(ms, want ?? clock.time ?? ms[0]))], false)
-  }, [times, request?.nonce])
+    let target = want ?? clock.time ?? ms[0]
+    if (want == null && startNow.current) {
+      const now = Date.now()
+      if (now >= ms[0] - 1800e3 && now <= ms[ms.length - 1]) target = now
+    }
+    startNow.current = false
+    clock.set(ms[Math.round(posOf(ms, target))], false)
+  }, [times, request?.nonce, mode])
 
   // Playback moves the clock continuously; the maps blend between forecast steps as it does.
   React.useEffect(() => {
@@ -1184,7 +1204,8 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
     if (pos >= ms.length - 1) pos = 0
     let last = performance.now(), raf = 0
     const step = (now: number) => {
-      pos += Math.min(0.1, (now - last) / 1000) / SEC_PER_STEP
+      // hold while a map is still loading the step it needs, rather than skipping past it
+      if (!clock.busy.size) pos += Math.min(0.1, (now - last) / 1000) / SEC_PER_STEP
       last = now
       if (pos > ms.length - 1) pos = 0
       clock.set(timeAt(ms, pos), true)

@@ -26,13 +26,17 @@ export function loadField(e: FieldEntry): Promise<FieldFile> {
       const tiff = await fromArrayBuffer(await res.arrayBuffer())
       const img: GeoTIFFImage = await tiff.getImage()
       const [west, south, east, north] = img.getBoundingBox()
+      // The files are pixel-interleaved, so every band shares the same compressed tiles: reading one
+      // band decodes all of them. Decode the whole file once, then hand out bands from that.
+      let all: Promise<ArrayLike<number>[]> | null = null
       const bands = new Map<number, Promise<Float32Array>>()
       return {
         entry: e, width: img.getWidth(), height: img.getHeight(), west, south, east, north,
         band(i: number) {
           if (!bands.has(i)) {
-            bands.set(i, img.readRasters({ samples: [i] }).then((r) => {
-              const raw = (r as unknown as ArrayLike<number>[])[0]
+            all ??= img.readRasters({ interleave: false }).then((r) => r as unknown as ArrayLike<number>[])
+            bands.set(i, all.then((r) => {
+              const raw = r[i]
               const out = new Float32Array(raw.length)
               for (let k = 0; k < raw.length; k++) out[k] = raw[k] === e.nodata ? NaN : raw[k] * e.scale
               return out
