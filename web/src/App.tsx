@@ -17,6 +17,7 @@ import { extremeTabs, MapCard } from "@/sections/Maps"
 import { Headline } from "@/sections/Overview"
 import { TrendsCard } from "@/sections/Trends"
 import { TempVerificationCard, VerificationCard } from "@/sections/Verify"
+import { ConvectiveCard } from "@/sections/Convective"
 import { ByLocation, RegionTotals } from "@/sections/Totals"
 import { WindByLocation, WindPeaks } from "@/sections/WindTotals"
 import { RainByDayCard } from "@/sections/RainByDay"
@@ -309,7 +310,9 @@ export default function App() {
 
           <TabsContent value="outlooks">
             <Section title="Outlooks and discussions" first
-              description="The national excessive rainfall and extended outlooks, and the full forecast discussions from the Seattle and Portland offices.">
+              description="Thunderstorm outlooks, mesoscale discussions and storm reports from SPC, the national excessive rainfall and extended outlooks, and the full forecast discussions from the Seattle and Portland offices."
+              action={data.convective ? <MapLink req={{ mode: "totals", variable: "storms", days: 1 }} label="Thunderstorm outlook on the map" /> : undefined}>
+              <ConvectiveCard data={data} />
               {data.outlooks ? <>
                 <OutlooksCard data={data} />
                 <FullDiscussions data={data} />

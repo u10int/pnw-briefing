@@ -16,7 +16,7 @@ from zoneinfo import ZoneInfo
 import numpy as np
 import yaml
 
-from . import (alerts, analysis, avalanche, change, cogs, context, extremes, fields, impacts, landslide,
+from . import (alerts, analysis, avalanche, change, cogs, context, convective, extremes, fields, impacts, landslide,
                maps, normals, observed, odds, outlooks, report, rivers, snowpack, summary, tempdep, trends, urma, verify, wildfire)
 from .grib import day0, day12, first_day_hours
 
@@ -226,6 +226,8 @@ def collect(cfg: dict, out: Path, demo: bool = False, products: bool = True) -> 
         "normals": norm,
         "tempDeparture": tdep,
         "alerts": nws_alerts,
+        # thunderstorms: SPC convective outlooks and recent storm reports (mesoscale discussions load live)
+        "convective": safe("thunderstorm outlooks", lambda: convective.fetch(cfg, demo)) if products else None,
         "wildfire": safe("wildfire", lambda: wildfire.fetch(cfg, (nws_alerts or {}).get("zones"), demo, (nws_alerts or {}).get("pages"))) if products else None,
         "ar": ar,
         "arCoast": ar_out,
