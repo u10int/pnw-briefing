@@ -224,7 +224,7 @@ def facts(data: dict, cfg: dict) -> dict:
 
 SYSTEM = """You write the headline and lead for a weather briefing, updated four times a day, covering Western Washington, Northwest Oregon and southwest British Columbia.
 Use only the facts given. Do not add places, timings, numbers or hazards that are not in them, and do not speculate.
-- Headline: at most 10 words, sentence case (capitalise only the first word and proper names), no final period. Lead with the most important impact or event (facts are listed most important first).
+- Headline: at most 10 words, sentence case (capitalise the first word and proper names only), no final period. Lead with the most important impact or event (facts are listed most important first).
 - Lead: one or two short sentences, at most 40 words in all, giving a quick overview of the other key impacts and events, in order of importance. Leave out anything minor.
 - Describe the weather and its impacts, never named NWS products: no "warning", "watch", "advisory" or "statement".
 - Keep it general: broad areas (e.g. "Puget Sound", "the coast", "the Cascade passes") rather than towns, and relative timing ("this weekend", "early next week") rather than dates. Never write calendar dates.
@@ -334,6 +334,11 @@ def by_rules(f: dict) -> dict:
 
 # ---------------------------------------------------------------- entry point
 
+def _cap(s: str) -> str:
+    """First letter upper case: the model sometimes takes "sentence case" to mean none at all."""
+    return s[:1].upper() + s[1:]
+
+
 def overview(data: dict, cfg: dict, demo: bool = False) -> dict:
     f = facts(data, cfg)
     sc = cfg.get("summary") or {}
@@ -345,7 +350,8 @@ def overview(data: dict, cfg: dict, demo: bool = False) -> dict:
             why = check(text, f)
             if why is None:
                 log.info("overview written by %s", model)
-                return {"headline": text["headline"].strip().rstrip("."), "lede": text["lede"].strip(), "source": "openai", "model": model}
+                return {"headline": _cap(text["headline"].strip().rstrip(".")), "lede": _cap(text["lede"].strip()),
+                        "source": "openai", "model": model}
             log.warning("overview from %s not used (%s): %s", model, why, text)
         except Exception as e:
             log.warning("overview model unavailable (%s)", e)

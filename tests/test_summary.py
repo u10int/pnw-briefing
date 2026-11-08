@@ -59,3 +59,12 @@ def test_check_rejects_named_products_and_long_leads():
     long = "Windy on the coast. Rain in the hills. Snow in the passes."
     assert summary.check({"headline": "Windy on the coast", "lede": long}, f) == "too long"
     assert summary.check({"headline": "Windy on the coast", "lede": " ".join(["word"] * 50) + "."}, f) == "too long"
+
+
+def test_model_text_is_capitalised(monkeypatch):
+    cfg = {"timezone": "America/Los_Angeles", "points": [], "regions": {}}
+    data = {"meta": {"issued": "2026-11-07T07:40:00-08:00"}, "windows": [], "events": []}
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
+    monkeypatch.setattr(summary, "ask_model", lambda f, m, k: {"headline": "a quiet stretch ahead", "lede": "nothing stands out."})
+    out = summary.overview(data, cfg)
+    assert out["headline"] == "A quiet stretch ahead" and out["lede"] == "Nothing stands out."
