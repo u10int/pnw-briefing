@@ -17,7 +17,7 @@ import numpy as np
 import yaml
 
 from . import (alerts, analysis, avalanche, change, cogs, context, convective, extremes, fields, impacts, landslide,
-               maps, normals, observed, odds, outlooks, report, rivers, snowpack, summary, tempdep, trends, urma, verify, wildfire)
+               maps, normals, observed, odds, outlooks, report, rivers, snowpack, summary, tempdep, timing, trends, urma, verify, wildfire)
 from .grib import day0, day12, first_day_hours
 
 ROOT = Path(__file__).resolve().parent
@@ -123,6 +123,8 @@ def collect(cfg: dict, out: Path, demo: bool = False, products: bool = True) -> 
 
     # ---- forecast context: AR strength, pressure gradients, pass snow level, ensemble odds, and
     # how much has already fallen (observed). Each is optional; a failure leaves it out.
+    # when the strongest gusts and heaviest precipitation come at each location (next 2 days)
+    peak_timing = safe("peak timing", lambda: timing.compute(grib_models, cfg, start))
     ar = safe("atmospheric rivers", lambda: context.atmospheric_rivers(grib_models, cfg))
     ar_out = safe("AR coast outlook", lambda: context.ar_coast(grib_models, cfg, start, analysis.windows(cfg)))
     grads = safe("pressure gradients", lambda: context.gradients(grib_models, cfg), [])
@@ -228,6 +230,7 @@ def collect(cfg: dict, out: Path, demo: bool = False, products: bool = True) -> 
         "alerts": nws_alerts,
         # thunderstorms: SPC convective outlooks and recent storm reports (mesoscale discussions load live)
         "convective": safe("thunderstorm outlooks", lambda: convective.fetch(cfg, demo)) if products else None,
+        "timing": peak_timing,
         "wildfire": safe("wildfire", lambda: wildfire.fetch(cfg, (nws_alerts or {}).get("zones"), demo, (nws_alerts or {}).get("pages"))) if products else None,
         "ar": ar,
         "arCoast": ar_out,

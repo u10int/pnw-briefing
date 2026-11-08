@@ -15,7 +15,7 @@ export const dayMonth = dayMD
 export const dayLong = dayMD
 
 const PT = "America/Los_Angeles"
-const ptParts = (t: number | string) => {
+export const ptParts = (t: number | string) => {
   const x = new Date(typeof t === "string" ? Date.parse(t) : t)
   const md = x.toLocaleDateString("en-US", { month: "numeric", day: "numeric", timeZone: PT })
   return { wd: x.toLocaleDateString("en-US", { weekday: "short", timeZone: PT }), md, x }
