@@ -108,6 +108,30 @@ export interface PeakPeriod {
   start: string; end: string; peak: number; peakTime: string; models: number; of: number
   peakFrom: string | null; peakTo: string | null; total?: number; heavy?: boolean
 }
+export interface Buoy {
+  id: string; name: string; lat: number; lon: number; area: string; time: string
+  wave: N; period: N; waveDir: N; wind: N; gust: N; windDir: N; water: N
+  waveMax24: N; gustMax24: N; spark: number[]                 // feet, seconds, mph, °F
+}
+export interface WavePoint {
+  name: string; lat: number; lon: number; near: string | null; area: string
+  hourly: { time: string[]; height: N[]; period: N[]; dir: N[] }     // local times, feet
+  daily: { date: string; max: number; period: N; dir: N; time: string }[]
+}
+export interface TideGauge {
+  id: string; name: string; near: string | null; area: string
+  flood: N; surge: N                                           // minor flood level (ft MLLW); observed − predicted now
+  highs: { time: string; height: number; margin: N }[]         // local times; margin = flood − height − surge
+}
+export interface MarineAlert {
+  id: string; event: string; severity: string | null; headline: string | null; onset: string | null; ends: string | null
+  areaDesc: string | null; zones: string[]; sender: string | null; url: string | null
+}
+export interface Coast {
+  fetched: string; source: string; buoys: Buoy[]; waves: WavePoint[]; tides: TideGauge[]
+  marineAlerts: MarineAlert[] | null; zonePrefixes: string[]
+}
+
 export interface ObsReport {
   kind: "rain" | "snow" | "ice" | "gust" | "damage" | "flood"; type: string; time: string | null
   lat: number; lon: number; mag: number | null; unit: string | null; measured: boolean | null
@@ -254,6 +278,7 @@ export interface Briefing {
   rivers?: Rivers | null                                // NWRFC river forecasts; absent before they were added
   // the headline and lead, written at build time from the briefing's facts; absent before it was added
   summary?: { headline: string; lede: string; source: "openai" | "rules"; model?: string } | null
+  coast?: Coast | null                                 // buoys, wave forecast, tides and marine warnings
   obsReports?: ObsReports | null                       // station observations and NWS storm reports
   fronts?: Fronts | null                               // WPC surface fronts for the map; absent before it was added
   timing?: PeakTiming | null                           // when gusts and heavy precipitation peak, by location; absent before it was added

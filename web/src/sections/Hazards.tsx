@@ -1,6 +1,6 @@
 import * as React from "react"
 
-import { ArrowLeftRight, CalendarDays, ChevronRight, CircleCheck, CloudRain, CloudSnow, type LucideIcon, Mountain, MountainSnow, OctagonAlert,
+import { Anchor, ArrowLeftRight, CalendarDays, ChevronRight, CircleCheck, CloudRain, CloudSnow, type LucideIcon, Mountain, MountainSnow, OctagonAlert,
   Snowflake, Thermometer, ThermometerSnowflake, ThermometerSun, TriangleAlert, Waves, Wind } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
@@ -10,7 +10,7 @@ import type { Briefing, Point, WindLevels } from "@/types"
 import { dateRange, ptDay } from "@/lib/format"
 import { dayStats } from "@/sections/DayMatrix"
 
-export type HazardTab = "precip" | "flood" | "wind" | "snow" | "temp"
+export type HazardTab = "precip" | "flood" | "wind" | "coast" | "snow" | "temp"
 export type Tone = "quiet" | "watch" | "alert"
 interface Item { icon: LucideIcon; text: string }
 /** `lead` is the short phrase the overview headline uses when this hazard is the one to lead with. */
@@ -297,8 +297,40 @@ const TONE: Record<Tone, { label: string; icon: LucideIcon; badge: "secondary" |
   alert: { label: "Significant", icon: OctagonAlert, badge: "likely" },
 }
 
-/** The five hazard summaries, in tab order. The overview headline and the cards both read these. */
-export const summarize = (d: Briefing): Summary[] => [precip(d), flood(d), wind(d), snow(d), temp(d)]
+/** Marine warnings, the biggest waves forecast off the coast and the tide closest to flooding. */
+function coast(d: Briefing): Summary | null {
+  const c = d.coast
+  if (!c) return null
+  const items: Item[] = []
+  let tone = "quiet" as Tone, lead: string | undefined
+  const raise = (t: Tone) => { if (t === "alert" || (t === "watch" && tone === "quiet")) tone = t }
+  const alerts = [...(c.marineAlerts ?? [])].sort((a, b) => sev(a.event) - sev(b.event))
+  for (const a of alerts.slice(0, 1)) {
+    const where = (a.areaDesc ?? "").split(";")[0].replace(/^(U\.S\. )?Waters? /i, "").trim()
+    items.push({ icon: Anchor, text: `${a.event}${where ? `: ${where}${(a.areaDesc ?? "").includes(";") ? " and more" : ""}` : ""}` })
+    if (sev(a.event) <= 1) raise("alert"); else if (sev(a.event) <= 3) raise("watch")
+    lead ??= `${a.event.replace(/ (Warning|Advisory|Watch)$/, (m) => m.toLowerCase())} on the water`
+  }
+  const wave = c.waves.filter((w) => w.area === "Outer coast").flatMap((w) => w.daily.map((x) => ({ w, x }))).sort((a, b) => b.x.max - a.x.max)[0]
+  if (wave && wave.x.max >= 12) {
+    items.push({ icon: Waves, text: `Seas to ${Math.round(wave.x.max)} ft ${wave.w.name.replace(/^Off /, "off ")}, ${day(midday(wave.x.date))}` })
+    if (wave.x.max >= 20) raise("watch")
+    lead ??= `Seas to ${Math.round(wave.x.max)} ft on the coast ${day(midday(wave.x.date))}`
+  }
+  const tide = c.tides.flatMap((g) => g.highs.filter((h) => h.margin != null).map((h) => ({ g, h }))).sort((a, b) => a.h.margin! - b.h.margin!)[0]
+  if (tide && tide.h.margin! <= 1) {
+    const m = tide.h.margin!
+    items.push({ icon: Waves, text: `High tide at ${tide.g.name} ${day(midday(tide.h.time.slice(0, 10)))} ${m <= 0 ? `${Math.abs(m).toFixed(1)} ft over` : `within ${m.toFixed(1)} ft of`} minor flooding` })
+    raise(m <= 0 ? "alert" : "watch")
+    lead ??= `High tide near flood stage at ${tide.g.name}`
+  }
+  if (!items.length) items.push({ icon: CircleCheck, text: "No marine warnings, and tides stay well below flood levels" })
+  return { tab: "coast", title: "Coast & marine", icon: Anchor, items, tone, lead }
+}
+const sev = (e: string) => (/hurricane/i.test(e) ? 0 : /storm/i.test(e) && /warning/i.test(e) ? 1 : /gale warning|hazardous seas warning|high surf warning/i.test(e) ? 2 : /warning/i.test(e) ? 3 : 4)
+
+/** The hazard summaries, in tab order. The overview headline and the cards both read these. */
+export const summarize = (d: Briefing): Summary[] => [precip(d), flood(d), wind(d), coast(d), snow(d), temp(d)].filter((x): x is Summary => !!x)
 
 /** One summary per hazard tab; each opens its tab. */
 export function HazardStrip({ data, onOpen }: { data: Briefing; onOpen: (tab: HazardTab) => void }) {
@@ -308,7 +340,7 @@ export function HazardStrip({ data, onOpen }: { data: Briefing; onOpen: (tab: Ha
     // each card spans five shared rows (header, badge, figure, chart, notes) through subgrid, so the
     // charts and notes line up across a row of cards whatever the caption lengths
     // on phones the cards are a row you swipe through, a peek of the next one showing
-    <div className="grid gap-x-3 gap-y-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 max-sm:-mx-4 max-sm:auto-cols-[82%] max-sm:grid-flow-col max-sm:grid-rows-[repeat(5,auto)] max-sm:snap-x max-sm:snap-mandatory max-sm:scroll-px-4 max-sm:overflow-x-auto max-sm:px-4 max-sm:pb-2">
+    <div className={`grid gap-x-3 gap-y-3 sm:grid-cols-2 lg:grid-cols-3 ${items.length > 5 ? "2xl:grid-cols-6" : "xl:grid-cols-5"} max-sm:-mx-4 max-sm:auto-cols-[82%] max-sm:grid-flow-col max-sm:grid-rows-[repeat(5,auto)] max-sm:snap-x max-sm:snap-mandatory max-sm:scroll-px-4 max-sm:overflow-x-auto max-sm:px-4 max-sm:pb-2`}>
       {items.map((h) => {
         const tone = TONE[h.tone]
         const Icon = h.icon, ToneIcon = tone.icon

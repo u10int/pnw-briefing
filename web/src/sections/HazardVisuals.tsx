@@ -60,6 +60,15 @@ export function hazardVisuals(d: Briefing): Partial<Record<HazardTab, Visual>> {
     }
   }
 
+  // coast: the highest waves forecast off the outer coast, and each day's highest
+  const cw = (d.coast?.waves ?? []).filter((w) => w.area === "Outer coast")
+  if (cw.length) {
+    const best = cw.flatMap((w) => w.daily.map((x) => ({ w, x }))).sort((a, b) => b.x.max - a.x.max)[0]
+    const byDay = d.dates.map((dt) => { const xs = cw.map((w) => w.daily.find((x) => x.date === dt)?.max ?? null).filter(fin); return xs.length ? Math.max(...xs) : null })
+    if (best) out.coast = { value: String(Math.round(best.x.max)), unit: "ft", caption: `${best.w.name}, ${day(new Date(`${best.x.date}T20:00:00Z`).getTime())}`, aside: "Highest waves forecast off the coast",
+      spark: { unit: "ft", series: [{ values: byDay, color: "#4a90cf" }] } }
+  }
+
   // flooding: the atmospheric river the models agree on, else the wettest 3 days at one place
   const eps = arEpisodes(d).filter((e) => e.agreed >= 1).sort((a, b) => b.agreed - a.agreed || a.start - b.start)
   const daily = across(d, rain, names, "max")

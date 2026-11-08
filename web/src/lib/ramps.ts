@@ -29,6 +29,13 @@ export const SPREAD: Ramp = {
   levels: [0.25, 0.5, 1, 2, 3, 4, 6, 8, 12],
   colors: ["#e6e6e6", "#d2d2d2", "#bcbcbc", "#a3a3a3", "#898989", "#6e6e6e", "#545454", "#383838", "#1c1c1c"],
 }
+/** Significant wave height (ft): calm blues through the 10 – 20 ft of a winter swell to the
+ *  25 ft+ of a big storm. */
+export const WAVE: Ramp = {
+  label: "Significant wave height", units: "ft",
+  levels: [1, 3, 5, 8, 10, 12, 15, 20, 25, 30],
+  colors: ["#e3f1fb", "#c3e0f5", "#9ccbec", "#6fb0de", "#4a90cf", "#f3d36b", "#f2a541", "#e5683b", "#c9302c", "#8e1f63"],
+}
 /** Probability (% of ensemble members); below 5% is left clear. */
 export const PROB: Ramp = {
   label: "Chance", units: "%",
