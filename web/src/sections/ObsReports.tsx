@@ -66,7 +66,7 @@ export function ObsReportsCard({ data, v }: { data: Briefing; v: V }) {
       <CardHeader>
         <CardTitle>{TITLE[v]}</CardTitle>
         <CardDescription>
-          {WHAT[v]} over the last {o.days.length - 1} days and today so far (Pacific time){reports.length ? `, then what's been reported to NWS Seattle and Portland in the last ${o.reportHours ?? 24} hours` : ""}.
+          {WHAT[v]} over the last {o.days.length - 1} days and today so far (Pacific time){reports.length ? `, then what's been reported to NWS Seattle and Portland in the last ${o.reportHours ?? 48} hours` : ""}.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">

@@ -522,4 +522,4 @@ def obs_reports(cfg):
          "remark": "Large tree down across power lines.", "near": "Seattle"},
     ]
     return {"days": [d.isoformat() for d in days], "today": today.isoformat(), "points": points, "reports": reports,
-            "reportHours": 24, "source": "demo"}
+            "reportHours": 48, "source": "demo"}

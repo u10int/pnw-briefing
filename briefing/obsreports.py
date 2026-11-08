@@ -11,7 +11,7 @@ reports NWS offices have put out.
     reading (to the whole inch, since depth sensors wobble).
 - NWS local storm reports (IEM's archive, by office): rain and snow totals, wind gusts, wind damage,
   flooding and ice, from spotters, mesonets and officials, each tied to the nearest forecast location.
-- Reports are kept for `report_hours` (24) after the time of the event, whether or not the office
+- Reports are kept for `report_hours` (48) after the time of the event, whether or not the office
   issues anything newer; the page also drops them once they pass that age while it's open.
 - NWS Public Information Statement summaries (Seattle and Portland, via IEM's text archive): after
   an event the offices list the highest wind reports, snowfall or rainfall totals from dozens of
@@ -309,7 +309,7 @@ def fetch(cfg, demo=False, now=None):
         names_job = ex.submit(_station_names, sorted({s.get("network") or _network(pts[n], s["asos"]) for n, s in st.items() if s.get("asos")}))
         sn_names_job = ex.submit(_snotel_names, trips) if trips else None
         # reports drop out `report_hours` after the event; summaries issued a day later still count
-        hours = float(spec.get("report_hours", 24))
+        hours = float(spec.get("report_hours", 48))
         since = now - timedelta(hours=hours + 24)
         offices = spec.get("lsr_wfos", ["SEW", "PQR"])
         lsr_job = ex.submit(lsrs, cfg, offices, since, now)

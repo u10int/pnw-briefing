@@ -1600,7 +1600,7 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
             <MapOptions
               overlays={[
                 !!data.fronts?.frames.length && <OptionRow key="fronts" id="fronts" label="Fronts (WPC)" checked={showFronts} onChange={setShowFronts} />,
-                live.length > 0 && <OptionRow key="reports" id="nws-reports" label={`NWS reports, last ${data.obsReports?.reportHours ?? 24} h`} checked={showReports} onChange={setShowReports} />,
+                live.length > 0 && <OptionRow key="reports" id="nws-reports" label={`NWS reports, last ${data.obsReports?.reportHours ?? 48} h`} checked={showReports} onChange={setShowReports} />,
               ...(mode === "hourly" ? [
                 entriesA.mslp && <OptionRow key="iso" id="isobars" label="Isobars" checked={isobars} onChange={setIsobars} />,
                 pairList.length > 0 && <OptionRow key="pairs" id="pairs" label="Gradient pairs" checked={showPairs} onChange={setShowPairs} />,
@@ -1639,7 +1639,7 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
         </div>
 
         {frontsOn && <FrontLegend />}
-        {reportsOn && <ReportLegend reports={reportsOn} hours={data.obsReports?.reportHours ?? 24} />}
+        {reportsOn && <ReportLegend reports={reportsOn} hours={data.obsReports?.reportHours ?? 48} />}
         {mode === "totals" ? (variable === "ar" ? <ArLegend /> : variable === "rivers" ? <RiverLegend /> : variable === "storms" ? <StormLegend day={d} /> : <RampLegend ramp={totRamp} every={totRamp.ticks ? 1 : totRamp.levels.length > 16 ? 2 : 1} />) : (
           <div className="space-y-2">
             {layer === "radar" && <RadarLegend withRefc={!!entriesA.refc} />}
