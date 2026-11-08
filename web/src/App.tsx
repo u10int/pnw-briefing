@@ -18,6 +18,7 @@ import { Headline } from "@/sections/Overview"
 import { TrendsCard } from "@/sections/Trends"
 import { TempVerificationCard, VerificationCard } from "@/sections/Verify"
 import { ConvectiveCard } from "@/sections/Convective"
+import { ObsReportsCard } from "@/sections/ObsReports"
 import { PeakTimingCard } from "@/sections/Timing"
 import { ByLocation, RegionTotals } from "@/sections/Totals"
 import { WindByLocation, WindPeaks } from "@/sections/WindTotals"
@@ -224,6 +225,7 @@ export default function App() {
               <RegionTotals data={data} />
               <RainByDayCard data={data} />
               <PeakTimingCard data={data} v="precip" />
+              <ObsReportsCard data={data} v="precip" />
               <ByLocation data={data} />
               <MapCard title="Precipitation maps" description="Each model on its own grid, then the mean and spread on a common grid."
                 tabs={[
@@ -256,6 +258,7 @@ export default function App() {
               <WindPeaks data={data} />
               <WindByDayCard data={data} />
               <PeakTimingCard data={data} v="gust" />
+              <ObsReportsCard data={data} v="gust" />
               <WindByLocation data={data} />
               <GradientsCard data={data} />
               <MapCard title="Wind and gust maps" description="The strongest sustained wind and gust in each model."
@@ -270,6 +273,7 @@ export default function App() {
               action={<MapLink req={{ mode: "hourly", layer: "frz" }} label="Freezing level on the map" />}>
               <SnowLevelCard data={data} />
               <RainByDayCard data={data} only="snow" />
+              <ObsReportsCard data={data} v="snow" />
               <MapCard title="Snowfall maps" description="From each model's own snow field; models without one are left out."
                 tabs={[
                   { id: "s48", label: "Next 48 hours", src: data.maps.snow_short, alt: "48-hour snowfall by model", note: "Model snowfall over the next two 12Z – 12Z days." },

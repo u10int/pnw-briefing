@@ -108,6 +108,20 @@ export interface PeakPeriod {
   start: string; end: string; peak: number; peakTime: string; models: number; of: number
   peakFrom: string | null; peakTo: string | null; total?: number; heavy?: boolean
 }
+export interface ObsReport {
+  kind: "rain" | "snow" | "ice" | "gust" | "damage" | "flood"; type: string; time: string | null
+  lat: number; lon: number; mag: number | null; unit: string | null; measured: boolean
+  place: string | null; county: string | null; state: string | null; source: string | null; remark: string | null
+  near: string | null                                   // the forecast location within 30 km
+}
+/** Observed values at each location's station by local day (the last is today so far), and NWS
+ *  local storm reports. */
+export interface ObsReports {
+  days: string[]; today: string; source: string
+  points: Record<string, { precip: N[]; gust: N[]; gustTime: (string | null)[]; snow: N[]; stations: string[] }>
+  reports: ObsReport[]
+}
+
 export interface FrontFrame {
   kind: "analysis" | "forecast"; valid: string; day?: number
   fronts: { type: "cold" | "warm" | "stationary" | "occluded" | "trough" | "dryline" | "squall"; coords: [number, number][] }[]
@@ -236,6 +250,7 @@ export interface Briefing {
   rivers?: Rivers | null                                // NWRFC river forecasts; absent before they were added
   // the headline and lead, written at build time from the briefing's facts; absent before it was added
   summary?: { headline: string; lede: string; source: "openai" | "rules"; model?: string } | null
+  obsReports?: ObsReports | null                       // station observations and NWS storm reports
   fronts?: Fronts | null                               // WPC surface fronts for the map; absent before it was added
   timing?: PeakTiming | null                           // when gusts and heavy precipitation peak, by location; absent before it was added
   verification?: Verification | null                   // recent forecasts scored against MRMS; absent before it was added

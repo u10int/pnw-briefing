@@ -1,0 +1,240 @@
+"""What has actually been observed at each forecast location over the last few days, and the
+reports NWS offices have put out.
+
+- Stations (config `obs_reports.stations`): per local calendar day, precipitation, peak gust and
+  new snow at the station that stands for each location.
+  - ASOS (lowland and coast): the Iowa Environmental Mesonet's daily summaries of the airport
+    observations (precipitation in inches, a trace stored as 0.0001; gusts in knots).
+  - Environment Canada climate stations (B.C.): daily totals from MSC GeoMet, usually a day behind.
+  - SNOTEL (the passes): hourly precipitation and snow depth from NRCS; a day's precipitation is
+    the rise in the accumulated gauge, its new snow the rise in depth over the previous day's last
+    reading (to the whole inch, since depth sensors wobble).
+- NWS local storm reports (IEM's archive, by office): rain and snow totals, wind gusts, wind damage,
+  flooding and ice, from spotters, mesonets and officials, each tied to the nearest forecast location.
+"""
+from __future__ import annotations
+
+import logging
+from concurrent.futures import ThreadPoolExecutor
+from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
+
+import numpy as np
+
+from .snowpack import _km, http_json
+
+log = logging.getLogger(__name__)
+PT = ZoneInfo("America/Los_Angeles")
+IEM = "https://mesonet.agron.iastate.edu"
+ECCC = "https://api.weather.gc.ca/collections/climate-daily/items"
+AWDB = "https://wcc.sc.egov.usda.gov/awdbRestApi/services/v1/data"
+KT_TO_MPH = 1.15078
+NEAR_KM = 30
+
+
+def _network(pt, sid):
+    if sid.startswith("C") and len(sid) == 4:
+        return "CA_BC_ASOS"
+    return "OR_ASOS" if pt.get("region") == "nwor" else "WA_ASOS"
+
+
+def _num(v):
+    try:
+        x = float(v)
+    except (TypeError, ValueError):
+        return None
+    return x if np.isfinite(x) else None
+
+
+def asos(sid, network, days):
+    """{date: {precip, gust, gustTime, snow}} from IEM daily summaries."""
+    months = sorted({(d.year, d.month) for d in days})
+    rows = []
+    for y, m in months:
+        rows += http_json(f"{IEM}/api/1/daily.json", {"station": sid, "network": network, "year": y, "month": m}).get("data", [])
+    want = {d.isoformat() for d in days}
+    out = {}
+    for r in rows:
+        if r.get("date") not in want:
+            continue
+        p, g, sn = _num(r.get("precip")), _num(r.get("max_gust")), _num(r.get("snow"))
+        out[r["date"]] = {"precip": None if p is None else (0.001 if 0 < p < 0.001 else round(p, 2)),   # 0.001 = trace
+                          "gust": None if g is None else round(g * KT_TO_MPH),
+                          "gustTime": r.get("max_gust_localts") or None,
+                          "snow": None if sn is None else round(sn, 1)}
+    return out
+
+
+def eccc(cid, days):
+    """{date: {precip, gust, snow}} from Environment Canada's daily climate data (mm, km/h, cm)."""
+    js = http_json(ECCC, {"f": "json", "CLIMATE_IDENTIFIER": cid, "sortby": "-LOCAL_DATE", "limit": len(days) + 3})
+    want = {d.isoformat() for d in days}
+    out = {}
+    for f in js.get("features", []):
+        a = f.get("properties", {})
+        d = str(a.get("LOCAL_DATE", ""))[:10]
+        if d not in want:
+            continue
+        p, g, sn = _num(a.get("TOTAL_PRECIPITATION")), _num(a.get("SPEED_MAX_GUST")), _num(a.get("TOTAL_SNOW"))
+        out[d] = {"precip": None if p is None else round(p / 25.4, 2), "gust": None if g is None else round(g / 1.609),
+                  "snow": None if sn is None else round(sn / 2.54, 1), "name": a.get("STATION_NAME")}
+    return out
+
+
+def snotel(triplets, days):
+    """{triplet: {date: {precip, snow, depth}}} from hourly SNOTEL readings (local standard time)."""
+    js = http_json(AWDB, {"stationTriplets": ",".join(triplets), "elements": "PREC,SNWD", "duration": "HOURLY",
+                          "beginDate": f"{(days[0] - timedelta(days=1)).isoformat()} 00:00",
+                          "endDate": f"{(days[-1] + timedelta(days=1)).isoformat()} 00:00", "returnFlags": "false"})
+    out = {}
+    for st in js:
+        ser = {}
+        for d in st.get("data", []):
+            el = d.get("stationElement", {}).get("elementCode")
+            ser[el] = [(v["date"], v["value"]) for v in d.get("values", []) if v.get("value") is not None]
+        by = {}
+        for el in ("PREC", "SNWD"):
+            for t, v in ser.get(el, []):
+                by.setdefault(t[:10], {}).setdefault(el, []).append(v)
+        rec = {}
+        for d in days:
+            k, prev = d.isoformat(), (d - timedelta(days=1)).isoformat()
+            today, before = by.get(k, {}), by.get(prev, {})
+            p = round(max(today["PREC"][-1] - before["PREC"][-1], 0), 2) if today.get("PREC") and before.get("PREC") else None
+            sn = round(max(max(today["SNWD"]) - before["SNWD"][-1], 0)) if today.get("SNWD") and before.get("SNWD") else None
+            rec[k] = {"precip": p, "snow": sn, "depth": today["SNWD"][-1] if today.get("SNWD") else None}
+        out[st["stationTriplet"]] = rec
+    return out
+
+
+def _station_names(networks):
+    names = {}
+    for n in networks:
+        try:
+            js = http_json(f"{IEM}/geojson/network/{n}.geojson", {})
+            names.update({f["properties"]["sid"]: f["properties"].get("sname") for f in js.get("features", [])})
+        except Exception as e:
+            log.info("station names for %s unavailable (%s)", n, e)
+    return names
+
+
+def _snotel_names(triplets):
+    try:
+        js = http_json("https://wcc.sc.egov.usda.gov/awdbRestApi/services/v1/stations",
+                       {"stationTriplets": ",".join(triplets), "returnStationElements": "false"})
+        return {s["stationTriplet"]: (s.get("name"), s.get("elevation")) for s in js}
+    except Exception as e:
+        log.info("SNOTEL names unavailable (%s)", e)
+        return {}
+
+
+LSR_KIND = (("FREEZING RAIN", "ice"), ("ICE", "ice"), ("SLEET", "ice"), ("SNOW", "snow"), ("RAIN", "rain"),
+            ("WND GST", "gust"), ("WND DMG", "damage"), ("FLOOD", "flood"))
+
+
+def _lsr_kind(text):
+    t = (text or "").upper()
+    if "TSTM" in t and "NON-TSTM" not in t:
+        return None                                    # thunderstorm reports are on the Outlooks tab
+    return next((k for key, k in LSR_KIND if key in t), None)
+
+
+def lsrs(cfg, wfos, start, end):
+    """Local storm reports in the map area, newest first."""
+    js = http_json(f"{IEM}/geojson/lsr.geojson", {"wfos": ",".join(wfos), "sts": start.strftime("%Y-%m-%dT%H:%MZ"),
+                                                  "ets": end.strftime("%Y-%m-%dT%H:%MZ")})
+    d = cfg["domain"]
+    pts = cfg["points"]
+    out = []
+    for f in js.get("features", []):
+        a = f.get("properties", {})
+        kind = _lsr_kind(a.get("typetext"))
+        lon, lat = _num(a.get("lon")), _num(a.get("lat"))
+        if not kind or lon is None or lat is None:
+            continue
+        if not (d["lon_min"] <= lon <= d["lon_max"] and d["lat_min"] <= lat <= d["lat_max"]):
+            continue
+        dist = [(_km(lat, lon, p["lat"], p["lon"]), p["name"]) for p in pts]
+        km, near = min(dist)
+        unit = (a.get("unit") or "").upper()
+        mag = _num(a.get("magf"))
+        if mag is not None and unit == "KNOTS":
+            mag, unit = round(mag * KT_TO_MPH), "MPH"
+        out.append({"kind": kind, "type": (a.get("typetext") or "").title(), "time": a.get("valid"),
+                    "lat": lat, "lon": lon, "mag": mag, "unit": unit.lower() or None,
+                    "measured": a.get("qualifier") == "M",
+                    "place": a.get("city"), "county": a.get("county"), "state": a.get("st") or a.get("state"),
+                    "source": a.get("source"), "remark": (a.get("remark") or "").strip()[:300] or None,
+                    "near": near if km <= NEAR_KM else None})
+    out.sort(key=lambda x: x["time"] or "", reverse=True)
+    return out
+
+
+def fetch(cfg, demo=False, now=None):
+    spec = cfg.get("obs_reports") or {}
+    if not spec:
+        return None
+    if demo:
+        from . import demo as src
+        return src.obs_reports(cfg)
+    now = now or datetime.now(timezone.utc)
+    today = now.astimezone(PT).date()
+    days = [today - timedelta(days=k) for k in range(int(spec.get("days", 3)), -1, -1)]
+    pts = {p["name"]: p for p in cfg["points"]}
+    st = {k: v for k, v in (spec.get("stations") or {}).items() if k in pts}
+
+    jobs = {}
+    with ThreadPoolExecutor(8) as ex:
+        for name, s in st.items():
+            if s.get("asos"):
+                jobs[(name, "asos")] = ex.submit(asos, s["asos"], s.get("network") or _network(pts[name], s["asos"]), days)
+            if s.get("eccc"):
+                jobs[(name, "eccc")] = ex.submit(eccc, s["eccc"], days)
+        trips = sorted({s["snotel"] for s in st.values() if s.get("snotel")})
+        sn_job = ex.submit(snotel, trips, days) if trips else None
+        names_job = ex.submit(_station_names, sorted({s.get("network") or _network(pts[n], s["asos"]) for n, s in st.items() if s.get("asos")}))
+        sn_names_job = ex.submit(_snotel_names, trips) if trips else None
+        lsr_job = ex.submit(lsrs, cfg, spec.get("lsr_wfos", ["SEW", "PQR"]),
+                            datetime.combine(days[0], datetime.min.time(), PT).astimezone(timezone.utc), now)
+
+    def res(job, what):
+        try:
+            return job.result() if job else None
+        except Exception as e:
+            log.warning("%s unavailable (%s)", what, e)
+            return None
+
+    sn = res(sn_job, "SNOTEL observations") or {}
+    names = res(names_job, "station names") or {}
+    sn_names = res(sn_names_job, "SNOTEL names") or {}
+    points = {}
+    for name, s in st.items():
+        a = res(jobs.get((name, "asos")), f"{name} ASOS") or {}
+        c = res(jobs.get((name, "eccc")), f"{name} climate station") or {}
+        t = sn.get(s.get("snotel"), {})
+        rows = {"precip": [], "gust": [], "gustTime": [], "snow": []}
+        for d in days:
+            k = d.isoformat()
+            ad, cd, td = a.get(k, {}), c.get(k, {}), t.get(k, {})
+            rows["precip"].append(next((x.get("precip") for x in (cd, ad, td) if x.get("precip") is not None), None))
+            g = next((x for x in (ad, cd) if x.get("gust") is not None), {})
+            rows["gust"].append(g.get("gust"))
+            rows["gustTime"].append(g.get("gustTime"))
+            rows["snow"].append(next((x.get("snow") for x in (td, cd, ad) if x.get("snow") is not None), None))
+        sources = []
+        if s.get("asos"):
+            sources.append(f"{(names.get(s['asos']) or s['asos']).title()} ({s['asos']})")
+        if s.get("eccc"):
+            nm = next((v.get("name") for v in c.values() if v.get("name")), None)
+            sources.append(f"{(nm or 'Environment Canada ' + s['eccc']).title()} (Environment Canada)")
+        if s.get("snotel"):
+            nm, el = sn_names.get(s["snotel"], (None, None))
+            sources.append(f"{nm or s['snotel']} SNOTEL" + (f" ({int(el):,} ft)" if el else ""))
+        if any(v is not None for r in ("precip", "gust", "snow") for v in rows[r]):
+            points[name] = {**rows, "stations": sources}
+    reports = res(lsr_job, "local storm reports") or []
+    log.info("observed reports: %d locations, %d storm reports", len(points), len(reports))
+    if not points and not reports:
+        return None
+    return {"days": [d.isoformat() for d in days], "today": today.isoformat(), "points": points, "reports": reports,
+            "source": "Airport observations via the Iowa Environmental Mesonet; Environment Canada; USDA NRCS SNOTEL; NWS local storm reports (IEM archive)"}

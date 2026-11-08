@@ -484,3 +484,42 @@ def fronts(cfg):
                            {"type": "stationary", "coords": [[-118.0, 51.5], [-114.0, 50.0], [-110.0, 49.5]]},
                        ]})
     return {"source": "NOAA/NWS Weather Prediction Center (demo)", "frames": frames}
+
+
+def obs_reports(cfg):
+    """Three wet, windy days and today so far, with a few storm reports."""
+    from zoneinfo import ZoneInfo
+    rng = np.random.default_rng(7)
+    today = datetime.now(ZoneInfo("America/Los_Angeles")).date()
+    days = [today - timedelta(days=k) for k in range(3, -1, -1)]
+    st = (cfg.get("obs_reports") or {}).get("stations", {})
+    points = {}
+    for p in cfg["points"]:
+        s = st.get(p["name"])
+        if not s:
+            continue
+        wet = {"coast": 1.6, "pass": 1.4}.get(p["kind"], 0.8)
+        precip = [round(float(x), 2) for x in rng.gamma(1.5, wet / 3, 4)]
+        precip[-1] = round(precip[-1] / 3, 2)
+        snow = [round(float(x)) for x in rng.gamma(1.2, 3, 4)] if s.get("snotel") else [None] * 4
+        gust = [None] * 4 if s.get("snotel") else [int(x) for x in rng.integers(18, 55 if p["kind"] == "coast" else 42, 4)]
+        points[p["name"]] = {"precip": precip, "gust": gust,
+                             "gustTime": [f"{d.isoformat()}T{int(rng.integers(0, 23)):02d}:15:00" if g else None for d, g in zip(days, gust)],
+                             "snow": snow, "stations": [f"{s.get('asos') or s.get('snotel')} (demo)"]}
+    now = datetime.now(timezone.utc)
+    reports = [
+        {"kind": "gust", "type": "Non-Tstm Wnd Gst", "time": (now - timedelta(hours=20)).isoformat(), "lat": 46.97, "lon": -123.94,
+         "mag": 62, "unit": "mph", "measured": True, "place": "Hoquiam", "county": "Grays Harbor", "state": "WA", "source": "ASOS",
+         "remark": None, "near": "Aberdeen"},
+        {"kind": "snow", "type": "Snow", "time": (now - timedelta(hours=14)).isoformat(), "lat": 47.74, "lon": -121.09,
+         "mag": 9.0, "unit": "inch", "measured": True, "place": "Stevens Pass", "county": "King", "state": "WA", "source": "Dept of Highways",
+         "remark": "24 hour snowfall.", "near": "Stevens Pass"},
+        {"kind": "rain", "type": "Heavy Rain", "time": (now - timedelta(hours=30)).isoformat(), "lat": 47.9, "lon": -124.35,
+         "mag": 3.12, "unit": "inch", "measured": True, "place": "2 SW Forks", "county": "Clallam", "state": "WA", "source": "CoCoRaHS",
+         "remark": "48 hour total.", "near": "Forks"},
+        {"kind": "damage", "type": "Non-Tstm Wnd Dmg", "time": (now - timedelta(hours=19)).isoformat(), "lat": 47.6, "lon": -122.3,
+         "mag": None, "unit": None, "measured": False, "place": "Seattle", "county": "King", "state": "WA", "source": "Public",
+         "remark": "Large tree down across power lines.", "near": "Seattle"},
+    ]
+    return {"days": [d.isoformat() for d in days], "today": today.isoformat(), "points": points, "reports": reports,
+            "source": "demo"}
