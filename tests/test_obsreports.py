@@ -75,3 +75,15 @@ def test_merge_drops_repeated_lsr():
     out = obsreports.merge_reports(lsr, pns, pts)
     assert len(out) == 5 and sum(1 for r in out if r["place"] == "2 W Hoquiam") == 1
     assert next(r for r in out if r["place"] == "2 W Hoquiam")["near"] == "Aberdeen"
+
+
+def test_fetch_drops_reports_older_than_report_hours():
+    now = datetime(2026, 11, 9, 20, tzinfo=timezone.utc)
+    cfg = {"points": [{"name": "Seattle", "lat": 47.61, "lon": -122.33, "region": "wwa"}],
+           "obs_reports": {"days": 1, "report_hours": 24, "stations": {}}}
+    rep = lambda t: {"kind": "gust", "mag": 50, "lat": 47.6, "lon": -122.3, "time": t, "place": "x"}
+    with mock.patch.object(obsreports, "lsrs", return_value=[rep("2026-11-09T10:00:00Z"), rep("2026-11-08T10:00:00Z")]), \
+         mock.patch.object(obsreports, "pns_reports", return_value=[]), \
+         mock.patch.object(obsreports, "_station_names", return_value={}):
+        out = obsreports.fetch(cfg, now=now)
+    assert [r["time"] for r in out["reports"]] == ["2026-11-09T10:00:00Z"] and out["reportHours"] == 24

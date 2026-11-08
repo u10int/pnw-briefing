@@ -11,6 +11,8 @@ reports NWS offices have put out.
     reading (to the whole inch, since depth sensors wobble).
 - NWS local storm reports (IEM's archive, by office): rain and snow totals, wind gusts, wind damage,
   flooding and ice, from spotters, mesonets and officials, each tied to the nearest forecast location.
+- Reports are kept for `report_hours` (24) after the time of the event, whether or not the office
+  issues anything newer; the page also drops them once they pass that age while it's open.
 - NWS Public Information Statement summaries (Seattle and Portland, via IEM's text archive): after
   an event the offices list the highest wind reports, snowfall or rainfall totals from dozens of
   sites, grouped by county or zone, each with an amount, time and position. Every row becomes a
@@ -306,7 +308,9 @@ def fetch(cfg, demo=False, now=None):
         sn_job = ex.submit(snotel, trips, days) if trips else None
         names_job = ex.submit(_station_names, sorted({s.get("network") or _network(pts[n], s["asos"]) for n, s in st.items() if s.get("asos")}))
         sn_names_job = ex.submit(_snotel_names, trips) if trips else None
-        since = datetime.combine(days[0], datetime.min.time(), PT).astimezone(timezone.utc)
+        # reports drop out `report_hours` after the event; summaries issued a day later still count
+        hours = float(spec.get("report_hours", 24))
+        since = now - timedelta(hours=hours + 24)
         offices = spec.get("lsr_wfos", ["SEW", "PQR"])
         lsr_job = ex.submit(lsrs, cfg, offices, since, now)
         pns_job = ex.submit(pns_reports, cfg, offices, since, now)
@@ -347,8 +351,10 @@ def fetch(cfg, demo=False, now=None):
         if any(v is not None for r in ("precip", "gust", "snow") for v in rows[r]):
             points[name] = {**rows, "stations": sources}
     reports = merge_reports(res(lsr_job, "local storm reports") or [], res(pns_job, "NWS report summaries") or [], cfg["points"])
+    cutoff = now - timedelta(hours=hours)
+    reports = [r for r in reports if r["time"] and datetime.fromisoformat(r["time"].replace("Z", "+00:00")) >= cutoff]
     log.info("observed reports: %d locations, %d storm reports", len(points), len(reports))
     if not points and not reports:
         return None
-    return {"days": [d.isoformat() for d in days], "today": today.isoformat(), "points": points, "reports": reports,
+    return {"days": [d.isoformat() for d in days], "today": today.isoformat(), "points": points, "reports": reports, "reportHours": hours,
             "source": "Airport observations via the Iowa Environmental Mesonet; Environment Canada; USDA NRCS SNOTEL; NWS local storm reports and Public Information Statement summaries (IEM archive)"}

@@ -514,7 +514,7 @@ def obs_reports(cfg):
         {"kind": "snow", "type": "Snow", "time": (now - timedelta(hours=14)).isoformat(), "lat": 47.74, "lon": -121.09,
          "mag": 9.0, "unit": "inch", "measured": True, "place": "Stevens Pass", "county": "King", "state": "WA", "source": "Dept of Highways",
          "remark": "24 hour snowfall.", "near": "Stevens Pass"},
-        {"kind": "rain", "type": "Heavy Rain", "time": (now - timedelta(hours=30)).isoformat(), "lat": 47.9, "lon": -124.35,
+        {"kind": "rain", "type": "Heavy Rain", "time": (now - timedelta(hours=10)).isoformat(), "lat": 47.9, "lon": -124.35,
          "mag": 3.12, "unit": "inch", "measured": True, "place": "2 SW Forks", "county": "Clallam", "state": "WA", "source": "CoCoRaHS",
          "remark": "48 hour total.", "near": "Forks"},
         {"kind": "damage", "type": "Non-Tstm Wnd Dmg", "time": (now - timedelta(hours=19)).isoformat(), "lat": 47.6, "lon": -122.3,
@@ -522,4 +522,4 @@ def obs_reports(cfg):
          "remark": "Large tree down across power lines.", "near": "Seattle"},
     ]
     return {"days": [d.isoformat() for d in days], "today": today.isoformat(), "points": points, "reports": reports,
-            "source": "demo"}
+            "reportHours": 24, "source": "demo"}

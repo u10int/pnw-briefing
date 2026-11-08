@@ -6,6 +6,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { DayHead } from "@/components/DayHead"
 import { ptDayHour } from "@/lib/format"
 import { openLocation } from "@/lib/locationlink"
+import { liveReports } from "@/lib/obsreports"
 import { GUST, PRECIP, SNOW } from "@/lib/ramps"
 import { rampCell } from "@/sections/DayMatrix"
 import type { Briefing, N, ObsReport } from "@/types"
@@ -58,14 +59,14 @@ export function ObsReportsCard({ data, v }: { data: Briefing; v: V }) {
   if (!o) return null
   const rows = data.points.map((p) => ({ name: p.name, rec: o.points[p.name] }))
     .filter((r) => r.rec && r.rec[v].some((x) => x != null))
-  const reports = o.reports.filter((r) => KINDS[v].includes(r.kind))
+  const reports = liveReports(o).filter((r) => KINDS[v].includes(r.kind))
   if (!rows.length && !reports.length) return null
   return (
     <Card>
       <CardHeader>
         <CardTitle>{TITLE[v]}</CardTitle>
         <CardDescription>
-          {WHAT[v]} over the last {o.days.length - 1} days and today so far (Pacific time){reports.length ? ", then what's been reported to NWS Seattle and Portland" : ""}.
+          {WHAT[v]} over the last {o.days.length - 1} days and today so far (Pacific time){reports.length ? `, then what's been reported to NWS Seattle and Portland in the last ${o.reportHours ?? 24} hours` : ""}.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">

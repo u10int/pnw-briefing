@@ -123,6 +123,7 @@ export interface ObsReports {
   days: string[]; today: string; source: string
   points: Record<string, { precip: N[]; gust: N[]; gustTime: (string | null)[]; snow: N[]; stations: string[] }>
   reports: ObsReport[]
+  reportHours?: number                                  // how long after the event a report is shown
 }
 
 export interface FrontFrame {

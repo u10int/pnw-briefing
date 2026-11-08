@@ -268,6 +268,7 @@ avalanche:
 # and gust (a day or so behind); snotel: NRCS triplet for precipitation and new snow at the passes.
 obs_reports:
   days: 3                       # full days before today, plus today so far
+  report_hours: 24              # NWS reports drop out this long after the event
   lsr_wfos: [SEW, PQR]          # NWS offices (Seattle, Portland) whose storm reports and report summaries to include
   stations:
     Bellingham: {asos: BLI}

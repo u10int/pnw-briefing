@@ -30,6 +30,7 @@ import { AR_COLORS, AR_LABELS, FLOOD_COLORS, FLOOD_LABELS, FRZ, GUST, IVT, legen
 import { contrastTextColor } from "@/lib/contrast"
 import type { ArCoast, Briefing, Cog, Convective, ExtremeVar, FrontFrame, Fronts, ObsReport, RiverGauge, Rivers, FieldEntry, FieldsManifest, FieldVar, Gradient } from "@/types"
 import { ptDayHour } from "@/lib/format"
+import { liveReports } from "@/lib/obsreports"
 import { addFrontLayers, FRONT_COLORS, FRONT_LAYERS, frontFrame, frontGeoJSON } from "@/lib/fronts"
 import { openLocation } from "@/lib/locationlink"
 
@@ -572,7 +573,7 @@ function reportGeoJSON(rs: ObsReport[]): GeoJSON.FeatureCollection {
   }
 }
 
-function ReportLegend({ reports }: { reports: ObsReport[] }) {
+function ReportLegend({ reports, hours }: { reports: ObsReport[]; hours: number }) {
   const kinds = [...new Set(reports.map((r) => r.kind))]
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
@@ -581,7 +582,7 @@ function ReportLegend({ reports }: { reports: ObsReport[] }) {
           <span className="inline-block size-2.5 rounded-full ring-1 ring-white" style={{ background: NWS_REPORT_COLORS[k] }} aria-hidden />{NWS_REPORT_NAMES[k]}
         </span>
       ))}
-      <span>NWS storm reports and report summaries from the last 3 days; gusts in mph, amounts in inches. Zoom in for values.</span>
+      <span>NWS storm reports and report summaries from the last {hours} hours; gusts in mph, amounts in inches. Zoom in for values.</span>
     </div>
   )
 }
@@ -1359,7 +1360,8 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
   const [showFronts, setShowFronts] = useStoredFlag("pnw-briefing.map.fronts", false)
   const frontsOn = showFronts && data.fronts?.frames.length ? data.fronts : null
   const [showReports, setShowReports] = useStoredFlag("pnw-briefing.map.nwsReports", false)
-  const reportsOn = showReports && data.obsReports?.reports.length ? data.obsReports.reports : null
+  const live = React.useMemo(() => liveReports(data.obsReports), [data.obsReports])
+  const reportsOn = showReports && live.length ? live : null
   const pairList = React.useMemo(() => (data.gradients ?? []).filter((g) => g.locs && g.series.length), [data])
   const [compare, setCompare] = React.useState(false)
   const clock = React.useMemo(() => new Clock(), [])
@@ -1598,7 +1600,7 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
             <MapOptions
               overlays={[
                 !!data.fronts?.frames.length && <OptionRow key="fronts" id="fronts" label="Fronts (WPC)" checked={showFronts} onChange={setShowFronts} />,
-                !!data.obsReports?.reports.length && <OptionRow key="reports" id="nws-reports" label="NWS reports, last 3 days" checked={showReports} onChange={setShowReports} />,
+                live.length > 0 && <OptionRow key="reports" id="nws-reports" label={`NWS reports, last ${data.obsReports?.reportHours ?? 24} h`} checked={showReports} onChange={setShowReports} />,
               ...(mode === "hourly" ? [
                 entriesA.mslp && <OptionRow key="iso" id="isobars" label="Isobars" checked={isobars} onChange={setIsobars} />,
                 pairList.length > 0 && <OptionRow key="pairs" id="pairs" label="Gradient pairs" checked={showPairs} onChange={setShowPairs} />,
@@ -1637,7 +1639,7 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
         </div>
 
         {frontsOn && <FrontLegend />}
-        {reportsOn && <ReportLegend reports={reportsOn} />}
+        {reportsOn && <ReportLegend reports={reportsOn} hours={data.obsReports?.reportHours ?? 24} />}
         {mode === "totals" ? (variable === "ar" ? <ArLegend /> : variable === "rivers" ? <RiverLegend /> : variable === "storms" ? <StormLegend day={d} /> : <RampLegend ramp={totRamp} every={totRamp.ticks ? 1 : totRamp.levels.length > 16 ? 2 : 1} />) : (
           <div className="space-y-2">
             {layer === "radar" && <RadarLegend withRefc={!!entriesA.refc} />}
