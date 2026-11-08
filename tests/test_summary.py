@@ -50,3 +50,12 @@ def test_overview_uses_model_text_only_when_it_checks_out(monkeypatch):
     assert out["source"] == "openai" and out["headline"].endswith("52 mph")
     monkeypatch.setattr(summary, "ask_model", lambda f, m, k: {"headline": "Gusts to 80 mph", "lede": "Very windy."})
     assert summary.overview(data, cfg)["source"] == "rules"
+
+
+def test_check_rejects_named_products_and_long_leads():
+    f = {"issued": "Saturday morning", "items": [], "changesSinceYesterday": []}
+    assert summary.check({"headline": "High Wind Warning for the coast", "lede": "Windy."}, f) == "names an NWS product"
+    assert summary.check({"headline": "Windy on the coast", "lede": "A watch is out."}, f) == "names an NWS product"
+    long = "Windy on the coast. Rain in the hills. Snow in the passes."
+    assert summary.check({"headline": "Windy on the coast", "lede": long}, f) == "too long"
+    assert summary.check({"headline": "Windy on the coast", "lede": " ".join(["word"] * 50) + "."}, f) == "too long"

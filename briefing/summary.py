@@ -127,23 +127,8 @@ def facts(data: dict, cfg: dict) -> dict:
                           - 0.08 * max(0, (_d(e["start"]) - today).days),
         })
 
-    al = data.get("alerts") or {}
-    seen = set()
-    for a in al.get("items") or []:
-        key = (a["event"], a.get("onset"), a.get("ends"))
-        if key in seen:
-            continue
-        seen.add(key)
-        s = a.get("onset") or a.get("effective") or issued.isoformat()
-        e = a.get("ends") or a.get("expires") or s
-        sd = datetime.fromisoformat(s).astimezone(tz).date() if "T" in str(s) else _d(s)
-        ed = datetime.fromisoformat(e).astimezone(tz).date() if "T" in str(e) else _d(e)
-        if ed < today:
-            continue
-        kind = "warning" if "Warning" in a["event"] else "watch" if "Watch" in a["event"] else "advisory" if "Advisory" in a["event"] else "statement"
-        items.append({"kind": "nws alert", "alert": a["event"], **when(max(sd, today), max(ed, today), today),
-                      **where(a.get("points") or [], places),
-                      "importance": {"warning": 3.6, "watch": 3.1, "advisory": 2.2, "statement": 1.2}[kind]})
+    # NWS alerts are left out on purpose: the overview speaks to impacts and events in general;
+    # the alerts timeline below the headline lists the individual warnings and advisories
 
     ar = data.get("ar") or {}
     models = [m["model"] for m in ar.get("models") or []]
@@ -237,10 +222,11 @@ def facts(data: dict, cfg: dict) -> dict:
 
 # ---------------------------------------------------------------- the model's words
 
-SYSTEM = """You write the headline and lead for a twice-daily weather briefing covering Western Washington, Northwest Oregon and southwest British Columbia.
+SYSTEM = """You write the headline and lead for a weather briefing, updated four times a day, covering Western Washington, Northwest Oregon and southwest British Columbia.
 Use only the facts given. Do not add places, timings, numbers or hazards that are not in them, and do not speculate.
-- Headline: at most 12 words, no final period. Lead with the most important impact or event (facts are listed most important first).
-- Lead: 2 or 3 short sentences giving a quick overview of the other key impacts and events, in order of importance.
+- Headline: at most 10 words, sentence case (capitalise only the first word and proper names), no final period. Lead with the most important impact or event (facts are listed most important first).
+- Lead: one or two short sentences, at most 40 words in all, giving a quick overview of the other key impacts and events, in order of importance. Leave out anything minor.
+- Describe the weather and its impacts, never named NWS products: no "warning", "watch", "advisory" or "statement".
 - Keep it general: broad areas (e.g. "Puget Sound", "the coast", "the Cascade passes") rather than towns, and relative timing ("this weekend", "early next week") rather than dates. Never write calendar dates.
 - Use at most two numbers in total, copied exactly from the facts (e.g. "gusts to 55 mph", "about 3.6 in").
 - Say "likely" or "possible" when the likelihood matters. Plain, calm, factual language; no exclamation marks, no advice.
@@ -259,8 +245,10 @@ def check(text: dict, f: dict) -> str | None:
     h, lede = (text.get("headline") or "").strip(), (text.get("lede") or "").strip()
     if not h or not lede:
         return "empty"
-    if len(h.split()) > 16 or len(lede) > 600:
+    if len(h.split()) > 12 or len(lede.split()) > 48 or len(re.findall(r"[.!?](?:\s|$)", lede)) > 2:
         return "too long"
+    if re.search(r"\b(?:warning|watch|advisory|statement)s?\b", h + " " + lede, re.I):
+        return "names an NWS product"
     if re.search(r"\b\d{1,2}/\d{1,2}\b|\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.? \d", h + " " + lede):
         return "calendar date"
     allowed = set(_numbers(json.dumps(shown(f))))
@@ -312,8 +300,6 @@ def _sentence(it) -> str:
         lik = "" if it["likelihood"] == "likely" else "a possible " if what.startswith("a ") else "possible "
         what = what[2:] if lik.startswith("a ") and what.startswith("a ") else what
         return f"{(lik + what)[0].upper()}{(lik + what)[1:]} for {_area_phrase(it)} {it['when']}"
-    if k == "nws alert":
-        return f"{it['alert']} for {_area_phrase(it)} {it['when']}"
     if k == "atmospheric river":
         w = AR_WORD[int(it['strength'][2])]
         return f"{'An' if w[0] in 'aeiou' else 'A'} {w} atmospheric river reaches the coast {it['when']}"
@@ -339,7 +325,7 @@ def by_rules(f: dict) -> dict:
         lede = ". ".join(s for s in (_sentence(i) for i in items[:2]) if s)
         return {"headline": "A quiet stretch with nothing standing out", "lede": (lede + ".") if lede else ""}
     head = _sentence(items[0])
-    rest = [s for s in (_sentence(i) for i in items[1:]) if s][:2]
+    rest = [s for s in (_sentence(i) for i in items[1:]) if s][:1]
     precip = next((i for i in items if i["kind"] == "precipitation total" and i["window"].endswith("7 days")), None)
     if precip and _sentence(precip) not in rest:
         rest.append(_sentence(precip))
