@@ -165,6 +165,9 @@ jobs:
       - name: Reuse the published briefing data (page-only rebuild)
         if: ${{ inputs.page_only }}
         shell: micromamba-shell {0}
+        env:
+          # the headline and lead are rewritten from the published facts
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           # The latest data/ from gh-pages (briefing.json, maps, COGs, hourly fields), with the
           # labels that come straight from config.yaml refreshed. The archive date is the

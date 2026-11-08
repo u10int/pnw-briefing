@@ -4,6 +4,7 @@
 
 Re-applies the labels that come straight from config.yaml (the page title, pressure-gradient station names,
 codes, locations, meanings and thresholds), so a config tweak shows up without re-fetching anything, and
+rewrites the headline and lead from the published facts (briefing/summary.py), and
 prints the briefing's date (YYYY-MM-DD) and cycle (YYYY-MM-DDTHHZ, possibly empty) for the archive. Everything computed from
 model data stays as published.
 """
@@ -11,6 +12,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
+import sys
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -57,7 +60,16 @@ def main():
     a = ap.parse_args()
     cfg = yaml.safe_load(open(a.config))
     data = json.loads(a.briefing.read_text())
-    a.briefing.write_text(json.dumps(refresh(data, cfg), separators=(",", ":")))
+    data = refresh(data, cfg)
+    # the headline and lead, rewritten from the published facts with the current wording rules
+    if data.get("meta") and data.get("windows") is not None:
+        try:
+            from . import summary
+            logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s", stream=sys.stderr)
+            data["summary"] = summary.overview(data, cfg, demo=bool(data["meta"].get("demo")))
+        except Exception as e:
+            print(f"overview not rewritten ({e})", file=sys.stderr)
+    a.briefing.write_text(json.dumps(data, separators=(",", ":")))
     print(briefing_date(data, cfg), briefing_cycle(data))
 
 
