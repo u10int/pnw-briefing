@@ -1,4 +1,4 @@
-"""Surface fronts and pressure centres from NOAA's Weather Prediction Center, for the map.
+"""Surface fronts from NOAA's Weather Prediction Center, for the map.
 
 - Analyses: WPC's coded surface bulletin (high-resolution version), issued every 3 hours. The
   timed copies (codsus00_hr … codsus21_hr) hold the latest analysis for each synoptic hour, so
@@ -197,4 +197,6 @@ def fetch(cfg, demo=False):
     fc = [f for f in forecasts(cfg) if f["valid"] > last]
     if not an and not fc:
         return None
-    return {"source": "NOAA/NWS Weather Prediction Center", "frames": an + sorted(fc, key=lambda f: f["valid"])}
+    # highs and lows aren't published: the map draws them from the models' pressure fields
+    frames = [{k: v for k, v in f.items() if k != "centers"} for f in an + sorted(fc, key=lambda f: f["valid"])]
+    return {"source": "NOAA/NWS Weather Prediction Center", "frames": frames}

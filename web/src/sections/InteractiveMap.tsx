@@ -354,8 +354,9 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
       m.addLayer({ id: "ar", type: "circle", source: "ar", paint: {
         "circle-radius": ["case", [">", ["get", "rank"], 0], 8.5, 4], "circle-color": ["get", "color"],
         "circle-stroke-color": "#fff", "circle-stroke-width": ["case", [">", ["get", "rank"], 0], 2, 1.2] } })
-      // WPC fronts and highs and lows, over everything but the labels and markers (hidden until turned on)
-      addFrontLayers(m, labels, m.getStyle().glyphs && Array.isArray(font) ? font as string[] : null)
+      // WPC fronts, over everything but the labels and markers (hidden until turned on); highs and
+      // lows come from the models' own pressure fields
+      addFrontLayers(m, labels)
       const arFont = (m.getStyle().layers.find((l) => l.type === "symbol" && (l.layout as Record<string, unknown> | undefined)?.["text-font"])?.layout as Record<string, unknown> | undefined)?.["text-font"]
       if (m.getStyle().glyphs && Array.isArray(arFont))
         m.addLayer({ id: "ar-rank", type: "symbol", source: "ar", filter: ["!=", ["get", "num"], ""],
@@ -544,8 +545,8 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
 /** Front symbols, drawn as on the map. */
 function FrontLegend() {
   const pip = (d: string, color: string) => <path d={d} fill={color} />
-  const tri = (x: number, c: string, up = true) => pip(up ? `M${x - 4.5} 8 L${x} 1 L${x + 4.5} 8 Z` : `M${x - 4.5} 8 L${x} 15 L${x + 4.5} 8 Z`, c)
-  const semi = (x: number, c: string) => pip(`M${x - 4.5} 8 A4.5 4.5 0 0 1 ${x + 4.5} 8 Z`, c)
+  const tri = (x: number, c: string, up = true) => pip(up ? `M${x - 5.5} 8 L${x} 0.5 L${x + 5.5} 8 Z` : `M${x - 5.5} 8 L${x} 15.5 L${x + 5.5} 8 Z`, c)
+  const semi = (x: number, c: string) => pip(`M${x - 5.5} 8 A5.5 5.5 0 0 1 ${x + 5.5} 8 Z`, c)
   const items: [string, React.ReactNode][] = [
     ["Cold", <>{<line x1="0" y1="8" x2="36" y2="8" stroke={FRONT_COLORS.cold} strokeWidth="2.4" />}{tri(10, FRONT_COLORS.cold)}{tri(26, FRONT_COLORS.cold)}</>],
     ["Warm", <>{<line x1="0" y1="8" x2="36" y2="8" stroke={FRONT_COLORS.warm} strokeWidth="2.4" />}{semi(10, FRONT_COLORS.warm)}{semi(26, FRONT_COLORS.warm)}</>],

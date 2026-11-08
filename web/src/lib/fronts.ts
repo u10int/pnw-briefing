@@ -32,7 +32,6 @@ export function frontGeoJSON(fr: FrontFrame | null): GeoJSON.FeatureCollection {
     type: "FeatureCollection",
     features: [
       ...fr.fronts.map((x) => ({ type: "Feature" as const, properties: { type: x.type }, geometry: { type: "LineString" as const, coordinates: x.coords } })),
-      ...fr.centers.map((c) => ({ type: "Feature" as const, properties: { kind: c.type, p: c.p == null ? "" : String(c.p) }, geometry: { type: "Point" as const, coordinates: [c.lon, c.lat] } })),
     ],
   }
 }
@@ -40,7 +39,7 @@ export function frontGeoJSON(fr: FrontFrame | null): GeoJSON.FeatureCollection {
 // ------------------------------------------------------------------ pip images
 
 const R = 2                                    // pixel ratio the images are drawn at
-const H = 16                                   // image height (CSS px); the line runs across its middle
+const H = 24                                   // image height (CSS px); the line runs across its middle
 
 function image(w: number, draw: (g: CanvasRenderingContext2D) => void) {
   const c = document.createElement("canvas")
@@ -54,12 +53,12 @@ const mid = H / 2
 /** A triangle on the line at x, pointing up (to the line's left). */
 function tri(g: CanvasRenderingContext2D, x: number, color: string, up = true) {
   const s = up ? -1 : 1
-  g.beginPath(); g.moveTo(x - 5.5, mid); g.lineTo(x, mid + s * 7.5); g.lineTo(x + 5.5, mid); g.closePath()
+  g.beginPath(); g.moveTo(x - 8, mid); g.lineTo(x, mid + s * 11); g.lineTo(x + 8, mid); g.closePath()
   g.fillStyle = color; g.fill()
 }
 /** A half circle on the line at x. */
 function semi(g: CanvasRenderingContext2D, x: number, color: string, up = true) {
-  g.beginPath(); g.arc(x, mid, 5.5, up ? Math.PI : 0, up ? 2 * Math.PI : Math.PI); g.closePath()
+  g.beginPath(); g.arc(x, mid, 8, up ? Math.PI : 0, up ? 2 * Math.PI : Math.PI); g.closePath()
   g.fillStyle = color; g.fill()
 }
 
@@ -68,26 +67,26 @@ export function addFrontImages(m: maplibregl.Map) {
   const add = (id: string, w: number, draw: (g: CanvasRenderingContext2D) => void) => {
     if (!m.hasImage(id)) m.addImage(id, image(w, draw), { pixelRatio: R })
   }
-  add("pip-cold", 14, (g) => tri(g, 7, FRONT_COLORS.cold))
-  add("pip-warm", 14, (g) => semi(g, 7, FRONT_COLORS.warm))
-  add("pip-occluded", 28, (g) => { tri(g, 7, FRONT_COLORS.occluded); semi(g, 21, FRONT_COLORS.occluded) })
+  add("pip-cold", 20, (g) => tri(g, 10, FRONT_COLORS.cold))
+  add("pip-warm", 20, (g) => semi(g, 10, FRONT_COLORS.warm))
+  add("pip-occluded", 40, (g) => { tri(g, 10, FRONT_COLORS.occluded); semi(g, 30, FRONT_COLORS.occluded) })
   // stationary: cold pips toward the warm side, warm pips toward the cold side
-  add("pip-stationary", 28, (g) => { tri(g, 7, FRONT_COLORS.cold, false); semi(g, 21, FRONT_COLORS.warm) })
+  add("pip-stationary", 40, (g) => { tri(g, 10, FRONT_COLORS.cold, false); semi(g, 30, FRONT_COLORS.warm) })
 }
 
 /** The fronts' layers, above the data and below the basemap's labels. */
-export function addFrontLayers(m: maplibregl.Map, before: string | undefined, font: string[] | null) {
+export function addFrontLayers(m: maplibregl.Map, before: string | undefined) {
   addFrontImages(m)
   m.addSource("fronts", { type: "geojson", data: { type: "FeatureCollection", features: [] } })
   const line = ["==", ["geometry-type"], "LineString"] as maplibregl.ExpressionSpecification
   const vis = { visibility: "none" as const }
   m.addLayer({ id: "fronts-casing", type: "line", source: "fronts", filter: line, layout: { ...vis, "line-cap": "round", "line-join": "round" },
-    paint: { "line-color": "rgba(255,255,255,0.85)", "line-width": 4.5 } }, before)
+    paint: { "line-color": "rgba(255,255,255,0.85)", "line-width": 5.5 } }, before)
   const solid = ["!", ["in", ["get", "type"], ["literal", ["trough", "dryline", "squall"]]]] as maplibregl.ExpressionSpecification
   m.addLayer({ id: "fronts-line", type: "line", source: "fronts", filter: ["all", line, solid], layout: { ...vis, "line-cap": "round", "line-join": "round" },
     paint: {
       "line-color": ["match", ["get", "type"], "cold", FRONT_COLORS.cold, "occluded", FRONT_COLORS.occluded, FRONT_COLORS.warm],
-      "line-width": 2.4,
+      "line-width": 3,
     } }, before)
   // troughs and drylines dashed, squall lines dash-dot
   m.addLayer({ id: "fronts-dashed", type: "line", source: "fronts", filter: ["all", line, ["in", ["get", "type"], ["literal", ["trough", "dryline"]]]],
@@ -97,17 +96,12 @@ export function addFrontLayers(m: maplibregl.Map, before: string | undefined, fo
     layout: { ...vis, "line-join": "round" }, paint: { "line-color": FRONT_COLORS.squall, "line-width": 1.8, "line-dasharray": [4, 1.5, 1, 1.5] } }, before)
   // stationary fronts alternate red and blue
   m.addLayer({ id: "fronts-stationary", type: "line", source: "fronts", filter: ["all", line, ["==", ["get", "type"], "stationary"]],
-    layout: { ...vis, "line-join": "round" }, paint: { "line-color": FRONT_COLORS.cold, "line-width": 2.4, "line-dasharray": [5, 5] } }, before)
+    layout: { ...vis, "line-join": "round" }, paint: { "line-color": FRONT_COLORS.cold, "line-width": 3, "line-dasharray": [5, 5] } }, before)
   m.addLayer({ id: "fronts-pips", type: "symbol", source: "fronts",
     filter: ["all", line, ["in", ["get", "type"], ["literal", ["cold", "warm", "occluded", "stationary"]]]],
-    layout: { ...vis, "symbol-placement": "line", "symbol-spacing": 40,
+    layout: { ...vis, "symbol-placement": "line", "symbol-spacing": 56,
               "icon-image": ["concat", "pip-", ["get", "type"]], "icon-rotation-alignment": "map", "icon-pitch-alignment": "map",
               "icon-allow-overlap": true, "icon-ignore-placement": true, "icon-keep-upright": false } }, before)
-  if (font)
-    m.addLayer({ id: "fronts-centers", type: "symbol", source: "fronts", filter: ["==", ["geometry-type"], "Point"],
-      layout: { ...vis, "text-field": ["format", ["get", "kind"], { "font-scale": 1.6 }, "\n", {}, ["get", "p"], { "font-scale": 0.75 }],
-                "text-font": font, "text-size": 14, "text-line-height": 1.0, "text-allow-overlap": true },
-      paint: { "text-color": ["match", ["get", "kind"], "L", "#c0262d", "#1d4fa0"], "text-halo-color": "rgba(255,255,255,0.95)", "text-halo-width": 1.6 } }, before)
 }
 
-export const FRONT_LAYERS = ["fronts-casing", "fronts-line", "fronts-dashed", "fronts-squall", "fronts-stationary", "fronts-pips", "fronts-centers"]
+export const FRONT_LAYERS = ["fronts-casing", "fronts-line", "fronts-dashed", "fronts-squall", "fronts-stationary", "fronts-pips"]

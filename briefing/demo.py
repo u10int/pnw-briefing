@@ -482,7 +482,5 @@ def fronts(cfg):
                            {"type": "warm", "coords": [[lo[0] + 4.0, 48.8], [-124.0 + dx * 0.8, 48.0], [-121.0 + dx * 0.8, 46.8]]},
                            {"type": "trough", "coords": [[-136.0 + dx, 47.5], [-138.0 + dx, 44.0]]},
                            {"type": "stationary", "coords": [[-118.0, 51.5], [-114.0, 50.0], [-110.0, 49.5]]},
-                       ],
-                       "centers": [{"type": "L", "lon": lo[0], "lat": lo[1], "p": 984 + k if kind == "analysis" else None},
-                                   {"type": "H", "lon": -116.5, "lat": 43.5, "p": 1029 if kind == "analysis" else None}]})
+                       ]})
     return {"source": "NOAA/NWS Weather Prediction Center (demo)", "frames": frames}

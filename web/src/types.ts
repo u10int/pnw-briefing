@@ -111,7 +111,6 @@ export interface PeakPeriod {
 export interface FrontFrame {
   kind: "analysis" | "forecast"; valid: string; day?: number
   fronts: { type: "cold" | "warm" | "stationary" | "occluded" | "trough" | "dryline" | "squall"; coords: [number, number][] }[]
-  centers: { type: "H" | "L"; lon: number; lat: number; p: number | null }[]
 }
 /** WPC surface fronts: the last day's analyses (every 3 h), then the forecast chart's days 1 – 3. */
 export interface Fronts { source: string; frames: FrontFrame[] }
