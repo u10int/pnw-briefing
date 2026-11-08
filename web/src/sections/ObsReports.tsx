@@ -1,3 +1,6 @@
+import * as React from "react"
+
+import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { DayHead } from "@/components/DayHead"
@@ -62,7 +65,7 @@ export function ObsReportsCard({ data, v }: { data: Briefing; v: V }) {
       <CardHeader>
         <CardTitle>{TITLE[v]}</CardTitle>
         <CardDescription>
-          {WHAT[v]} over the last {o.days.length - 1} days and today so far (Pacific time){reports.length ? ", and the storm reports NWS offices have issued" : ""}.
+          {WHAT[v]} over the last {o.days.length - 1} days and today so far (Pacific time){reports.length ? ", then what's been reported to NWS Seattle and Portland" : ""}.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
@@ -108,31 +111,59 @@ export function ObsReportsCard({ data, v }: { data: Briefing; v: V }) {
           </div>
         )}
 
-        {reports.length > 0 && (
-          <section>
-            <h3 className="mb-2.5 text-xs font-semibold tracking-wide text-muted-foreground uppercase">NWS storm reports</h3>
-            <ul className="divide-y divide-border/70 text-sm">
-              {reports.map((r, i) => (
-                <li key={i} className="grid gap-x-4 gap-y-0.5 py-2 sm:grid-cols-[120px_1fr]">
-                  <span className="text-xs text-muted-foreground tabular-nums sm:pt-0.5">{r.time ? ptDayHour(r.time) : ""}</span>
-                  <div className="min-w-0">
-                    <p>
-                      <span className="font-semibold tabular-nums">{reportMag(r) ?? typeName(r.type).replace(/^./, (c) => c.toUpperCase())}</span>
-                      {reportMag(r) && <span className="text-muted-foreground"> {typeName(r.type)}</span>}
-                      {" "}at {r.place}{r.state ? `, ${r.state}` : ""}
-                      {r.near && r.near !== r.place && <> · near <button type="button" onClick={() => openLocation(r.near!)} className="hover:underline">{r.near}</button></>}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      {[r.source, r.measured ? "measured" : r.mag != null ? "estimated" : null].filter(Boolean).join(", ")}
-                      {r.remark && <> · {r.remark}</>}
-                    </p>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </section>
-        )}
+        {reports.length > 0 && <ReportList reports={reports} />}
       </CardContent>
     </Card>
+  )
+}
+
+const SHOW = 8
+
+/** Every NWS report of the card's kind: single storm reports and the rows of the offices' report
+ *  summaries, the largest first (reports without an amount, like wind damage, after), the top
+ *  few shown until expanded. */
+function ReportList({ reports }: { reports: ObsReport[] }) {
+  const [all, setAll] = React.useState(false)
+  const sorted = React.useMemo(() => [...reports].sort((a, b) => (b.mag ?? -1) - (a.mag ?? -1) || (b.time ?? "").localeCompare(a.time ?? "")), [reports])
+  const shown = all ? sorted : sorted.slice(0, SHOW)
+  const sums = [...new Map(reports.filter((r) => r.summary).map((r) => [`${r.summary!.office}${r.summary!.issued}`, r.summary!])).values()]
+  return (
+    <section>
+      <h3 className="mb-1 text-xs font-semibold tracking-wide text-muted-foreground uppercase">Reported to NWS</h3>
+      <p className="mb-2.5 text-xs text-muted-foreground">
+        {reports.length} report{reports.length === 1 ? "" : "s"} from spotters, mesonets, ski areas and other stations
+        {sums.length > 0 && <>, including {sums.map((x) => `NWS ${x.office === "SEW" ? "Seattle" : x.office === "PQR" ? "Portland" : x.office}'s ${x.title.toLowerCase()} (${ptDayHour(x.issued)})`).join(" and ")}</>}.
+        {" "}Not all are official.
+      </p>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[480px] max-w-3xl text-sm">
+          <tbody>
+            {shown.map((r, i) => (
+              <tr key={i} className="border-b border-border/60 align-top last:border-b-0">
+                <td className="w-[88px] py-1.5 pr-3 font-semibold whitespace-nowrap tabular-nums">
+                  {reportMag(r) ?? <span className="font-normal">{typeName(r.type).replace(/^./, (c) => c.toUpperCase())}</span>}
+                </td>
+                <td className="py-1.5 pr-3">
+                  {r.place}{r.state ? `, ${r.state}` : ""}
+                  <span className="block text-xs text-muted-foreground">
+                    {[r.county, r.elev_ft != null ? `${r.elev_ft.toLocaleString()} ft` : null, r.source, r.measured === false && r.mag != null ? "estimated" : null].filter(Boolean).join(" · ")}
+                    {r.remark && <> · {r.remark}</>}
+                  </span>
+                </td>
+                <td className="py-1.5 pr-3 text-xs whitespace-nowrap text-muted-foreground tabular-nums">{r.time ? ptDayHour(r.time) : ""}</td>
+                <td className="py-1.5 text-xs whitespace-nowrap text-muted-foreground">
+                  {r.near && <>near <button type="button" onClick={() => openLocation(r.near!)} className="text-foreground hover:underline">{r.near}</button></>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {sorted.length > SHOW && (
+        <Button variant="ghost" size="sm" className="mt-1 -ml-2" onClick={() => setAll(!all)}>
+          {all ? "Show fewer" : `Show all ${sorted.length}`}
+        </Button>
+      )}
+    </section>
   )
 }

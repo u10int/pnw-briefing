@@ -110,9 +110,12 @@ export interface PeakPeriod {
 }
 export interface ObsReport {
   kind: "rain" | "snow" | "ice" | "gust" | "damage" | "flood"; type: string; time: string | null
-  lat: number; lon: number; mag: number | null; unit: string | null; measured: boolean
+  lat: number; lon: number; mag: number | null; unit: string | null; measured: boolean | null
   place: string | null; county: string | null; state: string | null; source: string | null; remark: string | null
   near: string | null                                   // the forecast location within 30 km
+  elev_ft?: number | null
+  /** set on rows from an office's Public Information Statement report summary */
+  summary?: { office: string; title: string; issued: string }
 }
 /** Observed values at each location's station by local day (the last is today so far), and NWS
  *  local storm reports. */

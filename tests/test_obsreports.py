@@ -44,3 +44,34 @@ def test_lsrs_kinds_and_nearest():
     assert [r["kind"] for r in out] == ["gust", "snow"]
     assert out[0]["mag"] == 40 and out[0]["unit"] == "mph" and out[0]["near"] == "Seattle"
     assert out[1]["near"] is None
+
+
+from pathlib import Path
+
+FIX = Path(__file__).parent / "fixtures"
+
+
+def test_parse_pns_wind():
+    rows = obsreports.parse_pns((FIX / "pnssew.txt").read_text(), "SEW")
+    assert len(rows) == 4
+    h = next(r for r in rows if r["place"] == "2 W Hoquiam")
+    assert h["kind"] == "gust" and h["mag"] == 69 and h["unit"] == "mph" and h["county"] == "Grays Harbor County"
+    assert h["time"] == "2026-11-08T02:19:00+00:00" and (h["lat"], h["lon"]) == (46.97, -123.92)
+    assert rows[0]["county"] == "Maritime Stations" and h["summary"]["office"] == "SEW"
+
+
+def test_parse_pns_snow_trace_and_elev():
+    rows = obsreports.parse_pns((FIX / "pnspqr_snow.txt").read_text(), "PQR")
+    assert [r["kind"] for r in rows] == ["snow"] * 3
+    assert rows[0]["mag"] == 4.0 and rows[0]["county"] == "North Oregon Cascades"
+    assert rows[1]["mag"] == 0.001 and rows[2]["elev_ft"] == 818
+
+
+def test_merge_drops_repeated_lsr():
+    pns = obsreports.parse_pns((FIX / "pnssew.txt").read_text(), "SEW")
+    lsr = [{"kind": "gust", "mag": 69, "lat": 46.97, "lon": -123.92, "time": "2026-11-08T02:19:00Z", "place": "2 W Hoquiam"},
+           {"kind": "gust", "mag": 50, "lat": 47.6, "lon": -122.3, "time": "2026-11-08T02:19:00Z", "place": "Seattle"}]
+    pts = [{"name": "Aberdeen", "lat": 46.98, "lon": -123.82}]
+    out = obsreports.merge_reports(lsr, pns, pts)
+    assert len(out) == 5 and sum(1 for r in out if r["place"] == "2 W Hoquiam") == 1
+    assert next(r for r in out if r["place"] == "2 W Hoquiam")["near"] == "Aberdeen"

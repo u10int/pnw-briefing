@@ -1,0 +1,33 @@
+411 
+NOUS46 KSEW 081349
+PNSSEW
+WAZ001-301>333-090149-
+
+Public Information Statement
+National Weather Service Seattle WA
+549 AM PST Sun Nov 8 2026
+
+...HIGHEST WIND REPORTS...
+
+Location                     Speed     Time/Date       Lat/Lon             
+
+...Pacific Ocean...
+
+...Maritime Stations...
+10 NW Coupeville             55 MPH    0300 PM 11/07   48.32N/122.83W      
+
+...Washington...
+
+...Grays Harbor County...
+2 W Hoquiam                  69 MPH    0619 PM 11/07   46.97N/123.92W      
+
+...King County...
+2 NW Snoqualmie Pass         85 MPH    0300 AM 11/08   47.44N/121.44W      
+1 SE Seatac                  46 MPH    0900 PM 11/07   47.44N/122.31W      
+
+Observations are collected from a variety of sources with varying
+equipment and exposures. We thank all volunteer weather observers 
+for their dedication. Not all data listed are considered official.
+
+$$
+LH
