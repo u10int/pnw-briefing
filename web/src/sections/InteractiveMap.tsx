@@ -16,7 +16,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { FALLBACK, STYLE_URL, withKey } from "@/lib/basemap"
 import { loadCog } from "@/lib/cog"
 import { MRMS_MODEL } from "@/lib/mrms-name"
-import { nearestFrame, preload, SAT_KINDS, type SatKind, satTimes, satUrl } from "@/lib/satellite"
+import { nearestFrame, preload, SAT_KINDS, type SatKind, type SatTimes, satTimes, satUrl } from "@/lib/satellite"
 import { bicubicAt, contourLines, fieldUrl, gridPos, loadField, nearestAt, nearestTime, type Elevation, elevationFor, pressureCenters, pressureGradient, windArrows, windFrom } from "@/lib/fields"
 import { GRAD_COLORS, gradLevel, pairName, seriesAt } from "@/lib/gradients"
 import type { MapRequest } from "@/lib/maplink"
@@ -239,7 +239,7 @@ type Status = { kind: "loading" | "ready" | "error" | "empty"; note?: string }
 function MapPane({ data, view, clock, opacity, smooth, particles, particleColor, sync, terrain, sat }: {
   data: Briefing; view: View | null; clock: Clock; opacity: number; smooth: boolean
   particles: boolean; particleColor: [number, number, number, number]; sync: ReturnType<typeof useCameraSync>
-  terrain: boolean; sat: { kind: SatKind; times: string[] } | null
+  terrain: boolean; sat: { kind: SatKind; times: SatTimes } | null
 }) {
   const el = React.useRef<HTMLDivElement>(null)
   const ready = React.useRef<Promise<maplibregl.Map> | null>(null)
@@ -430,40 +430,54 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
     ready.current?.then((m) => m.getLayer("hillshade") && m.setLayoutProperty("hillshade", "visibility", terrain ? "visible" : "none"))
   }, [terrain])
 
-  // Satellite imagery under the data: the frame nearest the clock (within 20 minutes), one image
-  // for the whole domain, decoded before it's swapped in; the next frames load ahead in playback.
+  // Satellite imagery under the data: the GOES frame nearest the clock (within 20 minutes), over
+  // the hourly global mosaic (within 75 minutes) that fills in north of the GOES layer's edge. One
+  // image each for the whole domain, decoded before it's swapped in; the next GOES frames load
+  // ahead during playback.
   const [satLabel, setSatLabel] = React.useState<string | null>(null)
   React.useEffect(() => {
     const d = data.domain
     const box = { west: d.lon_min, south: d.lat_min, east: d.lon_max, north: d.lat_max }
     const corners: [[number, number], [number, number], [number, number], [number, number]] =
       [[box.west, box.north], [box.east, box.north], [box.east, box.south], [box.west, box.south]]
-    let shown: string | null = null, want: string | null = null, stop = false
-    const hide = () => ready.current?.then((m) => m.getLayer("sat") && m.setLayoutProperty("sat", "visibility", "none"))
-    if (!sat || !sat.times.length) { hide(); setSatLabel(null); return }
+    let stop = false
+    const shown: Record<string, string | null> = {}, want: Record<string, string | null> = {}
+    const hide = (id: string) => ready.current?.then((m) => m.getLayer(id) && m.setLayoutProperty(id, "visibility", "none"))
+    const hideAll = () => { hide("sat"); hide("sat-fill") }
+    if (!sat) { hideAll(); setSatLabel(null); return }
+    const k = SAT_KINDS[sat.kind]
+    // show one layer's frame for the clock; returns the frame time shown, or null
+    const show = (id: string, layer: string, tol: number, below: string, ahead: boolean): string | null => {
+      const times = sat.times[layer] ?? []
+      const i = clock.time == null ? -1 : nearestFrame(times, clock.time, tol)
+      if (i < 0) { want[id] = shown[id] = null; hide(id); return null }
+      const url = satUrl(layer, times[i], box)
+      if (ahead && clock.playing) for (const j of [1, 2, 3]) if (times[i + j]) preload(satUrl(layer, times[i + j], box)).catch(() => {})
+      if (url !== shown[id] && url !== want[id]) {
+        want[id] = url
+        preload(url).then(() => ready.current!).then((m) => {
+          if (stop || want[id] !== url) return
+          const src = m.getSource(id) as maplibregl.ImageSource | undefined
+          if (src) src.updateImage({ url, coordinates: corners })
+          else {
+            m.addSource(id, { type: "image", url, coordinates: corners })
+            m.addLayer({ id, type: "raster", source: id, paint: { "raster-opacity": 0.9, "raster-fade-duration": 0 } }, m.getLayer(below) ? below : "grid")
+          }
+          m.setLayoutProperty(id, "visibility", "visible")
+          shown[id] = url
+        }).catch(() => {})
+      }
+      return times[i]
+    }
     const update = () => {
-      const i = clock.time == null ? -1 : nearestFrame(sat.times, clock.time)
-      if (i < 0) { want = null; shown = null; hide(); setSatLabel(null); return }
-      const url = satUrl(sat.kind, sat.times[i], box)
-      if (clock.playing) for (const k of [1, 2, 3]) if (sat.times[i + k]) preload(satUrl(sat.kind, sat.times[i + k], box)).catch(() => {})
-      if (url === shown || url === want) return
-      want = url
-      preload(url).then(() => ready.current!).then((m) => {
-        if (stop || want !== url) return
-        const src = m.getSource("sat") as maplibregl.ImageSource | undefined
-        if (src) src.updateImage({ url, coordinates: corners })
-        else {
-          m.addSource("sat", { type: "image", url, coordinates: corners })
-          m.addLayer({ id: "sat", type: "raster", source: "sat", paint: { "raster-opacity": 0.9, "raster-fade-duration": 0 } }, "grid")
-        }
-        m.setLayoutProperty("sat", "visibility", "visible")
-        shown = url
-        setSatLabel(`${SAT_KINDS[sat.kind].label} satellite, ${timeLabel(sat.times[i])}`)
-      }).catch(() => {})
+      const goes = show("sat", k.layer, 20, "grid", true)
+      const fill = show("sat-fill", k.fill, 75, "sat", false)
+      const t = goes ?? fill
+      setSatLabel(t ? `${k.label} satellite, ${timeLabel(t)}` : null)
     }
     update()
     const unsub = clock.subscribe(update)
-    return () => { stop = true; unsub(); hide() }
+    return () => { stop = true; unsub(); hideAll() }
   }, [sat?.kind, sat?.times])
 
   return (
@@ -1017,8 +1031,8 @@ function useMrms(data: Briefing, on: boolean): FieldEntry | null {
 
 /** GOES frame times from nowCOAST (about the last 7 hours), refreshed every 5 minutes while the
  *  hourly map is open; null when the service can't be reached (the option is then hidden). */
-function useSatTimes(on: boolean): Record<SatKind, string[]> | null {
-  const [times, setTimes] = React.useState<Record<SatKind, string[]> | null>(null)
+function useSatTimes(on: boolean): SatTimes | null {
+  const [times, setTimes] = React.useState<SatTimes | null>(null)
   React.useEffect(() => {
     if (!on) return
     let stop = false
@@ -1177,7 +1191,11 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
   // hourly state
   const mrms = useMrms(data, mode === "hourly" && active)
   const satAll = useSatTimes(mode === "hourly" && active)
-  const sat = React.useMemo(() => (satAll && satKind !== "off" && satAll[satKind].length ? { kind: satKind, times: satAll[satKind] } : null), [satAll, satKind])
+  const sat = React.useMemo(() => {
+    if (!satAll || satKind === "off") return null
+    const k = SAT_KINDS[satKind]
+    return (satAll[k.layer]?.length || satAll[k.fill]?.length) ? { kind: satKind, times: satAll } : null
+  }, [satAll, satKind])
   const byModel = React.useMemo(() => {
     const m = new Map<string, { tier: string; entries: Record<string, FieldEntry> }>()
     for (const e of mrms ? [mrms, ...fields] : fields) {
