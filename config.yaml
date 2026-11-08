@@ -145,14 +145,10 @@ grib_models:
      extremes: {step: 1, temp: maxmin, wind: max},
      fields: {hourly: [refc, ptype, t2m, gust, wind, mslp, frz, rh, smoke], hourly_hours: 48,
               stepped: [wind, mslp, frz, rh, refc, ptype, smoke]}}           # every 3 h from 48 h to 84 h
-  - {id: namnest, label: NAM 3 km, tier: regional, family: ncep,
-     herbie: {model: nam, product: conusnest.hiresf},
-     cycles: [0, 6, 12, 18], max_hours: 60, range_days: 2, sample_hours: 3, chain_step: 1,
-     extremes: {step: 1, temp: maxmin, wind: maxuv},          # max wind as components
-     fields: {hourly: [refc, ptype, t2m, gust, wind, mslp, frz, rh], hourly_hours: 48,
-              stepped: [wind, mslp, frz, rh, refc, ptype]}}                  # every 3 h from 48 h to 60 h
+  # NAM 3 km (namnest) was retired by NWS on 2026-11-03 12Z (SCN 26-47), replaced by RRFS.
   # blend
-  - {id: nbm, label: NBM, tier: blend, family: ncep, herbie: {model: nbm, product: co},
+  # AWS first: Herbie's NBM template lists NOMADS first, and NOMADS refuses the runners' index reads
+  - {id: nbm, label: NBM, tier: blend, family: ncep, herbie: {model: nbm, product: co, priority: [aws, nomads]},
      cycles: [0, 6, 12, 18], max_hours: 264, range_days: 11, sample_hours: 6, chain_step: 6,
      extremes: {steps: [[36, 1], [192, 3], [264, 6]], temp: maxmin, wind: speed}}   # 12-h highs/lows
   # global
