@@ -15,6 +15,7 @@ import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { FALLBACK, STYLE_URL, withKey } from "@/lib/basemap"
 import { loadCog } from "@/lib/cog"
+import { MRMS_MODEL } from "@/lib/mrms-name"
 import { bicubicAt, contourLines, fieldUrl, gridPos, loadField, nearestAt, nearestTime, type Elevation, elevationFor, pressureCenters, pressureGradient, windArrows, windFrom } from "@/lib/fields"
 import { GRAD_COLORS, gradLevel, pairName, seriesAt } from "@/lib/gradients"
 import type { MapRequest } from "@/lib/maplink"
@@ -794,7 +795,9 @@ function hourlyView(model: string, entries: Record<string, FieldEntry>, layer: H
   if (!prim) return null
   const iso = isobars && !!entries.mslp
   const name = def.label.toLowerCase()
-  const nearest = (time: number | null) => (time == null ? null : bracket(prim.times, time, false, 3.1))
+  // observed frames only stand for the time they were taken; model steps cover the hours around them
+  const tol = prim.tier === "observed" ? 0.4 : 3.1
+  const nearest = (time: number | null) => (time == null ? null : bracket(prim.times, time, false, tol))
   const ramp = layer === "t2m" ? TEMP : layer === "gust" ? GUST : layer === "wind" ? WIND : layer === "ivt" ? IVT : layer === "pgrad" ? PGRAD
     : layer === "apcp" ? APCP : layer === "asnow" ? ASNOW : layer === "rh" ? RH : layer === "smoke" ? SMOKE : FRZ
 
@@ -805,12 +808,14 @@ function hourlyView(model: string, entries: Record<string, FieldEntry>, layer: H
       const b = nearest(time)
       if (!b) return undefined
       const valid = prim.times[b.i0]
+      if (prim.tier === "observed") return `${timeLabel(valid)} · observed`
       return `${timeLabel(valid)} (hour ${Math.round((Date.parse(valid) - Date.parse(prim.init)) / 3600e3)} of the ${prim.run} run)`
     },
     grid(time, interp) {
-      const b = time == null ? null : bracket(prim.times, time, interp, 3.1)
+      const b = time == null ? null : bracket(prim.times, time, interp, tol)
       if (!b) {
-        const when = time == null ? "" : ` within 3 hours of ${timeLabel(new Date(time).toISOString())}`
+        const when = time == null ? "" : prim.tier === "observed" ? ` at ${timeLabel(new Date(time).toISOString())} (observed radar covers the briefing's start to now)`
+          : ` within 3 hours of ${timeLabel(new Date(time).toISOString())}`
         return { key: `none:${time}`, t: 0, load: async () => ({ draw: null, note: `${model} has no ${name}${when}.`, sample: () => null }) }
       }
       return {
@@ -951,6 +956,27 @@ function hourlyView(model: string, entries: Record<string, FieldEntry>, layer: H
   }
 }
 
+/** Observed radar frames (MRMS) for the briefing's window, listed once the hourly map is open and
+ *  every 5 minutes after that while the window reaches now. */
+function useMrms(data: Briefing, on: boolean): FieldEntry | null {
+  const [entry, setEntry] = React.useState<FieldEntry | null>(null)
+  const start = Date.parse(data.meta.cycle ?? `${data.dates[0]}T12:00:00Z`)
+  React.useEffect(() => {
+    if (!on) return
+    let stop = false
+    const d = data.domain
+    const load = () => import("@/lib/mrms")
+      .then((m) => m.mrmsEntry(start, { west: d.lon_min, south: d.lat_min, east: d.lon_max, north: d.lat_max }))
+      .then((e) => { if (!stop) setEntry((old) => (e && old && e.keys?.join() === old.keys?.join() ? old : e)) })
+      .catch(() => {})
+    load()
+    const live = Date.now() < start + 48 * 3600e3
+    const id = live ? setInterval(load, 5 * 60e3) : undefined
+    return () => { stop = true; if (id) clearInterval(id) }
+  }, [on, start])
+  return entry
+}
+
 function useFields(data: Briefing): FieldEntry[] {
   const inline = (data as unknown as { _fields?: FieldsManifest })._fields
   const [list, setList] = React.useState<FieldEntry[]>(inline?.fields ?? [])
@@ -966,7 +992,7 @@ function useFields(data: Briefing): FieldEntry[] {
 
 // ------------------------------------------------------------------ shared controls
 
-const TIERS = [["consensus", "Consensus"], ["regional", "Regional"], ["blend", "Blend"], ["global", "Global"]] as const
+const TIERS = [["observed", "Observed"], ["consensus", "Consensus"], ["regional", "Regional"], ["blend", "Blend"], ["global", "Global"]] as const
 
 function ModelSelect({ options, value, onChange, label }: { options: { model: string; tier: string }[]; value: string; onChange: (v: string) => void; label: string }) {
   return (
@@ -1095,14 +1121,15 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
   const [other, setOther] = React.useState("GFS")
 
   // hourly state
+  const mrms = useMrms(data, mode === "hourly" && active)
   const byModel = React.useMemo(() => {
     const m = new Map<string, { tier: string; entries: Record<string, FieldEntry> }>()
-    for (const e of fields) {
+    for (const e of mrms ? [mrms, ...fields] : fields) {
       if (!m.has(e.model)) m.set(e.model, { tier: e.tier, entries: {} })
       m.get(e.model)!.entries[e.var as FieldVar] = e
     }
     return m
-  }, [fields])
+  }, [fields, mrms])
   const [layer, setLayer] = React.useState<HLayer>("radar")
   const [hModel, setHModel] = React.useState("HRRR")
   const [hOther, setHOther] = React.useState("GFS")
@@ -1190,7 +1217,7 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
     let target = want ?? clock.time ?? ms[0]
     if (want == null && startNow.current) {
       const now = Date.now()
-      if (now >= ms[0] - 1800e3 && now <= ms[ms.length - 1]) target = now
+      if (now >= ms[0] - 1800e3 && now <= ms[ms.length - 1] + 1800e3) target = now
     }
     startNow.current = false
     clock.set(ms[Math.round(posOf(ms, target))], false)
@@ -1243,7 +1270,7 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
         <CardDescription>
           {mode === "totals"
             ? "Totals, extremes, ensemble odds and observed rainfall for each window, from each model's own grid. Model spread and percent of normal use the multi-model mean; ensemble odds pool GEFS and ECMWF ENS members."
-            : "Forecast maps through time. HRRR, RRFS and NAM step hourly for the first 48 hours (RRFS every 3 hours after that); NBM and the global models every 6 hours. Playback blends smoothly between forecast steps."}
+            : "Forecast maps through time. HRRR, RRFS and NAM step hourly for the first 48 hours (RRFS every 3 hours after that); NBM and the global models every 6 hours. Playback blends smoothly between forecast steps. MRMS radar (under Observed) is NOAA's multi-radar composite reflectivity, loaded live: hourly since the briefing's start and every 10 minutes for the last 3 hours, so you can compare it with the forecast radar for the same times."}
           {" "}Hover for values; drag and zoom to look closer.
         </CardDescription>
       </CardHeader>
@@ -1296,7 +1323,14 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
                 </SelectContent>
               </Select>
               <div className="flex items-center gap-x-5 max-sm:w-full">
-                {hA && <ModelSelect options={layerModels} value={hA} onChange={setHModel} label="Model" />}
+                {hA && <ModelSelect options={layerModels} value={hA} onChange={(m) => {
+                  setHModel(m)
+                  // observed radar pairs best with a high-resolution forecast
+                  if (m === MRMS_MODEL && !layerModels.some((x) => x.model === hOther && x.tier === "regional")) {
+                    const r = layerModels.find((x) => x.tier === "regional")
+                    if (r) setHOther(r.model)
+                  }
+                }} label="Model" />}
                 <Toggle id="compare-h" label="Compare" checked={compare} onChange={setCompare} />
               </div>
               {compare && hB && <div className="flex max-sm:w-full"><ModelSelect options={layerModels.filter((m) => m.model !== hA)} value={hB} onChange={setHOther} label="Compare with" /></div>}
@@ -1356,7 +1390,7 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
             ? options.slice(0, 12).map((c, i) => (
                 <React.Fragment key={c.path}>{i > 0 && ", "}<a className="underline underline-offset-2 hover:text-foreground" href={cogUrl(c)} download>{c.model}</a></React.Fragment>
               ))
-            : Object.values(entriesA).map((e, i) => (
+            : Object.values(entriesA).filter((e) => !e.path.startsWith("mrms:")).map((e, i) => (
                 <React.Fragment key={e.path}>{i > 0 && ", "}<a className="underline underline-offset-2 hover:text-foreground" href={fieldUrl(e)} download>{hA} {e.var}</a></React.Fragment>
               ))}
           {mode === "hourly" && " (one band per forecast time)"}.
