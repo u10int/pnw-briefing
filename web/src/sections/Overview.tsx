@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { dateRange } from "@/lib/format"
 import { summarize } from "@/sections/Hazards"
+import { ObservedHighlights } from "@/sections/ObsReports"
 import type { Briefing } from "@/types"
 
 const REGION_VAR: Record<string, string> = { wwa: "var(--wwa)", nwor: "var(--nwor)" }
@@ -26,6 +27,7 @@ function Overview({ data }: { data: Briefing }) {
     <div className="space-y-4">
       <h1 className="max-w-[26ch] text-[2.75rem] leading-[1.08] font-semibold tracking-tight text-balance max-sm:text-3xl">{s.headline}</h1>
       {s.lede && <p className="max-w-[68ch] text-base text-pretty text-muted-foreground">{s.lede}</p>}
+      <ObservedHighlights data={data} />
       <div className="flex flex-wrap items-center gap-2">
         <RunStatus data={data} />
         <EditionNote data={data} />

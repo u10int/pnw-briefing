@@ -235,7 +235,7 @@ def parse_pns(text, office):
         mag = 0.001 if m["mag"].upper() == "T" else float(m["mag"])
         if unit.startswith("KT"):
             mag, unit = round(mag * KT_TO_MPH), "MPH"
-        out.append({"kind": kind, "type": section.replace(" Reports", "").replace("Highest ", ""), "time": t.astimezone(timezone.utc).isoformat(),
+        out.append({"kind": kind, "type": {"gust": "Wind Gust", "snow": "Snowfall", "rain": "Rainfall", "ice": "Ice"}.get(kind, section), "time": t.astimezone(timezone.utc).isoformat(),
                     "lat": float(m["lat"]), "lon": -float(m["lon"]), "mag": mag, "unit": "mph" if unit == "MPH" else "inch",
                     "measured": None, "place": place, "county": area, "state": None, "source": None, "remark": None,
                     "elev_ft": int(m["elev"]) if m["elev"] else None,

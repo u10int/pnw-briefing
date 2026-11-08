@@ -22,7 +22,7 @@ const WHAT: Record<V, string> = {
 const KINDS: Record<V, ObsReport["kind"][]> = { precip: ["rain", "flood", "ice"], gust: ["gust", "damage"], snow: ["snow", "ice"] }
 const RAMP = { precip: PRECIP, gust: GUST, snow: SNOW }
 
-function fmt(v: V, x: N) {
+export function fmt(v: V, x: N) {
   if (x == null) return "–"
   if (v === "precip") return x > 0 && x < 0.005 ? "T" : x.toFixed(2)
   return String(Math.round(x))
@@ -38,14 +38,14 @@ function clock(s: string | null | undefined) {
 }
 
 /** NWS's abbreviated report types in plain words. */
-function typeName(t: string) {
+export function typeName(t: string) {
   const x = t.toLowerCase()
-  if (x.includes("wnd gst")) return "wind gust"
+  if (x.includes("wnd gst") || x === "wind") return "wind gust"
   if (x.includes("wnd dmg")) return "wind damage"
   return x
 }
 
-function reportMag(r: ObsReport) {
+export function reportMag(r: ObsReport) {
   if (r.mag == null) return null
   const u = r.unit ?? ""
   if (u === "mph") return `${Math.round(r.mag)} mph`
@@ -166,5 +166,102 @@ function ReportList({ reports }: { reports: ObsReport[] }) {
         </Button>
       )}
     </section>
+  )
+}
+
+/** One location's observations in its side panel: the station's last few days, then the NWS
+ *  reports tied to it. */
+export function LocationObserved({ data, name }: { data: Briefing; name: string }) {
+  const o = data.obsReports
+  const rec = o?.points[name]
+  const reports = React.useMemo(() => liveReports(o).filter((r) => r.near === name)
+    .sort((a, b) => (b.mag ?? -1) - (a.mag ?? -1)), [o, name])
+  if (!o || (!rec && !reports.length)) return null
+  const rows = rec ? (["precip", "gust", "snow"] as V[]).filter((v) => rec[v].some((x) => x != null)) : []
+  const label = { precip: "Precip (in)", gust: "Peak gust (mph)", snow: "New snow (in)" }
+  return (
+    <div>
+      <p className="mb-2 text-sm font-medium">Observed</p>
+      {rows.length > 0 && (
+        <>
+          <table className="w-full max-w-md text-[13px] tabular-nums">
+            <thead>
+              <tr className="text-xs text-muted-foreground">
+                <th className="pb-1 text-left font-normal" />
+                {o.days.map((d) => (
+                  <th key={d} className="pb-1 text-right font-normal">{d === o.today ? "Today" : new Date(`${d}T12:00:00`).toLocaleDateString("en-US", { weekday: "short" })}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((v) => (
+                <tr key={v} className="border-t border-border/60">
+                  <td className="py-1 pr-2 text-xs text-muted-foreground">{label[v]}</td>
+                  {rec![v].map((x, i) => (
+                    <td key={i} className={`py-1 text-right ${x == null ? "text-muted-foreground" : ""}`}>{fmt(v, x)}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="mt-1 text-xs text-muted-foreground">{rec!.stations.join("; ")}. Today is so far.</p>
+        </>
+      )}
+      {reports.length > 0 && (
+        <ul className="mt-3 space-y-1.5 text-[13px]">
+          {reports.slice(0, 6).map((r, i) => (
+            <li key={i}>
+              <span className="font-semibold tabular-nums">{reportMag(r) ?? typeName(r.type).replace(/^./, (c) => c.toUpperCase())}</span>
+              {reportMag(r) && <span className="text-muted-foreground"> {typeName(r.type)}</span>} at {r.place}
+              <span className="block text-xs text-muted-foreground">{[r.time ? ptDayHour(r.time) : null, r.county, r.source].filter(Boolean).join(" · ")}</span>
+            </li>
+          ))}
+          {reports.length > 6 && <li className="text-xs text-muted-foreground">and {reports.length - 6} more reported to NWS nearby</li>}
+        </ul>
+      )}
+    </div>
+  )
+}
+
+/** The standout observations of the last day or two, for the top of the page: the strongest
+ *  gust and the most rain and snow, from NWS reports and the locations' stations. */
+export function ObservedHighlights({ data }: { data: Briefing }) {
+  const o = data.obsReports
+  const items = React.useMemo(() => {
+    if (!o) return []
+    const reps = liveReports(o)
+    const recent = o.days.slice(-2)                                // yesterday and today at the stations
+    type Item = { what: string; value: number; text: string; where: string; when: string | null; loc: string | null }
+    const best = (kind: ObsReport["kind"], v: V, what: string, min: number): Item | null => {
+      let out: Item | null = null
+      for (const r of reps) {
+        if (r.kind !== kind || r.mag == null || r.mag < min) continue
+        if (!out || r.mag > out.value) out = { what, value: r.mag, text: reportMag(r)!, where: r.place ?? "", when: r.time, loc: r.near }
+      }
+      for (const [name, rec] of Object.entries(o.points)) {
+        rec[v].forEach((x, i) => {
+          const day = o.days[i]
+          if (x == null || x < min || !recent.includes(day)) return
+          if (!out || x > out.value) out = { what, value: x, text: v === "gust" ? `${Math.round(x)} mph` : `${x.toFixed(v === "snow" ? 0 : 2)} in`, where: name, when: null, loc: name }
+        })
+      }
+      return out
+    }
+    return [best("gust", "gust", "Strongest gust", 30), best("rain", "precip", "Most rain", 0.25), best("snow", "snow", "Most new snow", 1)]
+      .filter((x): x is NonNullable<typeof x> => !!x)
+  }, [o])
+  if (!items.length) return null
+  return (
+    <p className="max-w-[68ch] text-[13px] text-muted-foreground">
+      <span className="font-medium text-foreground">Observed lately: </span>
+      {items.map((x, i) => (
+        <span key={x.what}>
+          {i > 0 && " · "}
+          {x.what} <span className="font-semibold text-foreground tabular-nums">{x.text}</span>{" "}
+          {x.loc ? <button type="button" onClick={() => openLocation(x.loc!)} className="hover:underline">at {x.where}</button> : `at ${x.where}`}
+          {x.when && <> ({ptDayHour(x.when)})</>}
+        </span>
+      ))}
+    </p>
   )
 }

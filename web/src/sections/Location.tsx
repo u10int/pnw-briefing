@@ -11,6 +11,7 @@ import { dayShort, maxOf, median, minOf } from "@/lib/format"
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet"
 import type { Briefing, N, TrendVar } from "@/types"
 import { PeakTimingLines } from "@/sections/Timing"
+import { LocationObserved } from "@/sections/ObsReports"
 
 const ENS_COLORS = ["var(--chart-1)", "var(--chart-2)", "var(--chart-3)"]
 
@@ -340,6 +341,7 @@ export function LocationPanel({ data, name, onChange, onClose }: { data: Briefin
                 </div>
               )}
               <PeakTimingLines data={data} name={p.name} />
+              <LocationObserved data={data} name={p.name} />
               <PrecipTotalCard data={data} point={p.name} />
               <DayByDay data={data} point={p.name} />
             </div>
