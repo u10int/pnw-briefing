@@ -227,7 +227,7 @@ Use only the facts given. Do not add places, timings, numbers or hazards that ar
 - Headline: at most 10 words, sentence case (capitalise the first word and proper names only), no final period. Lead with the most important impact or event (facts are listed most important first).
 - Lead: one or two short sentences, at most 40 words in all, giving a quick overview of the other key impacts and events, in order of importance. Leave out anything minor.
 - Describe the weather and its impacts, never named NWS products: no "warning", "watch", "advisory" or "statement".
-- Keep it general: broad areas (e.g. "Puget Sound", "the coast", "the Cascade passes") rather than towns, and relative timing ("this weekend", "early next week") rather than dates. Never write calendar dates.
+- Keep it general: broad areas (e.g. "Puget Sound", "the coast", "the Cascade passes") rather than towns, with place names capitalised exactly as in the facts, and relative timing ("this weekend", "early next week") rather than dates. Never write calendar dates.
 - Use at most two numbers in total, copied exactly from the facts (e.g. "gusts to 55 mph", "about 3.6 in").
 - Say "likely" or "possible" when the likelihood matters. Plain, calm, factual language; no exclamation marks, no advice.
 - If little stands out, say so plainly."""
@@ -334,6 +334,30 @@ def by_rules(f: dict) -> dict:
 
 # ---------------------------------------------------------------- entry point
 
+# proper names the overview may use, beyond the configured regions, zones and areas
+PLACES = ["Western Washington", "Northwest Oregon", "Southwest BC", "southwest British Columbia", "British Columbia",
+          "Washington", "Oregon", "Puget Sound", "Willamette Valley", "Columbia River Gorge", "Cascades", "Cascade",
+          "Olympics", "Olympic Peninsula", "Coast Range", "Lower Mainland", "Sea to Sky", "Vancouver Island", "Portland",
+          "Seattle", "Vancouver", "BC"]   # not bare "WA" or "OR": "or" is a word
+
+
+def place_names(cfg: dict) -> list[str]:
+    names = [r["name"] for r in (cfg.get("regions") or {}).values()]
+    for p in cfg.get("points") or []:
+        names += [x for x in (p.get("zone"), p.get("area")) if x]
+    return list(dict.fromkeys(names + PLACES))
+
+
+def fix_places(text: str, names: list[str]) -> str:
+    """Write place names as they're spelled in the facts ("southwest bc" -> "Southwest BC"), and
+    capitalise "southwest"/"northwest" etc. only where they're part of a name."""
+    out = text
+    for n in sorted(names, key=len, reverse=True):
+        canon = n[0].upper() + n[1:]
+        out = re.sub(rf"(?<![\w-]){re.escape(n)}(?![\w-])", canon, out, flags=re.I)
+    return out
+
+
 def _cap(s: str) -> str:
     """First letter upper case: the model sometimes takes "sentence case" to mean none at all."""
     return s[:1].upper() + s[1:]
@@ -350,7 +374,9 @@ def overview(data: dict, cfg: dict, demo: bool = False) -> dict:
             why = check(text, f)
             if why is None:
                 log.info("overview written by %s", model)
-                return {"headline": _cap(text["headline"].strip().rstrip(".")), "lede": _cap(text["lede"].strip()),
+                names = place_names(cfg)
+                return {"headline": _cap(fix_places(text["headline"].strip().rstrip("."), names)),
+                        "lede": _cap(fix_places(text["lede"].strip(), names)),
                         "source": "openai", "model": model}
             log.warning("overview from %s not used (%s): %s", model, why, text)
         except Exception as e:

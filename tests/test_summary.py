@@ -68,3 +68,10 @@ def test_model_text_is_capitalised(monkeypatch):
     monkeypatch.setattr(summary, "ask_model", lambda f, m, k: {"headline": "a quiet stretch ahead", "lede": "nothing stands out."})
     out = summary.overview(data, cfg)
     assert out["headline"] == "A quiet stretch ahead" and out["lede"] == "Nothing stands out."
+
+
+def test_place_names_are_capitalised():
+    cfg = {"regions": {"wwa": {"name": "Western Washington"}}, "points": [{"zone": "WA coast"}, {"zone": "Southwest BC"}]}
+    n = summary.place_names(cfg)
+    t = "strong gusts along puget sound, the wa coast or southwest bc, rain in western washington"
+    assert summary.fix_places(t, n) == "strong gusts along Puget Sound, the WA coast or Southwest BC, rain in Western Washington"
