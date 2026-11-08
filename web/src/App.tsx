@@ -1,6 +1,6 @@
 import * as React from "react"
 
-import { CloudRain, Flame, MapIcon, MapPin, MountainSnow, Telescope, Thermometer, Waves, Wind } from "lucide-react"
+import { Anchor, CloudRain, Flame, MapIcon, MapPin, MountainSnow, Telescope, Thermometer, Waves, Wind } from "lucide-react"
 
 import { Separator } from "@/components/ui/separator"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -19,6 +19,7 @@ import { TrendsCard } from "@/sections/Trends"
 import { TempVerificationCard, VerificationCard } from "@/sections/Verify"
 import { ConvectiveCard } from "@/sections/Convective"
 import { ObsReportsCard } from "@/sections/ObsReports"
+import { CoastSection } from "@/sections/Coast"
 import { PeakTimingCard } from "@/sections/Timing"
 import { ByLocation, RegionTotals } from "@/sections/Totals"
 import { WindByLocation, WindPeaks } from "@/sections/WindTotals"
@@ -37,6 +38,7 @@ const TABS = [
   { id: "precip", label: "Precip", icon: CloudRain },
   { id: "flood", label: "Flooding", icon: Waves },
   { id: "wind", label: "Wind", icon: Wind },
+  { id: "coast", label: "Coast & marine", icon: Anchor },
   { id: "snow", label: "Snow & mountains", icon: MountainSnow },
   { id: "temp", label: "Temperature", icon: Thermometer },
   { id: "fire", label: "Wildfire", icon: Flame },
@@ -264,6 +266,13 @@ export default function App() {
               <MapCard title="Wind and gust maps" description="The strongest sustained wind and gust in each model."
                 tabs={[...pickExtremes(data, "short", "the next 48 hours", ["gust", "wind"], " (48 h)"),
                        ...pickExtremes(data, "long", "each model's full range", ["gust", "wind"], ` (to day ${meta.days})`)]} />
+            </Section>
+          </TabsContent>
+
+          <TabsContent value="coast">
+            <Section title="Coast and marine" first
+              description="The outer coast, the Strait of Juan de Fuca, the San Juans and Puget Sound: marine warnings, what the buoys are reading, the wave forecast, and the week's high tides against each gauge's flood level.">
+              <CoastSection data={data} />
             </Section>
           </TabsContent>
 

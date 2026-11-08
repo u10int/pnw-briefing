@@ -291,6 +291,51 @@ obs_reports:
     Vancouver BC: {asos: CYVR, eccc: "1108395"}
     Whistler BC: {asos: CWAE}
 
+# Coast and inland waters (coast.py). area groups rows on the page: "Outer coast", "Strait and
+# Puget Sound", "B.C. waters". near: the forecast location a row belongs with, if any.
+coast:
+  marine_zone_prefixes: [PZZ1, PZZ2]      # NWS Seattle and Portland marine zones
+  buoys:
+    - {id: "46206", name: La Perouse Bank,  lat: 48.840, lon: -126.000, area: Outer coast}
+    - {id: "46087", name: Neah Bay (Cape Flattery), lat: 48.493, lon: -124.727, area: Outer coast}
+    - {id: "46041", name: Cape Elizabeth,   lat: 47.351, lon: -124.741, area: Outer coast}
+    - {id: "46211", name: Grays Harbor,     lat: 46.857, lon: -124.243, area: Outer coast}
+    - {id: "46248", name: Astoria Canyon,   lat: 46.133, lon: -124.640, area: Outer coast}
+    - {id: "46029", name: Columbia River Bar, lat: 46.148, lon: -124.508, area: Outer coast}
+    - {id: "46243", name: Clatsop Spit,     lat: 46.215, lon: -124.129, area: Outer coast}
+    - {id: "46089", name: Tillamook (offshore), lat: 45.928, lon: -125.815, area: Outer coast}
+    - {id: "46050", name: Stonewall Bank (Newport), lat: 44.679, lon: -124.535, area: Outer coast}
+    - {id: "46267", name: Angeles Point,    lat: 48.171, lon: -123.600, area: Strait and Puget Sound}
+    - {id: "46088", name: New Dungeness,    lat: 48.332, lon: -123.179, area: Strait and Puget Sound}
+    - {id: WPOW1,   name: West Point (Seattle), lat: 47.662, lon: -122.435, area: Strait and Puget Sound}
+    - {id: "46146", name: Halibut Bank,     lat: 49.340, lon: -123.730, area: B.C. waters}
+  wave_points:
+    - {name: Cape Flattery,          lat: 48.35, lon: -124.85, near: Forks, area: Outer coast}
+    - {name: Off La Push,            lat: 47.90, lon: -124.80, near: Forks, area: Outer coast}
+    - {name: Off Grays Harbor,       lat: 46.95, lon: -124.30, near: Aberdeen, area: Outer coast}
+    - {name: Columbia River mouth,   lat: 46.25, lon: -124.20, near: Astoria, area: Outer coast}
+    - {name: Off Tillamook,          lat: 45.50, lon: -124.05, near: Tillamook, area: Outer coast}
+    - {name: Off Newport,            lat: 44.60, lon: -124.20, area: Outer coast}
+    - {name: West Strait,            lat: 48.35, lon: -124.30, area: Strait and Puget Sound}
+    - {name: East Strait,            lat: 48.25, lon: -123.35, area: Strait and Puget Sound}
+    - {name: Admiralty Inlet,        lat: 48.05, lon: -122.65, area: Strait and Puget Sound}
+    - {name: Central Puget Sound,    lat: 47.65, lon: -122.42, near: Seattle, area: Strait and Puget Sound}
+    - {name: Southern Strait of Georgia, lat: 49.05, lon: -123.25, near: Vancouver BC, area: B.C. waters}
+  tides:
+    - {id: "9443090", name: Neah Bay,      area: Outer coast}
+    - {id: "9442396", name: La Push,       near: Forks, area: Outer coast}
+    - {id: "9441102", name: Westport,      near: Aberdeen, area: Outer coast}
+    - {id: "9440910", name: Toke Point (Willapa Bay), area: Outer coast}
+    - {id: "9439040", name: Astoria,       near: Astoria, area: Outer coast}
+    - {id: "9437540", name: Garibaldi,     near: Tillamook, area: Outer coast}
+    - {id: "9435380", name: South Beach (Newport), area: Outer coast}
+    - {id: "9444090", name: Port Angeles,  area: Strait and Puget Sound, flood: false}   # its published flood level is on another datum
+    - {id: "9444900", name: Port Townsend, area: Strait and Puget Sound}
+    - {id: "9449880", name: Friday Harbor, area: Strait and Puget Sound}
+    - {id: "9449424", name: Cherry Point,  near: Bellingham, area: Strait and Puget Sound}
+    - {id: "9447130", name: Seattle,       near: Seattle, area: Strait and Puget Sound}
+    - {id: "9446484", name: Tacoma,        near: Tacoma, area: Strait and Puget Sound}
+
 # Snowpack: SNOTEL stations within `radius_km` of each area's centre. Percent of median is shown
 # once the area's median SWE reaches `min_median_in` (early-season medians are near zero).
 snowpack:

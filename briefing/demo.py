@@ -523,3 +523,64 @@ def obs_reports(cfg):
     ]
     return {"days": [d.isoformat() for d in days], "today": today.isoformat(), "points": points, "reports": reports,
             "reportHours": 48, "source": "demo"}
+
+
+def coast(cfg):
+    """A big westerly swell building on the coast, a gale in the Strait, a king tide at Westport."""
+    from zoneinfo import ZoneInfo
+    spec = cfg.get("coast") or {}
+    rng = np.random.default_rng(11)
+    now = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
+    buoys = []
+    for b in spec.get("buoys", []):
+        outer = b["area"] == "Outer coast"
+        wave = None if b["id"] == "WPOW1" else round(float(rng.uniform(14, 24) if outer else rng.uniform(1, 5)), 1)
+        buoys.append({**{k: b[k] for k in ("id", "name", "lat", "lon", "area")}, "time": (now - timedelta(minutes=30)).isoformat(),
+                      "wave": wave, "period": None if wave is None else float(rng.integers(12, 17) if outer else rng.integers(4, 7)),
+                      "waveDir": 260.0, "wind": int(rng.integers(15, 35)), "gust": int(rng.integers(25, 50)), "windDir": 220.0,
+                      "water": int(rng.integers(52, 56)), "waveMax24": None if wave is None else round(wave * 1.15, 1),
+                      "gustMax24": int(rng.integers(40, 60)),
+                      "spark": [] if wave is None else [round(wave * f, 1) for f in (0.55, 0.6, 0.7, 0.8, 0.9, 1.0, 1.05, 1.1, 1.0)]})
+    pt = ZoneInfo("America/Los_Angeles")
+    t0 = now.astimezone(pt).replace(hour=0, tzinfo=None)
+    times = [t0 + timedelta(hours=h) for h in range(24 * 7)]
+    waves = []
+    for p in spec.get("wave_points", []):
+        base = 18 if p["area"] == "Outer coast" else 3
+        h = [round(base * (0.7 + 0.5 * np.exp(-((k - 30) / 18) ** 2) + 0.35 * np.exp(-((k - 110) / 14) ** 2)) * (1 + 0.05 * rng.standard_normal()), 1)
+             for k in range(len(times))]
+        per = [14.0 if p["area"] == "Outer coast" else 5.0] * len(times)
+        daily = {}
+        for i, t in enumerate(times):
+            d = t.date().isoformat()
+            if d not in daily or h[i] > daily[d]["max"]:
+                daily[d] = {"date": d, "max": h[i], "period": per[i], "dir": 265.0, "time": t.isoformat(timespec="minutes")}
+        waves.append({"name": p["name"], "lat": p["lat"], "lon": p["lon"], "near": p.get("near"), "area": p["area"],
+                      "hourly": {"time": [t.isoformat(timespec="minutes") for t in times], "height": h, "period": per, "dir": [265.0] * len(times)},
+                      "daily": [daily[d] for d in sorted(daily)]})
+    tides = []
+    for g in spec.get("tides", []):
+        flood = None if g.get("flood") is False or g["name"] == "Garibaldi" else round(float(rng.uniform(12, 16)), 2)
+        surge = round(float(rng.uniform(-0.2, 1.4)), 2)
+        highs = []
+        for k in range(13):
+            t = t0 + timedelta(hours=11 + 12.4 * k)
+            hgt = round((flood or 12) - (0.4 if g["name"] == "Westport" and k in (4, 6) else rng.uniform(1.5, 4.5)) - surge, 2)
+            highs.append({"time": t.isoformat(timespec="minutes"), "height": hgt,
+                          "margin": round(flood - hgt - surge, 2) if flood else None})
+        tides.append({"id": g["id"], "name": g["name"], "near": g.get("near"), "area": g.get("area"), "flood": flood, "surge": surge, "highs": highs})
+    alerts = [
+        {"id": "demo-1", "event": "Gale Warning", "severity": "Moderate", "headline": "Gale Warning until Mon 4 PM",
+         "onset": now.isoformat(), "ends": (now + timedelta(hours=30)).isoformat(),
+         "areaDesc": "West Entrance U.S. Waters Strait Of Juan De Fuca; Central U.S. Waters Strait Of Juan De Fuca", "zones": ["PZZ130", "PZZ131"],
+         "sender": "NWS Seattle WA", "url": None},
+        {"id": "demo-2", "event": "Hazardous Seas Warning", "severity": "Moderate", "headline": "Hazardous Seas Warning until Tue 4 AM",
+         "onset": now.isoformat(), "ends": (now + timedelta(hours=42)).isoformat(),
+         "areaDesc": "Coastal waters from Cape Shoalwater WA to Cape Falcon OR out 10 nm", "zones": ["PZZ251", "PZZ271"],
+         "sender": "NWS Portland OR", "url": None},
+        {"id": "demo-3", "event": "Small Craft Advisory", "severity": "Minor", "headline": "Small Craft Advisory until Mon 10 AM",
+         "onset": now.isoformat(), "ends": (now + timedelta(hours=24)).isoformat(),
+         "areaDesc": "Puget Sound and Hood Canal; Admiralty Inlet", "zones": ["PZZ135", "PZZ134"], "sender": "NWS Seattle WA", "url": None},
+    ]
+    return {"fetched": now.isoformat(), "buoys": buoys, "waves": waves, "tides": tides, "marineAlerts": alerts,
+            "zonePrefixes": spec.get("marine_zone_prefixes", ["PZZ1", "PZZ2"]), "source": "demo"}
