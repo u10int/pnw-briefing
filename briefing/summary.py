@@ -130,6 +130,16 @@ def facts(data: dict, cfg: dict) -> dict:
     # NWS alerts are left out on purpose: the overview speaks to impacts and events in general;
     # the alerts timeline below the headline lists the individual warnings and advisories
 
+    for o in (data.get("convective") or {}).get("outlooks") or []:
+        cats = [a for a in o.get("areas") or [] if a["kind"] == "cat" and a["rank"] >= 2 and a.get("points")]
+        if not cats or o["day"] > 3 or not o.get("valid"):
+            continue
+        top = max(cats, key=lambda a: a["rank"])
+        vd = datetime.fromisoformat(o["valid"]).astimezone(tz).date()
+        items.append({"kind": "thunderstorm outlook", "risk": f"{top['name']} of severe thunderstorms (SPC)",
+                      **when(max(vd, today), max(vd, today), today), **where(top["points"], places),
+                      "importance": {2: 2.2, 3: 2.9}.get(top["rank"], 3.5) - 0.1 * (o["day"] - 1)})
+
     ar = data.get("ar") or {}
     models = [m["model"] for m in ar.get("models") or []]
     for rank in range(5, 0, -1):
@@ -303,6 +313,8 @@ def _sentence(it) -> str:
     if k == "atmospheric river":
         w = AR_WORD[int(it['strength'][2])]
         return f"{'An' if w[0] in 'aeiou' else 'A'} {w} atmospheric river reaches the coast {it['when']}"
+    if k == "thunderstorm outlook":
+        return _cap(f"{it['risk'].replace(' (SPC)', '').replace(' Risk', ' risk')} for {_area_phrase(it)} {it['when']}")
     if k == "snow level reaches the passes":
         return f"Snow level dropping to pass level {it['when']}"
     if k == "temperatures vs normal":

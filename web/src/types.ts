@@ -94,6 +94,17 @@ export interface TempVerification {
   chart: { dates: string[]; observed: Record<string, HiLo>; day1: Record<string, Record<string, HiLo>> }
 }
 
+export interface ConvArea {
+  kind: "cat" | "tornado" | "hail" | "wind" | "severe"; label: string; name: string; dn: number; rank: number; sig: boolean
+  fill: string | null; stroke: string | null; points: string[]; geometry: GeoJSON.MultiPolygon
+}
+export interface StormReport { type: "tornado" | "wind" | "hail"; time: string; lat: number; lon: number; mag: string; location: string; county: string; state: string; comments: string }
+export interface Convective {
+  source: string
+  outlooks: { day: number; issued: string | null; valid: string | null; expire: string | null; areas: ConvArea[] }[]
+  reports: StormReport[]
+}
+
 export interface ArCoastRank { rank: number; peak: number | null; start: string | null }
 export interface ArCoast {
   points: { name: string; lat: number; lon: number }[]
@@ -132,7 +143,7 @@ export type ExtremeVar = "tmax" | "tmin" | "wind" | "gust"
 
 export interface Cog {
   path: string; model: string; tier: string
-  var: "precip" | "snow" | "mean" | "spread" | "pct" | ExtremeVar | "p24" | "p72" | "obs" | "obspct" | "tmaxdep" | "tmindep" | "ar" | "rivers"
+  var: "precip" | "snow" | "mean" | "spread" | "pct" | ExtremeVar | "p24" | "p72" | "obs" | "obspct" | "tmaxdep" | "tmindep" | "ar" | "rivers" | "storms"
   days: number; units: string; run?: string | null; members?: string[]; threshold?: number
 }
 
@@ -223,6 +234,7 @@ export interface Briefing {
   avalanche?: Avalanche | null
   tempDeparture?: TempDeparture | null
   wildfire?: Wildfire | null
+  convective?: Convective | null                       // SPC outlooks and storm reports; absent before it was added
 }
 
 export interface FireAlert {

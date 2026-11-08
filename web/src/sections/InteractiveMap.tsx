@@ -16,6 +16,9 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { FALLBACK, STYLE_URL, withKey } from "@/lib/basemap"
 import { loadCog } from "@/lib/cog"
 import { MRMS_MODEL } from "@/lib/mrms-name"
+import type { Md } from "@/lib/spcmd"
+import { useMds } from "@/lib/useMds"
+import { REPORT_COLORS, reportMag, SPC_CAT } from "@/sections/Convective"
 import { nearestFrame, preload, SAT_KINDS, type SatKind, type SatTimes, satTimes, satUrl } from "@/lib/satellite"
 import { bicubicAt, contourLines, fieldUrl, gridPos, loadField, nearestAt, nearestTime, type Elevation, elevationFor, pressureCenters, pressureGradient, windArrows, windFrom } from "@/lib/fields"
 import { GRAD_COLORS, gradLevel, pairName, seriesAt } from "@/lib/gradients"
@@ -25,7 +28,7 @@ import { ParticleLayer, type WindDraw } from "@/lib/gl/particle-layer"
 import { type Grid, sameGrid } from "@/lib/gl/util"
 import { AR_COLORS, AR_LABELS, FLOOD_COLORS, FLOOD_LABELS, FRZ, GUST, IVT, legendBins, PCT, PGRAD, PRECIP, PROB, PTYPE_COLORS, PTYPE_NAMES, type Ramp, REFC, RH, SMOKE, SNOW, SPREAD, TDEP, TEMP, WIND } from "@/lib/ramps"
 import { contrastTextColor } from "@/lib/contrast"
-import type { ArCoast, Briefing, Cog, ExtremeVar, RiverGauge, Rivers, FieldEntry, FieldsManifest, FieldVar, Gradient } from "@/types"
+import type { ArCoast, Briefing, Cog, Convective, ExtremeVar, RiverGauge, Rivers, FieldEntry, FieldsManifest, FieldVar, Gradient } from "@/types"
 import { ptDayHour } from "@/lib/format"
 import { openLocation } from "@/lib/locationlink"
 
@@ -158,7 +161,7 @@ interface Loaded {
   bare?: boolean            // no grid on purpose (the AR outlook is markers only)
   sample: (lon: number, lat: number, t: number, smooth: boolean) => string | null
 }
-interface Overlays { isobars?: FC | null; centers?: FC | null; pairs?: FC | null; freezing?: FC | null; arrows?: FC | null; ar?: FC | null; sample?: (lon: number, lat: number, smooth: boolean) => string | null }
+interface Overlays { spc?: FC | null; isobars?: FC | null; centers?: FC | null; pairs?: FC | null; freezing?: FC | null; arrows?: FC | null; ar?: FC | null; sample?: (lon: number, lat: number, smooth: boolean) => string | null }
 /** One channel's choice for the current time: `key` identifies the data, `t` blends within it. */
 interface Choice<T> { key: string; t: number; load: () => Promise<T> }
 
@@ -338,6 +341,14 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
         type: "Feature", properties: { name: p.name }, geometry: { type: "Point", coordinates: [p.lon, p.lat] } })) } })
       m.addLayer({ id: "points", type: "circle", source: "points", paint: { "circle-radius": 3.5, "circle-color": "#fff", "circle-stroke-color": "#1b1f24", "circle-stroke-width": 1.5 } })
       // the coastal AR outlook: a marker per coastal location in its rank's colour, above everything
+      // SPC outlook areas and mesoscale discussion outlines (the thunderstorm view)
+      m.addSource("spc", { type: "geojson", data: EMPTY })
+      m.addLayer({ id: "spc-fill", type: "fill", source: "spc", filter: ["==", ["get", "kind"], "area"],
+                   paint: { "fill-color": ["get", "fill"], "fill-opacity": 0.45 } }, labels)
+      m.addLayer({ id: "spc-line", type: "line", source: "spc", filter: ["==", ["get", "kind"], "area"],
+                   paint: { "line-color": ["get", "stroke"], "line-width": 1.4 } }, labels)
+      m.addLayer({ id: "spc-md", type: "line", source: "spc", filter: ["==", ["get", "kind"], "md"],
+                   paint: { "line-color": "#1d4ed8", "line-width": 2.2, "line-dasharray": [2, 1.2] } }, labels)
       m.addSource("ar", { type: "geojson", data: EMPTY })
       m.addLayer({ id: "ar", type: "circle", source: "ar", paint: {
         "circle-radius": ["case", [">", ["get", "rank"], 0], 8.5, 4], "circle-color": ["get", "color"],
@@ -399,6 +410,7 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
           ;(m.getSource("freezing") as GeoJSONSource).setData(o?.freezing ?? EMPTY)
           ;(m.getSource("arrows") as GeoJSONSource).setData(o?.arrows ?? EMPTY)
           ;(m.getSource("ar") as GeoJSONSource | undefined)?.setData(o?.ar ?? EMPTY)
+          ;(m.getSource("spc") as GeoJSONSource | undefined)?.setData(o?.spc ?? EMPTY)
         })
       },
       () => {},
@@ -574,7 +586,7 @@ const categoryAt = (g: Grid, a: Float32Array, b: Float32Array | null, t: number,
 
 // ------------------------------------------------------------------ totals mode
 
-type TotVar = "precip" | "snow" | "spread" | "pct" | ExtremeVar | "p24" | "p72" | "obs" | "obspct" | "tmaxdep" | "tmindep" | "ar" | "rivers"
+type TotVar = "precip" | "snow" | "spread" | "pct" | ExtremeVar | "p24" | "p72" | "obs" | "obspct" | "tmaxdep" | "tmindep" | "ar" | "rivers" | "storms"
 type TotGroup = "Totals" | "Extremes" | "Vs normal" | "Odds" | "Observed" | "Outlooks"
 const GROUP_LABEL: Record<TotGroup, string> = {
   Totals: "Totals", Extremes: "Extremes over the window", "Vs normal": "Temperature vs normal", Odds: "Ensemble odds", Observed: "Already fallen (MRMS)",
@@ -597,6 +609,7 @@ const TOT_VARS: { id: TotVar; label: string; group: TotGroup; ramp: Ramp; perMod
   { id: "tmaxdep", label: "High temp vs normal", group: "Vs normal", ramp: { ...TDEP, label: "Daily high, model-mean departure from 1991 – 2020 normal (window average)" }, perModel: false, digits: 1, suffix: "°F vs normal" },
   { id: "ar", label: "AR outlook (coast)", group: "Outlooks", ramp: { ...IVT, label: "AR scale rank" }, perModel: true, digits: 0 },
   { id: "rivers", label: "River forecasts", group: "Outlooks", ramp: { ...IVT, label: "Flood category" }, perModel: false, digits: 0 },
+  { id: "storms", label: "Thunderstorm outlook (SPC)", group: "Outlooks", ramp: { ...IVT, label: "SPC category" }, perModel: false, digits: 0 },
   { id: "tmindep", label: "Low temp vs normal", group: "Vs normal", ramp: { ...TDEP, label: "Daily low, model-mean departure from 1991 – 2020 normal (window average)" }, perModel: false, digits: 1, suffix: "°F vs normal" },
 ]
 const MEAN = "Model mean"
@@ -704,6 +717,81 @@ function riverView(r: Rivers, c: Cog | undefined, windowLabel: string): View | n
     grid: () => ({ key: "rivers", t: 0, load: async () => ({ draw: null, bare: true, sample: () => null }) }),
     overlays: () => ({ key: `rivers|${c.days}`, t: 0, load: async () => ({ ar: fc, sample }) }),
   }
+}
+
+/** The thunderstorm outlook as pseudo-COG entries, one per outlook day with anything over the map
+ *  (day 1 always, for the live discussions and the storm reports). */
+function stormCogs(c: Convective | null | undefined): Cog[] {
+  if (!c) return []
+  const days = new Set([1, ...c.outlooks.filter((o) => o.areas.length).map((o) => o.day)])
+  return [...days].sort((a, b) => a - b).map((d) => ({ path: `storms|${d}`, model: "SPC", tier: "official", var: "storms" as const, days: d, units: "" }))
+}
+
+const inRing = (ring: number[][], lon: number, lat: number) => {
+  let inside = false
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i], [xj, yj] = ring[j]
+    if (yi > lat !== yj > lat && lon < ((xj - xi) * (lat - yi)) / (yj - yi) + xi) inside = !inside
+  }
+  return inside
+}
+const inMulti = (g: GeoJSON.MultiPolygon, lon: number, lat: number) =>
+  g.coordinates.some((poly) => inRing(poly[0], lon, lat) && !poly.slice(1).some((h) => inRing(h, lon, lat)))
+
+/** One outlook day: the categorical areas (or, for days 4 – 8, the severe probability areas) in
+ *  SPC's colours; on day 1 also the current mesoscale discussions (dashed outlines) and the last
+ *  three days' storm reports (dots by type). */
+function stormView(c: Convective, cog: Cog | undefined, mds: Md[] | null): View | null {
+  if (!cog) return null
+  const day = cog.days
+  const o = c.outlooks.find((x) => x.day === day)
+  const kind = day <= 3 ? "cat" : "severe"
+  const areas = (o?.areas ?? []).filter((a) => a.kind === kind).sort((a, b) => a.rank - b.rank)
+  const showMds = day === 1 ? (mds ?? []) : []
+  const reports = day === 1 ? c.reports : []
+  const spc = { type: "FeatureCollection", features: [
+    ...areas.map((a) => ({ type: "Feature", properties: { kind: "area", fill: a.fill ?? SPC_CAT[a.label]?.fill ?? "#999", stroke: a.stroke ?? "#555" }, geometry: a.geometry })),
+    ...showMds.map((m) => ({ type: "Feature", properties: { kind: "md" }, geometry: { type: "LineString", coordinates: m.polygon } })),
+  ] } as FC
+  const dots = { type: "FeatureCollection", features: reports.map((r) => ({
+    type: "Feature", properties: { rank: 1, num: "", color: REPORT_COLORS[r.type], text: "#fff" },
+    geometry: { type: "Point", coordinates: [r.lon, r.lat] } })) } as FC
+  const sample = (lon: number, lat: number) => {
+    const parts: string[] = []
+    const k = Math.cos((47 * Math.PI) / 180)
+    const near = reports.filter((r) => (r.lat - lat) ** 2 + ((r.lon - lon) * k) ** 2 < 0.004)
+    if (near.length) parts.push(near.map((r) => `${r.type === "tornado" ? "Tornado" : r.type === "wind" ? "Wind" : "Hail"}${reportMag(r) ? ` ${reportMag(r)}` : ""}, ${r.location} ${ptDayHour(r.time)}`).join("; "))
+    const top = [...areas].reverse().find((a) => inMulti(a.geometry, lon, lat))
+    if (top) parts.push(day <= 3 ? `${SPC_CAT[top.label]?.name ?? top.name}${top.label !== "TSTM" ? " risk" : ""}` : top.name)
+    for (const m of showMds) if (inRing(m.polygon, lon, lat)) parts.push(`MD ${m.number}: ${m.concerning}`)
+    return parts.length ? parts.join(" · ") : null
+  }
+  return {
+    key: `storms|${day}|${showMds.map((m) => m.number).join()}`,
+    title: `SPC convective outlook, day ${day}`,
+    sub: () => (o?.valid ? `${ptDayHour(o.valid)} – ${o.expire ? ptDayHour(o.expire, true) : ""}${o.issued ? ` · issued ${ptDayHour(o.issued)}` : ""}` : "No thunderstorms outlooked over the region"),
+    grid: () => ({ key: "storms", t: 0, load: async () => ({ draw: null, bare: true, sample: () => null }) }),
+    overlays: () => ({ key: `storms|${day}|${showMds.map((m) => m.number).join()}`, t: 0, load: async () => ({ spc, ar: dots, sample }) }),
+  }
+}
+
+function StormLegend({ day }: { day: number }) {
+  return (
+    <div className="space-y-1.5">
+      <p className="text-xs text-muted-foreground">
+        {day <= 3 ? "SPC's categorical risk of severe thunderstorms" : "SPC's probability of severe thunderstorms"}
+        {day === 1 && "; dashed outlines are current mesoscale discussions, dots the storm reports from the last three days"}. Hover for details.
+      </p>
+      <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs">
+        {day <= 3 && Object.entries(SPC_CAT).map(([k, v]) => (
+          <span key={k} className="flex items-center gap-1.5"><span className="size-3 rounded-[3px] ring-1 ring-black/15" style={{ background: v.fill }} />{v.name}</span>
+        ))}
+        {day === 1 && (["tornado", "wind", "hail"] as const).map((t) => (
+          <span key={t} className="flex items-center gap-1.5"><span className="size-3 rounded-full ring-2 ring-white" style={{ background: REPORT_COLORS[t] }} />{t[0].toUpperCase() + t.slice(1)} report</span>
+        ))}
+      </div>
+    </div>
+  )
 }
 
 function RiverLegend() {
@@ -1190,6 +1278,7 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
 
   // hourly state
   const mrms = useMrms(data, mode === "hourly" && active)
+  const mds = useMds(data, !!data.convective && active)
   const satAll = useSatTimes(mode === "hourly" && active)
   const sat = React.useMemo(() => {
     if (!satAll || satKind === "off") return null
@@ -1249,7 +1338,7 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
 
   // ---- totals
   const varOf = (c: Cog): TotVar => c.var as TotVar
-  const allCogs = React.useMemo(() => [...cogs, ...arCogs(data.arCoast), ...riverCogs(data.rivers)], [cogs, data.arCoast, data.rivers])
+  const allCogs = React.useMemo(() => [...cogs, ...arCogs(data.arCoast), ...riverCogs(data.rivers), ...stormCogs(data.convective)], [cogs, data.arCoast, data.rivers, data.convective])
   const totAvail = TOT_VARS.filter((v) => allCogs.some((c) => varOf(c) === v.id))
   const windows = [...new Set(allCogs.filter((c) => varOf(c) === variable).map((c) => c.days))].sort((a, b) => a - b)
   const d = windows.includes(days) ? days : windows[0]
@@ -1263,7 +1352,7 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
   }
   const totDef = TOT_VARS.find((v) => v.id === variable)!
   const totRamp = totDef.ramp
-  const winLabel = (n: number) => variable === "obs" || variable === "obspct" ? `past ${n} days`
+  const winLabel = (n: number) => variable === "storms" ? `Day ${n}` : variable === "obs" || variable === "obspct" ? `past ${n} days`
     : data.windows.find((w) => w.days === n)?.label.toLowerCase() ?? `${n} days`
   const perModel = totDef.perModel
 
@@ -1322,6 +1411,7 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
   const viewA = mode === "totals"
     ? variable === "ar" ? (data.arCoast ? arView(data.arCoast, pick(model), winLabel(d)) : null)
     : variable === "rivers" ? (data.rivers ? riverView(data.rivers, pick(model), winLabel(d)) : null)
+    : variable === "storms" ? (data.convective ? stormView(data.convective, pick(model), mds) : null)
     : totalsView(pick(model), totRamp, winLabel(d), totDef.digits, totDef.suffix)
     : hA ? hourlyView(hA, byModel.get(hA)!.entries, layer, isobars, showPairs && pairList.length ? pairList : null) : null
   const showB = compare && (mode === "hourly" || perModel)
@@ -1449,7 +1539,7 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
           {showB && <MapPane data={data} view={viewB} clock={clock} opacity={opacity} smooth={smooth} particles={showParticles} particleColor={ink} sync={sync} terrain={terrain} sat={sat} />}
         </div>
 
-        {mode === "totals" ? (variable === "ar" ? <ArLegend /> : variable === "rivers" ? <RiverLegend /> : <RampLegend ramp={totRamp} every={totRamp.ticks ? 1 : totRamp.levels.length > 16 ? 2 : 1} />) : (
+        {mode === "totals" ? (variable === "ar" ? <ArLegend /> : variable === "rivers" ? <RiverLegend /> : variable === "storms" ? <StormLegend day={d} /> : <RampLegend ramp={totRamp} every={totRamp.ticks ? 1 : totRamp.levels.length > 16 ? 2 : 1} />) : (
           <div className="space-y-2">
             {layer === "radar" && <RadarLegend withRefc={!!entriesA.refc} />}
             {smooth && layer === "radar" && !entriesA.refc && <p className="text-xs text-muted-foreground">Precipitation type is a category, so it isn't smoothed.</p>}
@@ -1470,7 +1560,7 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
           </div>
         )}
 
-        {!(mode === "totals" && (variable === "ar" || variable === "rivers")) && <p className="text-xs text-muted-foreground">
+        {!(mode === "totals" && (variable === "ar" || variable === "rivers" || variable === "storms")) && <p className="text-xs text-muted-foreground">
           Download as GeoTIFF:{" "}
           {mode === "totals"
             ? options.slice(0, 12).map((c, i) => (

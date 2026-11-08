@@ -6,7 +6,7 @@ models get rotated 2-D grids so the projected-grid code path is exercised.
 """
 from __future__ import annotations
 
-from datetime import timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import numpy as np
@@ -438,3 +438,27 @@ def observed_temps(earlier, days):
                         cur[1].append(hi[k]); cur[2].append(lo[k])
     return {key: (round(float(np.median(h)) + rng.normal(0.5, 2.5), 1), round(float(np.median(l)) + rng.normal(-0.3, 2.5), 1))
             for key, (_, h, l) in best.items()}
+
+
+def convective(cfg):
+    """A marginal risk over the Olympic Peninsula and coast today, general thunder around it, and a
+    couple of storm reports."""
+    now = datetime.now(timezone.utc)
+    v = now.replace(hour=12, minute=0, second=0, microsecond=0) - (timedelta(days=1) if now.hour < 12 else timedelta(0))
+    ring = lambda pts: {"type": "MultiPolygon", "coordinates": [[pts + [pts[0]]]]}
+    tstm = ring([[-125.5, 46.2], [-122.2, 46.2], [-121.6, 48.9], [-125.2, 49.0]])
+    mrgl = ring([[-125.0, 46.8], [-123.4, 46.8], [-123.0, 48.4], [-124.9, 48.5]])
+    from .wildfire import _inside
+    areas = [{"kind": "cat", "label": "MRGL", "name": "Marginal Risk", "dn": 3, "rank": 2, "sig": False, "fill": "#66A366",
+              "stroke": "#005500", "points": _inside(mrgl, cfg), "geometry": mrgl},
+             {"kind": "cat", "label": "TSTM", "name": "General Thunderstorms Risk", "dn": 2, "rank": 1, "sig": False,
+              "fill": "#C1E9C1", "stroke": "#55BB55", "points": _inside(tstm, cfg), "geometry": tstm},
+             {"kind": "wind", "label": "0.05", "name": "5% Severe Wind Risk", "dn": 5, "rank": 5, "sig": False,
+              "fill": "#8B4726", "stroke": "#8B4726", "points": _inside(mrgl, cfg), "geometry": mrgl}]
+    iso = lambda t: t.isoformat()
+    return {"source": "NOAA/NWS Storm Prediction Center (demo)",
+            "outlooks": [{"day": 1, "issued": iso(v), "valid": iso(v), "expire": iso(v + timedelta(days=1)), "areas": areas}],
+            "reports": [{"type": "wind", "time": iso(now - timedelta(hours=3)), "lat": 47.95, "lon": -124.38, "mag": "62",
+                         "location": "Forks", "county": "Clallam", "state": "WA", "comments": "Measured gust (demo)."},
+                        {"type": "hail", "time": iso(now - timedelta(hours=5)), "lat": 47.0, "lon": -123.8, "mag": "75",
+                         "location": "Aberdeen", "county": "Grays Harbor", "state": "WA", "comments": "Pea to dime size hail (demo)."}]}
