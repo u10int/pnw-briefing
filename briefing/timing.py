@@ -2,7 +2,8 @@
 next two days — only where they're expected to matter.
 
 From the models with hourly map fields (the high-resolution ones), each location's gust and
-hourly precipitation rate are lined up by valid time and the median across models taken. A
+hourly precipitation rate are lined up by valid time and the median across models taken, the
+high-resolution ones weighted double (config `timing.weights`, by tier). A
 period is the run of hours where that median reaches the location's threshold (gusts: config
 `timing.gust_mph` by location kind; precipitation: `timing.rate_in_per_h`, moderate rain),
 with gaps of up to two hours bridged. Each period gives its start and end, its peak and when,
@@ -16,7 +17,21 @@ from datetime import datetime, timedelta, timezone
 import numpy as np
 
 DEFAULTS = {"gust_mph": {"lowland": 35, "coast": 45, "pass": 50}, "rate_in_per_h": 0.10, "heavy_in_per_h": 0.30,
-            "hours": 48, "max_gap_h": 2}
+            "hours": 48, "max_gap_h": 2,
+            # high-resolution models count more in the median: they resolve gusts and showers the
+            # global ones smooth out
+            "weights": {"regional": 2, "blend": 1, "global": 1}}
+
+
+def wmedian(vals, weights):
+    """Weighted median: the value where the running weight first reaches half the total."""
+    order = np.argsort(vals)
+    v, w = np.asarray(vals, float)[order], np.asarray(weights, float)[order]
+    c = np.cumsum(w)
+    half = c[-1] / 2
+    i = int(np.searchsorted(c, half))
+    # an exact split between two values takes their mean, as the ordinary median does
+    return float((v[i] + v[i + 1]) / 2) if np.isclose(c[i], half) and i + 1 < len(v) else float(v[i])
 
 
 def _t(s):
@@ -64,6 +79,7 @@ def compute(models, cfg, start):
     ms = _hourly_models(models)
     if not ms:
         return None
+    wt = {m["label"]: spec["weights"].get(m.get("tier") or "global", 1) for m in ms}
     t0 = start if start.tzinfo else start.replace(tzinfo=timezone.utc)
     grid_t = [t0 + timedelta(hours=k) for k in range(1, spec["hours"] + 1)]
     grid = {t.strftime("%Y-%m-%dT%H:00Z") for t in grid_t}
@@ -77,8 +93,8 @@ def compute(models, cfg, start):
                 continue
             med = []
             for k in keys:
-                vs = [s[k] for s in per.values() if k in s]
-                med.append(float(np.median(vs)) if len(vs) >= min(2, len(per)) else None)
+                have = [(s[k], wt[lab]) for lab, s in per.items() if k in s]
+                med.append(wmedian([x for x, _ in have], [w for _, w in have]) if len(have) >= min(2, len(per)) else None)
             events = []
             for run in _periods(grid_t, med, thr, spec["max_gap_h"]):
                 a, b = run[0], run[-1]
@@ -97,7 +113,7 @@ def compute(models, cfg, start):
                       "models": reach, "of": len(per), "peakFrom": min(peaks) if peaks else None, "peakTo": max(peaks) if peaks else None}
                 if var == "precip":
                     ev["total"] = round(sum(med[i] or 0 for i in range(a, b + 1)), 2)
-                    ev["heavy"] = med[pk] >= spec["heavy_in_per_h"]
+                    ev["heavy"] = ev["peak"] >= spec["heavy_in_per_h"]          # as shown, so 0.30 reads heavy
                 events.append(ev)
             if events:
                 # the two strongest periods, in time order
@@ -105,5 +121,6 @@ def compute(models, cfg, start):
         if rec:
             out[p["name"]] = rec
     return {"hours": spec["hours"], "models": [m["label"] for m in ms],
+            "weighted": sorted({m["label"] for m in ms if wt[m["label"]] > 1}, key=[m["label"] for m in ms].index),
             "thresholds": {"gust_mph": spec["gust_mph"], "rate_in_per_h": spec["rate_in_per_h"], "heavy_in_per_h": spec["heavy_in_per_h"]},
             "points": out}

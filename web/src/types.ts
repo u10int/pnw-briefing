@@ -110,6 +110,7 @@ export interface PeakPeriod {
 }
 export interface PeakTiming {
   hours: number; models: string[]
+  weighted?: string[]                                  // the high-resolution models, counted double
   thresholds: { gust_mph: Record<string, number>; rate_in_per_h: number; heavy_in_per_h: number }
   points: Record<string, { gust?: PeakPeriod[]; precip?: PeakPeriod[] }>
 }

@@ -298,7 +298,7 @@ summary:
 
 # ----------------------------------------------------------------------------
 # Peak timing: when the strongest gusts and heaviest precipitation come at each location over
-# the next two days, from the hourly high-resolution models (multi-model median). A location
+# the next two days, from the models with hourly output (multi-model median, weighted). A location
 # shows a period only when the median gust reaches gust_mph (by kind) or the hourly
 # precipitation rate reaches rate_in_per_h (moderate rain); heavy_in_per_h marks heavy rates.
 # ----------------------------------------------------------------------------
@@ -307,3 +307,4 @@ timing:
   rate_in_per_h: 0.10
   heavy_in_per_h: 0.30
   hours: 48
+  weights: {regional: 2, blend: 1, global: 1}   # high-resolution models count double in the median

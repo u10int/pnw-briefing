@@ -95,7 +95,7 @@ export function PeakTimingCard({ data, v }: { data: Briefing; v: Var }) {
       <CardHeader>
         <CardTitle>{v === "gust" ? "When the strongest gusts come" : "When the heaviest precipitation comes"}</CardTitle>
         <CardDescription>
-          The next {WINDOW_H} hours at the locations where {what}, from the median of {t.models.length} models with hourly output ({t.models.join(", ")}). Each bar is how long it lasts and the dot marks the peak; the red line is now. Hover for details.
+          The next {WINDOW_H} hours at the locations where {what}, from the median of {t.models.length} models with hourly output ({t.models.join(", ")}){t.weighted?.length && t.weighted.length < t.models.length ? `, with the high-resolution ones (${t.weighted.join(", ")}) counted double` : ""}. Each bar is how long it lasts and the dot marks the peak; the red line is now. Hover for details.
         </CardDescription>
       </CardHeader>
       <CardContent>
