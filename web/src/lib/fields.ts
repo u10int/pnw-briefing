@@ -19,6 +19,13 @@ export const fieldUrl = (e: FieldEntry) => (e.path.startsWith("data:") ? e.path 
 /** Open a multi-band field COG once; bands are decoded on demand and cached, in physical units. */
 export function loadField(e: FieldEntry): Promise<FieldFile> {
   const url = fieldUrl(e)
+  if (e.path.startsWith("mrms:")) {
+    // observed radar, decoded from NOAA's files in the browser; keyed by its frames too, since the
+    // list grows while the page is open
+    const k = `${e.path}|${e.keys?.join() ?? ""}`
+    if (!files.has(k)) files.set(k, import("./mrms").then((m) => m.mrmsField(e)))
+    return files.get(k)!
+  }
   if (!files.has(url)) {
     files.set(url, (async () => {
       const res = await fetch(url)

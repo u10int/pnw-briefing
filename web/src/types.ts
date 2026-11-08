@@ -302,5 +302,6 @@ export interface FieldEntry {
   path: string; model: string; tier: string; var: FieldVar; units: string
   scale: number; nodata: number; times: string[]; run: string; init: string
   categories?: Record<string, string>
+  keys?: string[]          // observed radar: the MRMS file for each time (see lib/mrms.ts)
 }
 export interface FieldsManifest { fields: FieldEntry[] }
