@@ -295,3 +295,15 @@ cache_dir: .cache            # PRISM normals are cached here between runs
 summary:
   enabled: true
   model: gpt-4.1-mini
+
+# ----------------------------------------------------------------------------
+# Peak timing: when the strongest gusts and heaviest precipitation come at each location over
+# the next two days, from the hourly high-resolution models (multi-model median). A location
+# shows a period only when the median gust reaches gust_mph (by kind) or the hourly
+# precipitation rate reaches rate_in_per_h (moderate rain); heavy_in_per_h marks heavy rates.
+# ----------------------------------------------------------------------------
+timing:
+  gust_mph: {lowland: 35, coast: 45, pass: 50}
+  rate_in_per_h: 0.10
+  heavy_in_per_h: 0.30
+  hours: 48

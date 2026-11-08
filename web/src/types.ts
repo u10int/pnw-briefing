@@ -104,6 +104,15 @@ export interface Convective {
   outlooks: { day: number; issued: string | null; valid: string | null; expire: string | null; areas: ConvArea[] }[]
   reports: StormReport[]
 }
+export interface PeakPeriod {
+  start: string; end: string; peak: number; peakTime: string; models: number; of: number
+  peakFrom: string | null; peakTo: string | null; total?: number; heavy?: boolean
+}
+export interface PeakTiming {
+  hours: number; models: string[]
+  thresholds: { gust_mph: Record<string, number>; rate_in_per_h: number; heavy_in_per_h: number }
+  points: Record<string, { gust?: PeakPeriod[]; precip?: PeakPeriod[] }>
+}
 
 export interface ArCoastRank { rank: number; peak: number | null; start: string | null }
 export interface ArCoast {
@@ -219,6 +228,7 @@ export interface Briefing {
   rivers?: Rivers | null                                // NWRFC river forecasts; absent before they were added
   // the headline and lead, written at build time from the briefing's facts; absent before it was added
   summary?: { headline: string; lede: string; source: "openai" | "rules"; model?: string } | null
+  timing?: PeakTiming | null                           // when gusts and heavy precipitation peak, by location; absent before it was added
   verification?: Verification | null                   // recent forecasts scored against MRMS; absent before it was added
   tempVerification?: TempVerification | null           // recent highs and lows scored against URMA; absent before it was added
   // each region's value over the last few briefings, on dates they all share (oldest run first)

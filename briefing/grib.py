@@ -581,6 +581,28 @@ def _point_series(entry, idx, grid):
     return {h: np.array([d[k, i, j] for i, j in idx], dtype="float64") for k, h in enumerate(entry["hours"])}
 
 
+def point_hourly(model_fields, lat, lon, idx, points, run, lead0, upto):
+    """Gusts (mph) and precipitation rate (in/h) at each point for every map-field hour after the
+    start, up to forecast hour `upto`: {"times": [ISO], "step": [hours since the previous],
+    "gust": {name: [...]}, "rate": {name: [...]}} (None where a field is missing)."""
+    grid = lat.shape if lat.ndim == 2 else (lat.size, lon.size)
+    g = _point_series(model_fields.get("gust"), idx, grid)
+    a = _point_series(model_fields.get("apcp"), idx, grid)      # accumulated from the start, inches
+    hours = sorted(h for h in set(g) | set(a) if lead0 < h <= upto)
+    if not hours:
+        return None
+    acc_hours = sorted(h for h in a if lead0 < h <= upto)
+    rate, prev = {}, (lead0, np.zeros(len(points)))
+    for h in acc_hours:
+        rate[h] = np.maximum(a[h] - prev[1], 0) / (h - prev[0])
+        prev = (h, a[h])
+    val = lambda x, k: None if x is None or not np.isfinite(x[k]) else round(float(x[k]), 3)
+    step = [h - p for p, h in zip([lead0] + hours[:-1], hours)]
+    return {"times": [(run + timedelta(hours=h)).strftime("%Y-%m-%dT%H:00Z") for h in hours], "step": step,
+            "gust": {p["name"]: [val(g.get(h), k) for h in hours] for k, p in enumerate(points)} if g else {},
+            "rate": {p["name"]: [val(rate.get(h), k) for h in hours] for k, p in enumerate(points)} if rate else {}}
+
+
 def _daily_points(series, bounds, npts, reduce):
     """[point, day] reduction over each 12Z-12Z day (hours a < h <= b); NaN where none."""
     ndays = len(bounds) - 1
@@ -781,6 +803,12 @@ def fetch_model(spec, cfg, start, points):
             return np.array([d[:, i, j] for i, j in idx])
         wmax = at_points("wind", wind_from_fields)
         fire = fire_points(model_fields, lat, lon, idx, targets)
+        # hour-by-hour gusts and precipitation rate at the points, for when the peaks come (2 days)
+        try:
+            hourly = point_hourly(model_fields, lat, lon, idx, points, run, lead0, lead0 + 54)
+        except Exception as e:
+            log.info("%s: no hourly point series (%s)", spec["label"], report.short(e))
+            hourly = None
         rain = np.clip(daily_p - np.nan_to_num(daily_s) / 10, 0, None)
 
         n = cfg["days"]
@@ -799,6 +827,7 @@ def fetch_model(spec, cfg, start, points):
         dates = day_dates(start, n, tz)
         return {"id": spec["id"], "label": spec["label"], "source": "grib", "tier": spec.get("tier", "global"),
                 "run": run, "lead0": lead0, "range_days": ndays, "targets": targets, "dates": dates, "data": data,
+                "hourly": hourly,
                 "lat": lat, "lon": lon, "precip_mm": cum, "snow_in": snow, "snow_method": snow_method,
                 "fields": model_fields, "ext_series": ext_series, "ivt": ivt}
     except Exception as e:

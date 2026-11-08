@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 
 import numpy as np
 
-from .grib import day0, day_bounds, day_dates, first_day_hours, nearest_index
+from .grib import day0, day_bounds, day_dates, first_day_hours, nearest_index, point_hourly
 
 RNG = np.random.default_rng(7)
 # For faking "yesterday's" briefing: issued a day earlier, same weather on the same dates,
@@ -108,12 +108,14 @@ def grib(cfg):
             data[p["name"]] = {k: list(np.concatenate([v, np.full(n - nd, np.nan)])) for k, v in row.items()}
         run = start - timedelta(hours=0 if spec.get("tier") != "global" else 12)
         lead0 = int((start - run).total_seconds() // 3600)
+        flds = _fields(spec, la, lo, lead0, nd, _outside(cfg, spec))
+        hourly = point_hourly(flds, la, lo, idx, cfg["points"], run, lead0, lead0 + 54)
         out.append({"id": spec["id"], "label": spec["label"], "source": "grib", "tier": spec.get("tier", "global"),
                     "run": run, "lead0": lead0, "range_days": nd, "targets": day_bounds(lead0, nd, first_day_hours(start)),
                     "dates": dates, "data": data,
                     "lat": lat, "lon": lon, "precip_mm": cum, "snow_in": snow,
                     "snow_method": "model snowfall (ASNOW)" if spec["family"] == "ncep" else "snowfall water equivalent at 10:1",
-                    "fields": _fields(spec, la, lo, lead0, nd, _outside(cfg, spec)),
+                    "fields": flds, "hourly": hourly,
                     "ivt": _ivt(spec, lat, lon, lead0, nd) if spec.get("ivt") else None})
     return out
 
