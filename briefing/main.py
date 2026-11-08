@@ -17,7 +17,7 @@ import numpy as np
 import yaml
 
 from . import (alerts, analysis, avalanche, change, cogs, context, convective, extremes, fields, fronts, impacts, landslide,
-               maps, normals, observed, odds, outlooks, report, rivers, snowpack, summary, tempdep, timing, trends, urma, verify, wildfire)
+               maps, normals, observed, obsreports, odds, outlooks, report, rivers, snowpack, summary, tempdep, timing, trends, urma, verify, wildfire)
 from .grib import day0, day12, first_day_hours
 
 ROOT = Path(__file__).resolve().parent
@@ -243,6 +243,8 @@ def collect(cfg: dict, out: Path, demo: bool = False, products: bool = True) -> 
         "landslide": slide,
         "avalanche": safe("avalanche danger", lambda: avalanche.fetch(cfg, demo)) if products else None,
         "snowpack": safe("snowpack", lambda: snowpack.fetch(cfg, demo)) if products else None,
+        # what stations and NWS storm reports have measured at each location over the last few days
+        "obsReports": safe("observed reports", lambda: obsreports.fetch(cfg, demo)) if products else None,
         "outlooks": safe("NWS discussions and outlooks", lambda: outlooks.fetch(cfg, demo)) if products else None,
         "rivers": safe("river forecasts", lambda: rivers.fetch(cfg, demo)) if products else None,
     }

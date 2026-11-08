@@ -262,6 +262,35 @@ landslide:
 avalanche:
   center: NWAC
 
+# Observed reports by location (obsreports.py): the station that stands for each forecast location.
+# asos: IEM station id (state ASOS network, or CA_BC_ASOS for C-prefixed ids) for daily
+# precipitation and peak gust; eccc: Environment Canada climate id for B.C. daily precipitation
+# and gust (a day or so behind); snotel: NRCS triplet for precipitation and new snow at the passes.
+obs_reports:
+  days: 3                       # full days before today, plus today so far
+  report_hours: 48              # NWS reports drop out this long after the event
+  lsr_wfos: [SEW, PQR]          # NWS offices (Seattle, Portland) whose storm reports and report summaries to include
+  stations:
+    Bellingham: {asos: BLI}
+    Everett: {asos: PAE}
+    Seattle: {asos: SEA}
+    Tacoma: {asos: TIW}
+    Olympia: {asos: OLM}
+    Forks: {asos: UIL}
+    Aberdeen: {asos: HQM}
+    Stevens Pass: {snotel: "791:WA:SNTL"}
+    Snoqualmie Pass: {snotel: "672:WA:SNTL"}
+    White Pass: {snotel: "863:WA:SNTL"}
+    Vancouver WA: {asos: VUO}
+    Astoria: {asos: AST}
+    Tillamook: {asos: TMK}
+    Portland: {asos: PDX}
+    Salem: {asos: SLE}
+    Corvallis: {asos: CVO}
+    Government Camp: {snotel: "651:OR:SNTL"}
+    Vancouver BC: {asos: CYVR, eccc: "1108395"}
+    Whistler BC: {asos: CWAE}
+
 # Snowpack: SNOTEL stations within `radius_km` of each area's centre. Percent of median is shown
 # once the area's median SWE reaches `min_median_in` (early-season medians are near zero).
 snowpack:

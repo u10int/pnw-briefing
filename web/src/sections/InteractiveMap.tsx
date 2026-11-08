@@ -28,8 +28,9 @@ import { ParticleLayer, type WindDraw } from "@/lib/gl/particle-layer"
 import { type Grid, sameGrid } from "@/lib/gl/util"
 import { AR_COLORS, AR_LABELS, FLOOD_COLORS, FLOOD_LABELS, FRZ, GUST, IVT, legendBins, PCT, PGRAD, PRECIP, PROB, PTYPE_COLORS, PTYPE_NAMES, type Ramp, REFC, RH, SMOKE, SNOW, SPREAD, TDEP, TEMP, WIND } from "@/lib/ramps"
 import { contrastTextColor } from "@/lib/contrast"
-import type { ArCoast, Briefing, Cog, Convective, ExtremeVar, FrontFrame, Fronts, RiverGauge, Rivers, FieldEntry, FieldsManifest, FieldVar, Gradient } from "@/types"
+import type { ArCoast, Briefing, Cog, Convective, ExtremeVar, FrontFrame, Fronts, ObsReport, RiverGauge, Rivers, FieldEntry, FieldsManifest, FieldVar, Gradient } from "@/types"
 import { ptDayHour } from "@/lib/format"
+import { liveReports } from "@/lib/obsreports"
 import { addFrontLayers, FRONT_COLORS, FRONT_LAYERS, frontFrame, frontGeoJSON } from "@/lib/fronts"
 import { openLocation } from "@/lib/locationlink"
 
@@ -240,10 +241,10 @@ function chevronImage(): ImageData {
 
 type Status = { kind: "loading" | "ready" | "error" | "empty"; note?: string }
 
-function MapPane({ data, view, clock, opacity, smooth, particles, particleColor, sync, terrain, sat, fronts }: {
+function MapPane({ data, view, clock, opacity, smooth, particles, particleColor, sync, terrain, sat, fronts, reports }: {
   data: Briefing; view: View | null; clock: Clock; opacity: number; smooth: boolean
   particles: boolean; particleColor: [number, number, number, number]; sync: ReturnType<typeof useCameraSync>
-  terrain: boolean; sat: { kind: SatKind; times: SatTimes } | null; fronts: Fronts | null
+  terrain: boolean; sat: { kind: SatKind; times: SatTimes } | null; fronts: Fronts | null; reports: ObsReport[] | null
 }) {
   const el = React.useRef<HTMLDivElement>(null)
   const ready = React.useRef<Promise<maplibregl.Map> | null>(null)
@@ -357,6 +358,15 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
       // WPC fronts, over everything but the labels and markers (hidden until turned on); highs and
       // lows come from the models' own pressure fields
       addFrontLayers(m, labels)
+      // NWS reports (storm reports and report summaries), hidden until turned on
+      m.addSource("nws-reports", { type: "geojson", data: EMPTY })
+      m.addLayer({ id: "nws-reports", type: "circle", source: "nws-reports", layout: { visibility: "none" },
+        paint: { "circle-radius": 5, "circle-color": ["match", ["get", "kind"], ...Object.entries(NWS_REPORT_COLORS).flat(), "#555"] as unknown as string,
+                 "circle-stroke-color": "#fff", "circle-stroke-width": 1.5 } }, labels)
+      if (m.getStyle().glyphs && Array.isArray(font))
+        m.addLayer({ id: "nws-reports-label", type: "symbol", source: "nws-reports", minzoom: 6.5, layout: { visibility: "none",
+          "text-field": ["get", "label"], "text-font": font as string[], "text-size": 11, "text-offset": [0, -1.1], "text-anchor": "bottom", "text-optional": true },
+          paint: { "text-color": "#1b1f24", "text-halo-color": "rgba(255,255,255,0.95)", "text-halo-width": 1.5 } }, labels)
       const arFont = (m.getStyle().layers.find((l) => l.type === "symbol" && (l.layout as Record<string, unknown> | undefined)?.["text-font"])?.layout as Record<string, unknown> | undefined)?.["text-font"]
       if (m.getStyle().glyphs && Array.isArray(arFont))
         m.addLayer({ id: "ar-rank", type: "symbol", source: "ar", filter: ["!=", ["get", "num"], ""],
@@ -496,6 +506,14 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
     return () => { stop = true; unsub(); hideAll() }
   }, [sat?.kind, sat?.times])
 
+  // NWS reports: everything from the last few days, not tied to the clock
+  React.useEffect(() => {
+    ready.current?.then((m) => {
+      ;(m.getSource("nws-reports") as GeoJSONSource | undefined)?.setData(reports ? reportGeoJSON(reports) : EMPTY)
+      for (const id of ["nws-reports", "nws-reports-label"]) if (m.getLayer(id)) m.setLayoutProperty(id, "visibility", reports ? "visible" : "none")
+    })
+  }, [reports])
+
   // WPC fronts: the analysis or forecast frame nearest the clock, swapped in as the clock moves
   const [frontLabel, setFrontLabel] = React.useState<string | null>(null)
   React.useEffect(() => {
@@ -541,6 +559,33 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
 }
 
 // ------------------------------------------------------------------ legends
+
+const NWS_REPORT_COLORS: Record<ObsReport["kind"], string> = { gust: "#2a6fdb", damage: "#1b1f24", rain: "#1e9e4a", snow: "#7b4fc9", ice: "#d147a3", flood: "#0b7a75" }
+const NWS_REPORT_NAMES: Record<ObsReport["kind"], string> = { gust: "Wind gust", damage: "Wind damage", rain: "Rain", snow: "Snow", ice: "Ice", flood: "Flooding" }
+
+function reportGeoJSON(rs: ObsReport[]): GeoJSON.FeatureCollection {
+  return {
+    type: "FeatureCollection",
+    features: rs.map((r) => ({
+      type: "Feature" as const, geometry: { type: "Point" as const, coordinates: [r.lon, r.lat] },
+      properties: { kind: r.kind, label: r.mag == null ? "" : r.unit === "mph" ? String(Math.round(r.mag)) : r.mag < 0.005 ? "T" : `${+r.mag.toFixed(2)}″` },
+    })),
+  }
+}
+
+function ReportLegend({ reports, hours }: { reports: ObsReport[]; hours: number }) {
+  const kinds = [...new Set(reports.map((r) => r.kind))]
+  return (
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+      {kinds.map((k) => (
+        <span key={k} className="flex items-center gap-1.5">
+          <span className="inline-block size-2.5 rounded-full ring-1 ring-white" style={{ background: NWS_REPORT_COLORS[k] }} aria-hidden />{NWS_REPORT_NAMES[k]}
+        </span>
+      ))}
+      <span>NWS storm reports and report summaries from the last {hours} hours; gusts in mph, amounts in inches. Zoom in for values.</span>
+    </div>
+  )
+}
 
 /** Front symbols, drawn as on the map. */
 function FrontLegend() {
@@ -1314,6 +1359,9 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
   const [showPairs, setShowPairs] = useStoredFlag("pnw-briefing.map.pairs", true)
   const [showFronts, setShowFronts] = useStoredFlag("pnw-briefing.map.fronts", false)
   const frontsOn = showFronts && data.fronts?.frames.length ? data.fronts : null
+  const [showReports, setShowReports] = useStoredFlag("pnw-briefing.map.nwsReports", false)
+  const live = React.useMemo(() => liveReports(data.obsReports), [data.obsReports])
+  const reportsOn = showReports && live.length ? live : null
   const pairList = React.useMemo(() => (data.gradients ?? []).filter((g) => g.locs && g.series.length), [data])
   const [compare, setCompare] = React.useState(false)
   const clock = React.useMemo(() => new Clock(), [])
@@ -1552,6 +1600,7 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
             <MapOptions
               overlays={[
                 !!data.fronts?.frames.length && <OptionRow key="fronts" id="fronts" label="Fronts (WPC)" checked={showFronts} onChange={setShowFronts} />,
+                live.length > 0 && <OptionRow key="reports" id="nws-reports" label={`NWS reports, last ${data.obsReports?.reportHours ?? 48} h`} checked={showReports} onChange={setShowReports} />,
               ...(mode === "hourly" ? [
                 entriesA.mslp && <OptionRow key="iso" id="isobars" label="Isobars" checked={isobars} onChange={setIsobars} />,
                 pairList.length > 0 && <OptionRow key="pairs" id="pairs" label="Gradient pairs" checked={showPairs} onChange={setShowPairs} />,
@@ -1569,7 +1618,7 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
                   </div>
                 ),
               ] : [])].filter(Boolean)}
-              active={(frontsOn ? 1 : 0) + (mode === "hourly" ? [entriesA.mslp && isobars, pairList.length > 0 && showPairs, hasWind && particles, satAll && satKind !== "off"].filter(Boolean).length : 0)}
+              active={(frontsOn ? 1 : 0) + (reportsOn ? 1 : 0) + (mode === "hourly" ? [entriesA.mslp && isobars, pairList.length > 0 && showPairs, hasWind && particles, satAll && satKind !== "off"].filter(Boolean).length : 0)}
               display={<>
                 <OptionRow id="terrain" label="Terrain" checked={terrain} onChange={setTerrain} />
                 <OptionRow id="smooth" label="Smooth" checked={smooth} onChange={setSmooth} />
@@ -1585,11 +1634,12 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
         {mode === "hourly" && times.length > 0 && <TimeBar times={times} clock={clock} playing={playing} setPlaying={setPlaying} />}
 
         <div className={`grid gap-3 ${showB ? "lg:grid-cols-2" : ""}`}>
-          <MapPane data={data} view={viewA} clock={clock} opacity={opacity} smooth={smooth} particles={showParticles} particleColor={ink} sync={sync} terrain={terrain} sat={sat} fronts={frontsOn} />
-          {showB && <MapPane data={data} view={viewB} clock={clock} opacity={opacity} smooth={smooth} particles={showParticles} particleColor={ink} sync={sync} terrain={terrain} sat={sat} fronts={frontsOn} />}
+          <MapPane data={data} view={viewA} clock={clock} opacity={opacity} smooth={smooth} particles={showParticles} particleColor={ink} sync={sync} terrain={terrain} sat={sat} fronts={frontsOn} reports={reportsOn} />
+          {showB && <MapPane data={data} view={viewB} clock={clock} opacity={opacity} smooth={smooth} particles={showParticles} particleColor={ink} sync={sync} terrain={terrain} sat={sat} fronts={frontsOn} reports={reportsOn} />}
         </div>
 
         {frontsOn && <FrontLegend />}
+        {reportsOn && <ReportLegend reports={reportsOn} hours={data.obsReports?.reportHours ?? 48} />}
         {mode === "totals" ? (variable === "ar" ? <ArLegend /> : variable === "rivers" ? <RiverLegend /> : variable === "storms" ? <StormLegend day={d} /> : <RampLegend ramp={totRamp} every={totRamp.ticks ? 1 : totRamp.levels.length > 16 ? 2 : 1} />) : (
           <div className="space-y-2">
             {layer === "radar" && <RadarLegend withRefc={!!entriesA.refc} />}

@@ -1,0 +1,23 @@
+187 
+NOUS46 KPQR 202124
+PNSPQR
+ORZ101>128-WAZ201>211-210924-
+
+Public Information Statement
+National Weather Service Portland OR
+124 PM PST Fri Feb 20 2026
+
+
+On the evening of February 18th through February 19th, 2026, an area of low 
+pressure moved into the region around Tillamook, OR.
+
+...SNOWFALL REPORTS...
+
+Location                     Amount    Time/Date       Lat/Lon/Elev (ft.) 
+
+...North Oregon Cascades...     
+4 SSE Government Camp        4.0 in    1159 PM 02/19   45.25N/121.74W       
+Sequim 2.8 SSE                T in     0700 AM 02/19   48.04N/123.08W       
+Port Angeles 8.1 SSW         0.2 in    0900 AM 02/19   48.09N/123.54W/818   
+
+$$
