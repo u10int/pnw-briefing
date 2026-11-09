@@ -340,7 +340,7 @@ export function HazardStrip({ data, onOpen }: { data: Briefing; onOpen: (tab: Ha
     // each card spans five shared rows (header, badge, figure, chart, notes) through subgrid, so the
     // charts and notes line up across a row of cards whatever the caption lengths
     // on phones the cards are a row you swipe through, a peek of the next one showing
-    <div className={`grid gap-x-3 gap-y-3 sm:grid-cols-2 lg:grid-cols-3 ${items.length > 5 ? "2xl:grid-cols-6" : "xl:grid-cols-5"} max-sm:-mx-4 max-sm:auto-cols-[82%] max-sm:grid-flow-col max-sm:grid-rows-[repeat(5,auto)] max-sm:snap-x max-sm:snap-mandatory max-sm:scroll-px-4 max-sm:overflow-x-auto max-sm:px-4 max-sm:pb-2`}>
+    <div className={`grid gap-x-3 gap-y-3 sm:grid-cols-2 lg:grid-cols-3 ${items.length > 5 ? "" : "xl:grid-cols-5"} max-sm:-mx-4 max-sm:auto-cols-[82%] max-sm:grid-flow-col max-sm:grid-rows-[repeat(5,auto)] max-sm:snap-x max-sm:snap-mandatory max-sm:scroll-px-4 max-sm:overflow-x-auto max-sm:px-4 max-sm:pb-2`}>
       {items.map((h) => {
         const tone = TONE[h.tone]
         const Icon = h.icon, ToneIcon = tone.icon
