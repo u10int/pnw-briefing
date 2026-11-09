@@ -92,6 +92,53 @@ class report_quiet:
         return self._w.__exit__(*a)
 
 
+def normal_on_model(nlat, nlon, ngrid, mlat, mlon):
+    """The PRISM normal [day, y, x] on a model's grid. Where the model is coarser than PRISM's 4 km
+    (the global models), each model cell gets the average normal over its area, so a model whose
+    terrain is smoothed to 25 km is compared with a normal at the same scale, not with the 4 km
+    peaks and valleys it can't resolve. Where it's as fine or finer (HRRR, RRFS, HRDPS), the normal
+    is interpolated to its points."""
+    nlat, nlon, mlat, mlon = (np.asarray(x) for x in (nlat, nlon, mlat, mlon))
+    ngrid = np.asarray(ngrid, dtype="float32")
+    nd = ngrid.shape[0]
+    if mlat.ndim == 1 and mlat.size > 1 and mlon.size > 1 and \
+            np.median(np.abs(np.diff(mlat))) > 1.5 * np.median(np.abs(np.diff(nlat))):
+        def edges(c):
+            mid = (c[1:] + c[:-1]) / 2
+            return np.concatenate([[c[0] - (mid[0] - c[0])], mid, [c[-1] + (c[-1] - mid[-1])]])
+        oy, ox = np.argsort(mlat), np.argsort(mlon)
+        ey, ex = edges(mlat[oy]), edges(mlon[ox])
+        iy, ix = np.searchsorted(ey, nlat) - 1, np.searchsorted(ex, nlon) - 1
+        oky, okx = (iy >= 0) & (iy < mlat.size), (ix >= 0) & (ix < mlon.size)
+        ny, nx = mlat.size, mlon.size
+        IY, IX = np.meshgrid(np.where(oky, iy, 0), np.where(okx, ix, 0), indexing="ij")
+        ok = oky[:, None] & okx[None, :]
+        cell = (IY * nx + IX)[ok]
+        out = np.full((nd, ny, nx), np.nan, "float32")
+        for t in range(nd):
+            v = ngrid[t][ok]
+            f = np.isfinite(v)
+            s = np.bincount(cell[f], v[f], ny * nx)
+            c = np.bincount(cell[f], minlength=ny * nx)
+            with np.errstate(all="ignore"):
+                srt = (s / c).reshape(ny, nx)
+            res = np.empty_like(srt)
+            res[np.ix_(oy, ox)] = srt                    # back to the model's own row and column order
+            out[t] = res
+        return out
+    from scipy.interpolate import RegularGridInterpolator
+    la, lo = analysis._ll2d(mlat, mlon)
+    pts = np.column_stack([la.ravel(), lo.ravel()])
+    oy, ox = np.argsort(nlat), np.argsort(nlon)
+    out = np.full((nd, *la.shape), np.nan, "float32")
+    for t in range(nd):
+        g = ngrid[t][np.ix_(oy, ox)]
+        lin = RegularGridInterpolator((nlat[oy], nlon[ox]), g, bounds_error=False, fill_value=np.nan)(pts)
+        near = RegularGridInterpolator((nlat[oy], nlon[ox]), g, method="nearest", bounds_error=False, fill_value=np.nan)(pts)
+        out[t] = np.where(np.isfinite(lin), lin, near).reshape(la.shape)   # nearest along the coast, where linear meets ocean
+    return out
+
+
 def grids(grib_models, cfg, normal_grid, out_dir: Path):
     """COGs of the model-mean departure of daily highs and lows, averaged over each window."""
     from .cogs import write_cog
@@ -99,27 +146,36 @@ def grids(grib_models, cfg, normal_grid, out_dir: Path):
     if not normal_grid:
         return []
     glat, glon = analysis.common_grid(cfg)
-    # every model's daily highs and lows, and the normals, on the common grid (one regrid each)
-    nrm = {var: analysis.regrid(normal_grid["lat"], normal_grid["lon"], normal_grid[var], glat, glon) for var in VARS}
-    daily = []
+    # each model's departure is worked out on its own grid, against the normal at its own scale
+    # (see normal_on_model), and only then brought onto the common grid, bilinearly for the
+    # regular lat/lon models, so a 0.25° model doesn't land as solid blocks or paint its smoothed
+    # terrain as warm peaks and cold valleys
+    deps = []
     for m in grib_models:
         dt = m.get("daily_temps") or daily_temps(m)
-        if dt:
-            rg = analysis.Regridder(m["lat"], m["lon"], glat, glon)
-            daily.append((m["label"], {var: rg(g) for var, g in dt.items()}))
+        if not dt:
+            continue
+        rec = {}
+        for var, g in dt.items():
+            if var not in VARS:
+                continue
+            nm = normal_on_model(normal_grid["lat"], normal_grid["lon"], normal_grid[var], m["lat"], m["lon"])
+            k = min(g.shape[0], nm.shape[0])
+            with np.errstate(all="ignore"):
+                rec[var] = np.asarray(g[:k], dtype="float32") - nm[:k]
+        deps.append((m, rec))
     manifest = []
     for w in analysis.windows(cfg):
         n = w["days"]
         for var, (_, word) in VARS.items():
-            if n > nrm[var].shape[0]:
-                continue
             per = []
-            for label, dt in daily:
-                g = dt.get(var)
-                if g is None or g.shape[0] < n:
+            for m, rec in deps:
+                d = rec.get(var)
+                if d is None or d.shape[0] < n:
                     continue
                 with np.errstate(all="ignore"), report_quiet():
-                    per.append((label, np.nanmean(g[:n] - nrm[var][:n], 0)))
+                    mean_native = np.nanmean(d[:n], 0)
+                per.append((m["label"], analysis.regrid(m["lat"], m["lon"], mean_native, glat, glon)))
             if not per:
                 continue
             with np.errstate(all="ignore"), report_quiet():
