@@ -28,7 +28,7 @@ const groupBy = <T extends { area: string }>(xs: T[]) =>
   AREAS.map((a) => [a, xs.filter((x) => x.area === a)] as const).filter(([, v]) => v.length)
 const SectionRow = ({ label, span }: { label: string; span: number }) => (
   <TableRow className="border-0 hover:bg-transparent">
-    <TableCell colSpan={span} className="px-0 pt-4 pb-1 text-xs font-semibold tracking-wide text-muted-foreground uppercase">{label}</TableCell>
+    <TableCell colSpan={span} className="border-b border-border/70 px-0 pt-4 pb-1.5 text-xs font-semibold tracking-wide text-muted-foreground uppercase">{label}</TableCell>
   </TableRow>
 )
 
@@ -114,7 +114,7 @@ function BuoysCard({ data }: { data: Briefing }) {
         <Table className="w-auto min-w-[640px] border-separate border-spacing-x-0 border-spacing-y-[2px] text-[13px] [&_td]:pr-5 [&_th]:pr-5">
           <TableHeader>
             <TableRow className="hover:bg-transparent">
-              <TableHead>Buoy</TableHead>
+              <TableHead className="md:min-w-[260px]">Buoy</TableHead>
               <TableHead className="text-center">Waves</TableHead>
               <TableHead className="text-center">24 h high</TableHead>
               <TableHead>Wind</TableHead>
@@ -128,7 +128,7 @@ function BuoysCard({ data }: { data: Briefing }) {
                 <SectionRow label={area} span={6} />
                 {xs.map((b: Buoy) => (
                   <TableRow key={b.id} className="border-0 hover:bg-transparent">
-                    <TableCell className="py-1 pr-3">
+                    <TableCell className="py-1 pr-3 md:min-w-[260px]">
                       {b.name}
                       <span className="block text-[11px] text-muted-foreground">{b.id} · {ptDayHour(b.time)}</span>
                     </TableCell>
@@ -179,7 +179,7 @@ function WaveForecastCard({ data }: { data: Briefing }) {
           <Table className="w-auto border-separate border-spacing-[2px] text-[12.5px]">
             <TableHeader>
               <TableRow className="hover:bg-transparent">
-                <TableHead className="sticky left-0 z-10 bg-card">Where</TableHead>
+                <TableHead className="sticky left-0 z-10 bg-card md:min-w-[230px]">Where</TableHead>
                 {days.map((d) => <TableHead key={d} className="h-auto w-[60px] px-1 pb-2 text-center align-bottom text-[11.5px]"><DayHead day={d} /></TableHead>)}
               </TableRow>
             </TableHeader>
@@ -189,7 +189,7 @@ function WaveForecastCard({ data }: { data: Briefing }) {
                   <SectionRow label={a} span={days.length + 1} />
                   {xs.map((w: WavePoint) => (
                     <TableRow key={w.name} className="border-0 hover:bg-transparent">
-                      <TableCell className="sticky left-0 z-10 max-w-[150px] bg-card py-1 pr-3">
+                      <TableCell className="sticky left-0 z-10 max-w-[150px] bg-card py-1 pr-3 whitespace-normal md:max-w-none md:min-w-[230px] md:whitespace-nowrap">
                         {w.name}
                         {w.near && <button type="button" onClick={() => openLocation(w.near!)} className="block text-left text-[11px] text-muted-foreground hover:underline">near {w.near}</button>}
                       </TableCell>
@@ -266,7 +266,7 @@ function TidesCard({ data }: { data: Briefing }) {
           <Table className="w-auto border-separate border-spacing-x-[2px] border-spacing-y-[2px] text-[12.5px]">
             <TableHeader>
               <TableRow className="hover:bg-transparent">
-                <TableHead className="sticky left-0 z-10 bg-card">Gauge</TableHead>
+                <TableHead className="sticky left-0 z-10 bg-card md:min-w-[230px]">Gauge</TableHead>
                 <TableHead className="px-2 text-right text-[11.5px] font-normal">Flood<span className="block">level</span></TableHead>
                 <TableHead className="px-2 text-right text-[11.5px] font-normal">Running<span className="block">vs tide</span></TableHead>
                 {days.map((d) => <TableHead key={d} className="h-auto w-[72px] px-1 pb-2 text-center align-bottom text-[11.5px]"><DayHead day={d} /></TableHead>)}
@@ -278,7 +278,7 @@ function TidesCard({ data }: { data: Briefing }) {
                   <SectionRow label={a} span={days.length + 3} />
                   {xs.map((g: TideGauge) => (
                     <TableRow key={g.id} className="border-0 hover:bg-transparent">
-                      <TableCell className="sticky left-0 z-10 max-w-[160px] bg-card py-1 pr-3">
+                      <TableCell className="sticky left-0 z-10 max-w-[160px] bg-card py-1 pr-3 whitespace-normal md:max-w-none md:min-w-[230px] md:whitespace-nowrap">
                         {g.name}
                         {g.near && <button type="button" onClick={() => openLocation(g.near!)} className="block text-left text-[11px] text-muted-foreground hover:underline">near {g.near}</button>}
                       </TableCell>
