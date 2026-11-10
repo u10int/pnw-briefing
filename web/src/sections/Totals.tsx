@@ -1,6 +1,7 @@
 import * as React from "react"
 
 import { Badge } from "@/components/ui/badge"
+import { Takeaway } from "@/components/Takeaway"
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -272,13 +273,23 @@ export function ByLocation({ data, switcher }: { data: Briefing; switcher?: Reac
     <Card>
       <CardHeader>
         <CardTitle>By location</CardTitle>
+        {(() => {
+          const k = meds.reduce<number>((b, x, i) => (x != null && (b < 0 || x > meds[b]!) ? i : b), -1)
+          if (k < 0) return null
+          const xs = t.rows.map((r) => r.points[pts[k]]).filter((x): x is number => x != null)
+          const pct = normal?.[pts[k]]?.normal ? Math.round((100 * meds[k]!) / normal[pts[k]].normal) : null
+          return <Takeaway>Wettest: {pts[k]}, a median {inch(meds[k]!)}″ over {t.label.toLowerCase()}{pct != null && ` (${pct}% of normal)`}; models range {inch(Math.min(...xs))} – {inch(Math.max(...xs))}″.</Takeaway>
+        })()}
         <CardDescription>
           {showPct ? "Each model's total as a percent of the 1991 – 2020 normal for the same days." : "Totals in inches."} The
           Median row is the median across models{chg ? "; the row below it is the change in that median since yesterday" : ""}.
           {ens.length > 0 && <> Hover an ensemble median for the 10th – 90th percentile range{ensPts.length < pts.length ? ` (ensembles are computed for ${ensPts.join(", ")})` : ""}.</>}
         </CardDescription>
-        <CardAction className="flex flex-wrap justify-start gap-2 @xl/card-header:justify-end">
-          {switcher}
+        {switcher && <CardAction>{switcher}</CardAction>}
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {/* this view's own controls, under the header so the By day / By model switch stays put */}
+        <div className="flex flex-wrap gap-2">
           {data.normals && (
             <Tabs value={mode} onValueChange={(v) => setMode(v as "in" | "pct")}>
               <TabsList>
@@ -292,9 +303,7 @@ export function ByLocation({ data, switcher }: { data: Briefing; switcher?: Reac
               {data.totals.map((x) => <TabsTrigger key={x.days} value={String(x.days)}>{x.label.replace("Next ", "")}</TabsTrigger>)}
             </TabsList>
           </Tabs>
-        </CardAction>
-      </CardHeader>
-      <CardContent>
+        </div>
         <Table className="border-separate border-spacing-[2px] text-[12.5px]">
           <TableHeader>
             <TableRow className="hover:bg-transparent">

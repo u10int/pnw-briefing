@@ -223,8 +223,8 @@ export function FireWeatherByDayCard({ data }: { data: Briefing }) {
     [p.name, model ? modelDays(model, p.name, FKEY[v], nd) : stats[p.name].map((s) => s.med)])) as Record<string, N[]>
   const pickOf = (xs: N[]) => { const ys = xs.filter((x): x is number => x != null); return ys.length ? (lowIsBad ? Math.min(...ys) : Math.max(...ys)) : null }
   const rows: MatrixRow[] = [
-    ...data.regions.map((r) => { const days = regionDays(data, r.id, byPoint, lowIsBad ? "min" : "max"); return { name: r.name, group: true, days, lead: pickOf(days) } }),
-    ...data.points.map((p) => ({ name: p.name, point: p.name, days: byPoint[p.name], lead: pickOf(byPoint[p.name]) })),
+    ...data.regions.map((r) => { const days = regionDays(data, r.id, byPoint, lowIsBad ? "min" : "max"); return { name: r.name, group: true, region: r.id, days, lead: pickOf(days) } }),
+    ...data.points.map((p) => ({ name: p.name, point: p.name, region: p.region ?? undefined, days: byPoint[p.name], lead: pickOf(byPoint[p.name]) })),
   ]
   const fmt = (x: N) => (x == null ? "–" : v === "rh" ? `${Math.round(x)}%` : String(Math.round(x)))
   const tip = (r: MatrixRow, k: number) => {
@@ -240,7 +240,7 @@ export function FireWeatherByDayCard({ data }: { data: Briefing }) {
       <CardHeader>
         <CardTitle>Fire weather by day</CardTitle>
         <CardDescription>
-          {model ? `${model.label}'s` : only ? `Each location's median of ${listNames(only)}` : "Each location's multi-model median"} {FWORD[v]} for each 12Z – 12Z day
+          {model ? `${model.label}'s` : only ? `Each location's median of ${listNames(only)}` : "Each location's multi-model median"} {FWORD[v]} for each day (4 AM – 4 AM)
           {model && `, out to day ${model.days}`}. Region rows show their {lowIsBad ? "driest" : "worst"} location.
         </CardDescription>
         <CardAction className="flex flex-wrap gap-2"><MapButton req={{ mode: "hourly", layer: "rh" }} label="Humidity on the map" /><MapButton req={{ mode: "hourly", layer: "smoke" }} label="Smoke on the map" /></CardAction>

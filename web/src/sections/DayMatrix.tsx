@@ -1,4 +1,5 @@
 import * as React from "react"
+import { ChevronRight } from "lucide-react"
 import { contrastTextColor } from "@/lib/contrast"
 import { DayHead } from "@/components/DayHead"
 
@@ -130,23 +131,51 @@ export function RampStrip({ ramp, range, unit = "", from, extra }: { ramp: Ramp;
   )
 }
 
-export interface MatrixRow { name: string; group?: boolean; point?: string; days: N[]; lead: N }
+export interface MatrixRow { name: string; group?: boolean; point?: string; region?: string; days: N[]; lead: N }
+
+/** A light diagonal hatch over a cell where the models are far apart. */
+export const HATCH: React.CSSProperties = { backgroundImage: "repeating-linear-gradient(135deg, rgb(0 0 0 / 0.16) 0 1.5px, transparent 1.5px 5px)" }
+
+/** Narrow screens: region rows start collapsed, and open to their locations. */
+function useNarrow() {
+  const q = "(max-width: 639px)"
+  const [narrow, setNarrow] = React.useState(() => typeof window !== "undefined" && window.matchMedia?.(q).matches)
+  React.useEffect(() => {
+    const m = window.matchMedia?.(q)
+    if (!m) return
+    const f = () => setNarrow(m.matches)
+    m.addEventListener("change", f)
+    return () => m.removeEventListener("change", f)
+  }, [])
+  return narrow
+}
 
 export const dayLabel = (iso: string) => dayMD(iso)
 
 /** Locations down the side, days across, a summary column first. Region rows are shaded. Cells
  *  for locations get a tooltip from `tip`. Days at or past `dimFrom` get a muted header. */
-export function DayMatrix({ dates, rows, leadHead, leadSub, style, fmt, tip, dimFrom }: {
+export function DayMatrix({ dates, rows, leadHead, leadSub, style, fmt, tip, dimFrom, flag }: {
   dates: string[]; rows: MatrixRow[]; leadHead: string; leadSub: string
   style: (v: N) => React.CSSProperties; fmt: (v: N) => string
   tip?: (row: MatrixRow, k: number) => React.ReactNode; dimFrom?: number
+  /** cells to hatch: where the models are far apart */
+  flag?: (row: MatrixRow, k: number) => boolean
 }) {
+  const narrow = useNarrow()
+  const [open, setOpen] = React.useState<Set<string>>(new Set())
+  const grouped = narrow && rows.some((r) => r.group && r.region) && rows.some((r) => !r.group && r.region)
+  // on a phone: each region row, then its locations once opened; elsewhere as given
+  const shown = !grouped ? rows : rows.filter((r) => r.group).flatMap((g) =>
+    [g, ...(open.has(g.region!) ? rows.filter((r) => !r.group && r.region === g.region) : [])])
+  const toggle = (id: string) => setOpen((o) => { const n = new Set(o); if (n.has(id)) n.delete(id); else n.add(id); return n })
   return (
     <div className="overflow-x-auto rounded-md border">
       <table className="w-full border-collapse text-xs tabular-nums">
         <thead>
           <tr className="border-b">
-            <th className="sticky left-0 z-10 bg-card px-2 py-1.5 text-left font-medium">Location</th>
+            <th className="sticky left-0 z-10 bg-card px-2 py-1.5 text-left font-medium">
+              Location<span className="block font-normal text-muted-foreground">days 4 AM – 4 AM</span>
+            </th>
             <th className="px-2 py-1.5 text-center font-medium whitespace-nowrap">{leadHead}<span className="block font-normal text-muted-foreground">{leadSub}</span></th>
             {dates.map((d, k) => (
               <th key={d} className={`min-w-10 px-1 py-1.5 text-center font-medium ${dimFrom != null && k >= dimFrom ? "text-muted-foreground" : ""}`}>
@@ -156,15 +185,21 @@ export function DayMatrix({ dates, rows, leadHead, leadSub, style, fmt, tip, dim
           </tr>
         </thead>
         <tbody>
-          {rows.map((r) => (
+          {shown.map((r) => (
             <tr key={r.name} className={`border-b last:border-b-0 ${r.group ? "font-medium" : ""}`}>
-              <td className={`sticky left-0 z-10 px-2 py-1 whitespace-nowrap ${r.group ? "bg-muted" : "bg-card"}`}>
-                {r.point ? <button type="button" onClick={() => openLocation(r.point!)} className="rounded text-left hover:underline focus-visible:outline-2 focus-visible:outline-ring">{r.name}</button> : r.name}
+              <td className={`sticky left-0 z-10 px-2 py-1 whitespace-nowrap ${r.group ? "bg-muted" : "bg-card"} ${grouped && !r.group ? "pl-5" : ""}`}>
+                {r.point ? <button type="button" onClick={() => openLocation(r.point!)} className="rounded text-left hover:underline focus-visible:outline-2 focus-visible:outline-ring">{r.name}</button>
+                  : grouped && r.region ? (
+                    <button type="button" onClick={() => toggle(r.region!)} aria-expanded={open.has(r.region)} className="flex items-center gap-1 text-left">
+                      <ChevronRight className={`size-3.5 transition-transform ${open.has(r.region) ? "rotate-90" : ""}`} aria-hidden />{r.name}
+                    </button>
+                  ) : r.name}
               </td>
               <td className="border-r px-2 py-1 text-center font-medium" style={style(r.lead)}>{fmt(r.lead)}</td>
               {dates.map((_, k) => {
                 const x = r.days[k] ?? null
-                const td = <td key={k} className="px-1 py-1 text-center" style={style(x)}>{fmt(x)}</td>
+                const hatched = x != null && flag?.(r, k)
+                const td = <td key={k} className="px-1 py-1 text-center" style={hatched ? { ...style(x), ...HATCH } : style(x)}>{fmt(x)}</td>
                 const body = r.point && x != null ? tip?.(r, k) : null
                 if (!body) return td
                 return (
@@ -180,4 +215,9 @@ export function DayMatrix({ dates, rows, leadHead, leadSub, style, fmt, tip, dim
       </table>
     </div>
   )
+}
+
+/** The legend swatch for hatched cells. */
+export function HatchKey({ what = "Models far apart" }: { what?: string }) {
+  return <span className="mr-3 inline-flex items-center gap-1.5 align-middle"><span className="inline-block h-3 w-5 rounded-[2px] border" style={HATCH} aria-hidden />{what}</span>
 }

@@ -1,6 +1,7 @@
 import * as React from "react"
 
 import { MapButton } from "@/components/MapButton"
+import { Takeaway } from "@/components/Takeaway"
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { ptDay, ptDayHour, ptParts } from "@/lib/format"
@@ -100,10 +101,16 @@ export function PeakTimingCard({ data, v }: { data: Briefing; v: Var }) {
     ? `gusts reach ${th.gust_mph.lowland} mph in the lowlands, ${th.gust_mph.coast} on the coast or ${th.gust_mph.pass} at the passes`
     : v === "snow" ? `snow falls, with the bars where it comes at ${th.snow_in_per_h ?? 0.5}″ an hour or more (${th.heavy_snow_in_per_h ?? 1}″+ is heavy)`
     : `precipitation falls, with the bars where it comes at ${th.rate_in_per_h}″ an hour or more (${th.heavy_in_per_h}″+ is heavy)`
+  const strongest = rows.flatMap((r) => r.es.map((e) => ({ name: r.p.name, e }))).sort((a, b) => b.e.peak - a.e.peak)[0]
+  const takeaway = strongest
+    ? <>Strongest: {strongest.name}, {peakText(v, strongest.e)} near {ptDayHour(strongest.e.peakTime)}{rows.filter((r) => r.es.length).length > 1 && <>; {rows.filter((r) => r.es.length).length} locations reach the threshold</>}.</>
+    : rows.length ? <>Nothing reaches the threshold in the next {WINDOW_H} hours; {v === "snow" ? "light snow" : "lighter precipitation"} at {rows.length} location{rows.length > 1 ? "s" : ""}.</>
+    : <>Nothing reaches the threshold in the next {WINDOW_H} hours.</>
   return (
     <Card>
       <CardHeader>
         <CardTitle>{v === "gust" ? "When the strongest gusts come" : v === "snow" ? "When the heaviest snow comes" : "When the heaviest precipitation comes"}</CardTitle>
+        <Takeaway>{takeaway}</Takeaway>
         <CardDescription>
           The next {WINDOW_H} hours at the locations where {what}, from the median of {t.models.length} models with hourly output ({t.models.join(", ")}){t.weighted?.length && t.weighted.length < t.models.length ? `, with the high-resolution ones (${t.weighted.join(", ")}) counted double` : ""}. Each bar is how long it lasts and the dot marks the peak{v !== "gust" ? `; the pale fill is when any ${v === "snow" ? "snow" : "precipitation"} falls` : ""}; the red line is now. Hover for details.
         </CardDescription>

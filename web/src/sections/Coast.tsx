@@ -2,6 +2,7 @@ import * as React from "react"
 import { CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts"
 
 import { Badge } from "@/components/ui/badge"
+import { dayOf, Takeaway } from "@/components/Takeaway"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { type ChartConfig, ChartContainer, ChartLegend, ChartLegendContent, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
@@ -108,6 +109,8 @@ export function BuoysCard({ data }: { data: Briefing }) {
     <Card>
       <CardHeader>
         <CardTitle>Buoys now</CardTitle>
+        {(() => { const b = bs.filter((x) => x.wave != null).sort((a, c) => c.wave! - a.wave!)[0]
+          return b && <Takeaway>Highest waves now: {b.wave} ft at {b.name}{b.period ? `, ${Math.round(b.period)} s` : ""}{b.waveMax24 != null && b.waveMax24 > b.wave! ? ` (${b.waveMax24} ft in the last 24 hours)` : ""}.</Takeaway> })()}
         <CardDescription>The latest reading at each buoy, the highest waves and strongest gust of the last 24 hours, and the waves over that time (left to right).</CardDescription>
       </CardHeader>
       <CardContent className="overflow-x-auto">
@@ -172,6 +175,8 @@ export function WaveForecastCard({ data }: { data: Briefing }) {
     <Card>
       <CardHeader>
         <CardTitle>Wave forecast</CardTitle>
+        {(() => { const x = ws.flatMap((w) => w.daily.map((d) => ({ w, d }))).sort((a, b) => b.d.max - a.d.max)[0]
+          return x && <Takeaway>Highest seas: {Math.round(x.d.max)} ft at {x.w.name} {dayOf(x.d.date)}{x.d.period ? `, at ${Math.round(x.d.period)} s` : ""}.</Takeaway> })()}
         <CardDescription>The highest significant wave height each day, in feet, with its period and direction underneath; the chart shows it through the week.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
@@ -249,19 +254,18 @@ export function TidesCard({ data }: { data: Briefing }) {
     <Card>
       <CardHeader>
         <CardTitle>Tides and coastal flooding</CardTitle>
+        {(() => {
+          const near = ts.flatMap((g) => g.highs.filter((h) => h.margin != null).map((h) => ({ g, h }))).sort((a, b) => a.h.margin! - b.h.margin!)
+          if (!near.length) return null
+          if (!close.length) return <Takeaway>No high tide comes within a foot of flooding; closest is {near[0].g.name} {wall(near[0].h.time)}, {near[0].h.margin!.toFixed(1)} ft below.</Takeaway>
+          return <Takeaway>Closest to flooding: {near.filter((x, i) => x.h.margin! <= 1 && near.findIndex((y) => y.g.id === x.g.id) === i).slice(0, 2).map(({ g, h }, i) => (
+            <span key={g.id + h.time}>{i > 0 && "; "}{g.name} {wall(h.time)}, {h.margin! <= 0 ? `${Math.abs(h.margin!).toFixed(1)} ft over` : `${h.margin!.toFixed(1)} ft below`} minor flood</span>))}.</Takeaway>
+        })()}
         <CardDescription>
           Each day's highest high tide at each gauge (feet above mean lower low water, local time), against the gauge's minor flood level, with the water's current running above or below the tide prediction (a rough storm surge) added on. Tides within a foot of flooding are flagged.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
-        {close.length > 0 && (
-          <p className="text-sm">
-            <span className="font-medium">Closest to flooding: </span>
-            {close.sort((a, b) => a.h.margin! - b.h.margin!).slice(0, 3).map(({ g, h }, i) => (
-              <span key={g.id + h.time}>{i > 0 && "; "}{g.name} {wall(h.time)}, {h.margin! <= 0 ? `${Math.abs(h.margin!).toFixed(1)} ft over` : `${h.margin!.toFixed(1)} ft below`} minor flood</span>
-            ))}
-          </p>
-        )}
         <div className="overflow-x-auto">
           <Table className="w-auto border-separate border-spacing-x-[2px] border-spacing-y-[2px] text-[12.5px]">
             <TableHeader>

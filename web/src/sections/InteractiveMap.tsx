@@ -3,6 +3,7 @@ import * as maplibregl from "maplibre-gl"
 import type { GeoJSONSource, MapMouseEvent, StyleSpecification } from "maplibre-gl"
 import "maplibre-gl/dist/maplibre-gl.css"
 // MapLibre runs a web worker for vector/GeoJSON work; have Vite bundle it and tell MapLibre where it is.
+import { summarize } from "@/sections/Hazards"
 import { Pause, Play, SlidersHorizontal } from "lucide-react"
 import { Popover } from "radix-ui"
 
@@ -1469,6 +1470,18 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
   const varOf = (c: Cog): TotVar => c.var as TotVar
   const allCogs = React.useMemo(() => [...cogs, ...arCogs(data.arCoast), ...riverCogs(data.rivers), ...stormCogs(data.convective)], [cogs, data.arCoast, data.rivers, data.convective])
   const totAvail = TOT_VARS.filter((v) => allCogs.some((c) => varOf(c) === v.id))
+  // open on the variable behind the briefing's top hazard, until the reader or a link picks one
+  const opened = React.useRef(false)
+  React.useEffect(() => {
+    if (opened.current || !totAvail.length) return
+    opened.current = true
+    if (request) return
+    const top = summarize(data).filter((x) => x.tone !== "quiet").sort((a, b) => (b.tone === "alert" ? 1 : 0) - (a.tone === "alert" ? 1 : 0))[0]
+    const want: TotVar[] = !top ? [] : top.tab === "wind" || top.tab === "coast" ? ["gust"] : top.tab === "snow" ? ["snow"]
+      : top.tab === "temp" ? ["tmaxdep", "tmax"] : ["precip"]
+    const v = want.find((x) => totAvail.some((t) => t.id === x))
+    if (v) setVariable(v)
+  }, [totAvail, data, request])
   const windows = [...new Set(allCogs.filter((c) => varOf(c) === variable).map((c) => c.days))].sort((a, b) => a - b)
   const d = windows.includes(days) ? days : windows[0]
   const options = allCogs.filter((c) => varOf(c) === variable && c.days === d)

@@ -1,9 +1,11 @@
 import * as React from "react"
 
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Takeaway } from "@/components/Takeaway"
+import { extreme } from "@/components/Takeaway"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { TDEP, TEMP } from "@/lib/ramps"
-import { coreModels, DayMatrix, dayLabel, listNames, MEDIAN, type MatrixRow, ModelPick, modelDays, modelsWith, RampStrip, rampCell, regionDays, usePick } from "@/sections/DayMatrix"
+import { coreModels, DayMatrix, HatchKey, dayLabel, listNames, MEDIAN, type MatrixRow, ModelPick, modelDays, modelsWith, RampStrip, rampCell, regionDays, usePick } from "@/sections/DayMatrix"
 import type { Briefing, N } from "@/types"
 import { MapButton } from "@/components/MapButton"
 
@@ -60,9 +62,22 @@ export function TempDepartureCard({ data }: { data: Briefing }) {
   })) as Record<string, N[]>
   const lead = (days: N[]) => mean(days.slice(0, w.days))
   const rows: MatrixRow[] = [
-    ...data.regions.map((r) => { const days = regionDays(data, r.id, byPoint); return { name: r.name, group: true, days, lead: lead(days) } }),
-    ...data.points.map((p) => ({ name: p.name, point: p.name, days: byPoint[p.name], lead: lead(byPoint[p.name]) })),
+    ...data.regions.map((r) => { const days = regionDays(data, r.id, byPoint); return { name: r.name, group: true, region: r.id, days, lead: lead(days) } }),
+    ...data.points.map((p) => ({ name: p.name, point: p.name, region: p.region ?? undefined, days: byPoint[p.name], lead: lead(byPoint[p.name]) })),
   ]
+  const hi = extreme(rows), lo = extreme(rows, true)
+  const fmtT = (x: number) => show === "dep" ? signed(x) : deg(x)
+  const regLines = data.regions.map((r) => {
+    const a = w.regions[r.id]?.tmax ?? null, b = w.regions[r.id]?.tmin ?? null
+    return a == null && b == null ? null : `${r.name}: ${[words(a, "highs"), words(b, "lows")].filter(Boolean).join(", ")}`
+  }).filter(Boolean)
+  const takeaway = pick === MEDIAN && show === "dep" && regLines.length ? <>{regLines.join("; ")}, on average over {w.label.toLowerCase()}.</>
+    : hi && lo && <>{show === "dep" ? (hi.value < 0 ? "Least cold vs normal" : "Warmest vs normal") : `Highest ${WORD[v]}`}: {hi.row.name} ({fmtT(hi.value)}); {show === "dep" ? (lo.value > 0 ? "least warm" : "coolest") : "lowest"}: {lo.row.name} ({fmtT(lo.value)}), averaged over {w.days} days.</>
+  // the spread of the models' own values at a location and day
+  const farApart = (r: MatrixRow, k: number) => {
+    const xs = (only ?? models).map((m) => modelDays(m, r.point!, KEY[v], nd)[k]).filter((x): x is number => x != null)
+    return xs.length >= 3 && Math.max(...xs) - Math.min(...xs) >= 10
+  }
   const noNormal = data.points.filter((p) => (td.normals[p.name]?.tmax ?? []).every((x) => x == null)).map((p) => p.name)
 
   const tip = (r: MatrixRow, k: number) => {
@@ -81,6 +96,7 @@ export function TempDepartureCard({ data }: { data: Briefing }) {
     <Card>
       <CardHeader>
         <CardTitle>{show === "dep" ? "Temperatures vs normal" : "Daily temperatures"}</CardTitle>
+        <Takeaway>{takeaway}</Takeaway>
         <CardDescription>
           {model ? `${model.label}'s` : only ? `Each location's median of ${listNames(only)}` : "Each location's multi-model median"} daily {WORD[v]}{" "}
           {show === "dep" ? "against its 1991 – 2020 normal for the date (PRISM)" : "temperature"}{model && `, out to day ${model.days}`}.
@@ -89,18 +105,6 @@ export function TempDepartureCard({ data }: { data: Briefing }) {
         <CardAction className="flex flex-wrap gap-2"><MapButton req={{ mode: "totals", variable: "tmaxdep", days: 7 }} label="Highs vs normal on the map" /><MapButton req={{ mode: "totals", variable: "tmindep", days: 7 }} label="Lows vs normal on the map" /></CardAction>
       </CardHeader>
       <CardContent className="space-y-4">
-        {pick === MEDIAN && (
-          <ul className="space-y-1 text-sm">
-            {data.regions.map((r) => {
-              const hi = w.regions[r.id]?.tmax ?? null, lo = w.regions[r.id]?.tmin ?? null
-              if (hi == null && lo == null) return null
-              return (
-                <li key={r.id}><span className="font-medium">{r.name}:</span>{" "}
-                  {[words(hi, "highs"), words(lo, "lows")].filter(Boolean).join(", ")} on average over {w.label.toLowerCase()}.</li>
-              )
-            })}
-          </ul>
-        )}
         <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
           <Tabs value={v} onValueChange={(x) => setV(x as Var)}>
             <TabsList><TabsTrigger value="tmax">Highs</TabsTrigger><TabsTrigger value="tmin">Lows</TabsTrigger></TabsList>
@@ -117,10 +121,11 @@ export function TempDepartureCard({ data }: { data: Briefing }) {
           {show === "dep" ? <RampStrip ramp={TDEP} range={[-20, 20]} unit="°" /> : <RampStrip ramp={TEMP} range={[20, 95]} unit="°" />}
         </div>
         <DayMatrix dates={td.dates} rows={rows} leadHead="Avg" leadSub={w.label} dimFrom={w.days}
-          style={show === "dep" ? depCell : (x) => rampCell(x, TEMP)} fmt={show === "dep" ? (x) => signed(x) : deg} tip={tip} />
+          style={show === "dep" ? depCell : (x) => rampCell(x, TEMP)} fmt={show === "dep" ? (x) => signed(x) : deg} tip={tip} flag={model ? undefined : farApart} />
         <p className="text-xs text-muted-foreground">
-          Days past the selected window are shown too; the average covers only the window. Model days run 12Z – 12Z (4 AM to 4 AM
-          Pacific), which holds the day's afternoon high and early-morning low.
+          <HatchKey what="Hatched: models 10°F+ apart" />{" "}
+          Days past the selected window are shown too; the average covers only the window. Each day runs 4 AM to 4 AM
+          Pacific, which holds the day's afternoon high and early-morning low.
           {show === "dep" && noNormal.length > 0 && ` PRISM normals cover the US only, so ${noNormal.join(", ")} ${noNormal.length > 1 ? "have" : "has"} no departure.`}
           {" "}The interactive map's Summary mode has the gridded version under “Temperature vs normal”.
         </p>

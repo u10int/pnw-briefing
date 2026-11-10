@@ -2,6 +2,7 @@ import * as React from "react"
 
 import { Button } from "@/components/ui/button"
 import { MapButton } from "@/components/MapButton"
+import { Takeaway } from "@/components/Takeaway"
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { DayHead } from "@/components/DayHead"
@@ -64,10 +65,18 @@ export function ObsReportsCard({ data, v }: { data: Briefing; v: V }) {
     .filter((r) => r.rec && r.rec[v].some((x) => x != null))
   const reports = liveReports(o).filter((r) => KINDS[v].includes(r.kind))
   if (!rows.length && !reports.length) return null
+  // the most at any station over the period, and the largest report with an amount
+  const agg = (xs: N[]) => { const ys = xs.filter((x): x is number => x != null); return ys.length ? (v === "gust" ? Math.max(...ys) : ys.reduce((a, b) => a + b, 0)) : null }
+  const st = rows.map((r) => ({ name: r.name, x: agg(r.rec[v]) })).filter((r) => r.x != null).sort((a, b) => b.x! - a.x!)[0]
+  const rep = reports.filter((r) => r.mag != null && REPORT_RAMP[r.kind]).sort((a, b) => b.mag! - a.mag!)[0]
+  const stText = st && st.x! > 0 && <>{v === "gust" ? "Strongest station gust" : "Most at a station"}: {st.name}, {v === "gust" ? `${Math.round(st.x!)} mph` : `${fmt(v, st.x)}″`}{v !== "gust" && ` over ${o.days.length - 1} days and today`}</>
+  const repText = rep && <>largest report {reportMag(rep)}{rep.place ? ` at ${rep.place}` : ""}</>
+  const takeaway = stText || repText ? <>{stText}{stText && repText ? "; " : ""}{!stText && repText ? <>Largest report: {reportMag(rep)}{rep.place ? ` at ${rep.place}` : ""}</> : repText}.</> : null
   return (
     <Card>
       <CardHeader>
         <CardTitle>{TITLE[v]}</CardTitle>
+        <Takeaway>{takeaway}</Takeaway>
         <CardDescription>
           {WHAT[v]} over the last {o.days.length - 1} days and today so far (Pacific time){reports.length ? `, then what's been reported to NWS Seattle and Portland in the last ${o.reportHours ?? 48} hours` : ""}.
         </CardDescription>

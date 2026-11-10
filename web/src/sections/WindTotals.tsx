@@ -1,5 +1,6 @@
 import * as React from "react"
 
+import { Takeaway } from "@/components/Takeaway"
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -78,12 +79,20 @@ export function WindByLocation({ data, switcher }: { data: Briefing; switcher?: 
     <Card>
       <CardHeader>
         <CardTitle>By location</CardTitle>
+        {(() => {
+          const k = meds.reduce<number>((b, x, i) => (x != null && (b < 0 || x > meds[b]!) ? i : b), -1)
+          if (k < 0) return null
+          const xs = rows.map((r) => r.points[pts[k]]).filter((x): x is number => x != null)
+          return <Takeaway>Strongest: {pts[k]}, a median {Math.round(meds[k]!)} mph {v === "gust" ? "gust" : "sustained"}; models range {Math.round(Math.min(...xs))} – {Math.round(Math.max(...xs))} mph.</Takeaway>
+        })()}
         <CardDescription>
           Each model's strongest {v === "gust" ? "gust" : "sustained wind"} at each location over the window, in mph. The Median row is the median across models
           {chg ? "; the row below it is the change in that median since yesterday" : ""}.
         </CardDescription>
-        <CardAction className="flex flex-wrap justify-start gap-2 @xl/card-header:justify-end">
-          {switcher}
+        {switcher && <CardAction>{switcher}</CardAction>}
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="flex flex-wrap gap-2">
           <Tabs value={v} onValueChange={(x) => setV(x as Var)}>
             <TabsList>
               <TabsTrigger value="gust">Gust</TabsTrigger>
@@ -93,9 +102,7 @@ export function WindByLocation({ data, switcher }: { data: Briefing; switcher?: 
           <Tabs value={win} onValueChange={setWin}>
             <TabsList>{wins.map((x) => <TabsTrigger key={x.days} value={String(x.days)}>{x.label.replace("Next ", "")}</TabsTrigger>)}</TabsList>
           </Tabs>
-        </CardAction>
-      </CardHeader>
-      <CardContent>
+        </div>
         {rows.length ? (
           <Table className="border-separate border-spacing-[2px] text-[12.5px]">
             <TableHeader>

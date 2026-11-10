@@ -1,9 +1,10 @@
 import * as React from "react"
 
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { dayOf, extreme, Takeaway } from "@/components/Takeaway"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { GUST, type Ramp, WIND } from "@/lib/ramps"
-import { coreModels, DayMatrix, dayLabel, dayStats, listNames, MEDIAN, type MatrixRow, ModelPick, modelDays, modelsWith, RampStrip, rampCell, regionDays, usePick } from "@/sections/DayMatrix"
+import { coreModels, DayMatrix, type DayStat, HatchKey, dayLabel, dayStats, listNames, MEDIAN, type MatrixRow, ModelPick, modelDays, modelsWith, RampStrip, rampCell, regionDays, usePick } from "@/sections/DayMatrix"
 import type { Briefing, N } from "@/types"
 
 type Var = "gust" | "wind"
@@ -31,11 +32,17 @@ export function WindByDayCard({ data, switcher }: { data: Briefing; switcher?: R
   const byPoint = Object.fromEntries(data.points.map((p) =>
     [p.name, model ? modelDays(model, p.name, KEY[v], nd) : stats[p.name].map((s) => s.med)])) as Record<string, N[]>
   const rows: MatrixRow[] = [
-    ...data.regions.map((r) => { const days = regionDays(data, r.id, byPoint, "max"); return { name: r.name, group: true, days, lead: peak(days) } }),
-    ...data.points.map((p) => ({ name: p.name, point: p.name, days: byPoint[p.name], lead: peak(byPoint[p.name]) })),
+    ...data.regions.map((r) => { const days = regionDays(data, r.id, byPoint, "max"); return { name: r.name, group: true, region: r.id, days, lead: peak(days) } }),
+    ...data.points.map((p) => ({ name: p.name, point: p.name, region: p.region ?? undefined, days: byPoint[p.name], lead: peak(byPoint[p.name]) })),
   ]
   const span = model ? Math.min(model.days, nd) : nd
+  const top = extreme(rows.map((r) => ({ ...r, lead: peak(r.days.slice(0, span)) })), false, span)
+  const takeaway = top && <>Strongest: {top.row.name}, {v === "gust" ? "gusting to" : "sustained"} {Math.round(top.value)} mph{top.day >= 0 && <> {dayOf(data.dates[top.day])}</>}.</>
 
+  const farApart = (r: MatrixRow, k: number) => {
+    const s = (stats as Record<string, DayStat[]>)[r.point!]?.[k]
+    return !!s && s.n >= 3 && s.lo != null && s.hi != null && s.hi - s.lo >= (v === "gust" ? 20 : 15)
+  }
   const tip = (r: MatrixRow, k: number) => {
     const x = r.days[k]!, s = stats[r.point!][k]
     return <>
@@ -50,8 +57,9 @@ export function WindByDayCard({ data, switcher }: { data: Briefing; switcher?: R
     <Card>
       <CardHeader>
         <CardTitle>{switcher ? "By location" : v === "gust" ? "Gusts by day" : "Wind by day"}</CardTitle>
+        <Takeaway>{takeaway}</Takeaway>
         <CardDescription>
-          {model ? `${model.label}'s` : only ? `Each location's median of ${listNames(only)}` : "Each location's multi-model median"} {WORD[v]} for each 12Z – 12Z day, in mph
+          {model ? `${model.label}'s` : only ? `Each location's median of ${listNames(only)}` : "Each location's multi-model median"} {WORD[v]} for each day (4 AM – 4 AM), in mph
           {model && `, out to day ${model.days}`}. Region rows show their windiest location.
         </CardDescription>
         {switcher && <CardAction>{switcher}</CardAction>}
@@ -67,8 +75,9 @@ export function WindByDayCard({ data, switcher }: { data: Briefing; switcher?: R
           <div className="sm:ml-auto"><RampStrip ramp={ramp} range={[6.9, 69.05]} extra={<span>mph</span>} /></div>
         </div>
         <DayMatrix dates={data.dates} rows={rows} leadHead="Peak" leadSub={`${span} days`} dimFrom={model ? model.days : undefined}
-          style={(x) => rampCell(x, ramp)} fmt={mph} tip={tip} />
+          style={(x) => rampCell(x, ramp)} fmt={mph} tip={tip} flag={model ? undefined : farApart} />
         <p className="text-xs text-muted-foreground">
+          <HatchKey what={`Hatched: models ${v === "gust" ? 20 : 15}+ mph apart`} />{" "}
           {only ? `The core median uses only ${listNames(only)} on every day. Point values are the nearest model cell, which on coarse global grids smooths out terrain-driven winds.`
             : pick === MEDIAN
             ? "The median uses whichever models reach that day. Point values are the nearest model cell, which on coarse global grids smooths out terrain-driven winds."
