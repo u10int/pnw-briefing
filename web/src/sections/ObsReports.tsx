@@ -11,7 +11,7 @@ import { openLocation } from "@/lib/locationlink"
 import { liveReports } from "@/lib/obsreports"
 import { GUST, PRECIP, SNOW } from "@/lib/ramps"
 import { rampCell } from "@/sections/DayMatrix"
-import type { Briefing, N, ObsReport } from "@/types"
+import type { Briefing, N, ObsReport, ObsReports } from "@/types"
 
 type V = "precip" | "gust" | "snow"
 const TITLE: Record<V, string> = { precip: "Observed precipitation", gust: "Observed peak gusts", snow: "Observed new snow" }
@@ -249,45 +249,34 @@ export function LocationObserved({ data, name }: { data: Briefing; name: string 
  *  gust and the most rain and snow, from NWS reports and the locations' stations. */
 export function ObservedHighlights({ data }: { data: Briefing }) {
   const o = data.obsReports
-  const items = React.useMemo(() => {
+  const groups = React.useMemo(() => {
     if (!o) return []
-    const reps = liveReports(o)
-    const recent = o.days.slice(-2)                                // yesterday and today at the stations
-    type Item = { what: string; value: number; text: string; where: string; when: string | null; loc: string | null }
-    const best = (kind: ObsReport["kind"], v: V, what: string, min: number): Item | null => {
-      let out: Item | null = null
-      for (const r of reps) {
-        if (r.kind !== kind || r.mag == null || r.mag < min) continue
-        if (!out || r.mag > out.value) out = { what, value: r.mag, text: reportMag(r)!, where: r.place ?? "", when: r.time, loc: r.near }
-      }
-      for (const [name, rec] of Object.entries(o.points)) {
-        rec[v].forEach((x, i) => {
-          const day = o.days[i]
-          if (x == null || x < min || !recent.includes(day)) return
-          if (!out || x > out.value) out = { what, value: x, text: v === "gust" ? `${Math.round(x)} mph` : `${x.toFixed(v === "snow" ? 0 : 2)} in`, where: name, when: null, loc: name }
-        })
-      }
-      return out
-    }
-    return [best("gust", "gust", "Strongest gust", 30), best("rain", "precip", "Most rain", 0.25), best("snow", "snow", "Most new snow", 1)]
-      .filter((x): x is NonNullable<typeof x> => !!x)
+    const sum = (xs: N[]) => xs.filter((x): x is number => x != null).reduce((a, b) => a + b, 0)
+    const top = (f: (r: ObsReports["points"][string]) => number) =>
+      Object.entries(o.points).map(([n, r]) => ({ n, v: f(r) })).filter((x) => x.v > 0).sort((a, b) => b.v - a.v).slice(0, 3)
+    return [
+      { key: "precip", title: "Most rain", rows: top((r) => sum(r.precip)), color: "#2563c9", fmt: (v: number) => `${v.toFixed(2)}″` },
+      { key: "snow", title: "Most new snow", rows: top((r) => sum(r.snow)), color: "#6553cf", fmt: (v: number) => `${Math.round(v)}″` },
+      { key: "gust", title: "Strongest gusts", rows: top((r) => Math.max(0, ...r.gust.filter((x): x is number => x != null))), color: "#4b98b8", fmt: (v: number) => `${Math.round(v)} mph` },
+    ].filter((g) => g.rows.length)
   }, [o])
-  if (!items.length) return null
+  if (!o || !groups.length) return null
   return (
-    <section className="space-y-2">
-      <h2 className="text-sm font-semibold">Observed lately</h2>
-      <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-[13px]">
-        {items.map((x) => (
-          <React.Fragment key={x.what}>
-            <dt className="text-muted-foreground">{x.what}</dt>
-            <dd>
-              <span className="font-semibold tabular-nums">{x.text}</span>{" "}
-              {x.loc ? <button type="button" onClick={() => openLocation(x.loc!)} className="hover:underline">at {x.where}</button> : `at ${x.where}`}
-              {x.when && <span className="text-muted-foreground"> · {ptDayHour(x.when)}</span>}
-            </dd>
-          </React.Fragment>
-        ))}
-      </dl>
+    <section className="space-y-3">
+      <h2 className="text-sm font-semibold">Observed lately <span className="font-normal text-muted-foreground">· last {o.days.length - 1} days and today</span></h2>
+      {groups.map((g) => (
+        <div key={g.key} className="space-y-1">
+          <p className="text-[12px] text-muted-foreground">{g.title}</p>
+          {g.rows.map((x) => (
+            <div key={x.n} className="grid grid-cols-[112px_minmax(0,1fr)_56px] items-center gap-2 text-[12.5px]">
+              <button type="button" onClick={() => openLocation(x.n)} className="truncate text-left hover:underline">{x.n}</button>
+              <div className="h-2 rounded-full bg-border/60"><div className="h-2 rounded-full" style={{ width: `${(100 * x.v) / g.rows[0].v}%`, background: g.color }} /></div>
+              <span className="text-right font-medium tabular-nums">{g.fmt(x.v)}</span>
+            </div>
+          ))}
+        </div>
+      ))}
+      <p className="text-[11px] text-muted-foreground">At each location's station; today is so far.</p>
     </section>
   )
 }
