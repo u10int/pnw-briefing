@@ -15,6 +15,8 @@ import { LocationPanel } from "@/sections/Location"
 import { onOpenLocation } from "@/lib/locationlink"
 import { extremeTabs, MapCard } from "@/sections/Maps"
 import { Headline } from "@/sections/Overview"
+import { RunTrendCard } from "@/sections/RunTrend"
+import { UnusualCard } from "@/sections/Unusual"
 import { TrendsCard } from "@/sections/Trends"
 import { TempVerificationCard, VerificationCard } from "@/sections/Verify"
 import { ConvectiveCard } from "@/sections/Convective"
@@ -271,7 +273,9 @@ export default function App() {
                 { id: "forecast", title: GROUP_TITLES.forecast, show: true, children: <>
                   <RegionTotals data={data} />
                   <LocationViews day={(sw) => <RainByDayCard data={data} switcher={sw} />} model={(sw) => <ByLocation data={data} switcher={sw} />} />
+                  <UnusualCard data={data} />
                   <PeakTimingCard data={data} v="precip" />
+                  <RunTrendCard data={data} vars={["precip"]} />
                   <MapCard title="Precipitation maps" description="Each model on its own grid, then the mean and spread on a common grid."
                     map={{ req: { mode: "totals", variable: "spread", days: 7 }, label: "Model spread on the map" }}
                     tabs={[
@@ -296,7 +300,7 @@ export default function App() {
                 { id: "forecast", title: GROUP_TITLES.forecast, show: true, children: <>
                   <RiversCard data={data} />
                   <ArCard data={data} />
-                  <OddsCard data={data} />
+                  <OddsCard data={data} vars={["rain24", "rain72", "snow24"]} title="Odds of heavy rain and snow" />
                 </> },
                 { id: "observed", title: GROUP_TITLES.observed, show: data.landslide?.points.length, children: <LandslideCard data={data} /> },
               ]} />
@@ -312,6 +316,8 @@ export default function App() {
                   <WindPeaks data={data} />
                   <LocationViews day={(sw) => <WindByDayCard data={data} switcher={sw} />} model={(sw) => <WindByLocation data={data} switcher={sw} />} />
                   <PeakTimingCard data={data} v="gust" />
+                  <OddsCard data={data} vars={["gust"]} title="Odds of strong gusts" />
+                  <RunTrendCard data={data} vars={["gust"]} />
                   <GradientsCard data={data} />
                   <MapCard title="Wind and gust maps" description="The strongest sustained wind and gust in each model."
                     map={{ req: { mode: "totals", variable: "wind", days: 7 }, label: "Strongest wind on the map" }}
@@ -347,6 +353,7 @@ export default function App() {
                   <SnowLevelCard data={data} />
                   <RainByDayCard data={data} only="snow" />
                   <PeakTimingCard data={data} v="snow" />
+                  <RunTrendCard data={data} vars={["snow"]} />
                   <AvalancheCard data={data} />
                   <MapCard title="Snowfall maps" description="From each model's own snow field; models without one are left out."
                     tabs={[
@@ -369,6 +376,7 @@ export default function App() {
               <Groups tab="temp" groups={[
                 { id: "forecast", title: GROUP_TITLES.forecast, show: true, children: <>
                   <TempDepartureCard data={data} />
+                  <RunTrendCard data={data} vars={["tmax", "tmin"]} />
                   <MapCard title="High and low temperature maps" description="The highest and lowest 2 m temperature in each model."
                     map={{ req: { mode: "totals", variable: "tmax", days: 7 }, label: "Highs and lows on the map" }}
                     tabs={[...pickExtremes(data, "short", "the next 48 hours", ["tmax", "tmin"], " (48 h)"),

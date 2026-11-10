@@ -5,7 +5,7 @@ import { Takeaway } from "@/components/Takeaway"
 import { extreme } from "@/components/Takeaway"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { TDEP, TEMP } from "@/lib/ramps"
-import { coreModels, DayMatrix, HatchKey, dayLabel, listNames, MEDIAN, type MatrixRow, ModelPick, modelDays, modelsWith, RampStrip, rampCell, regionDays, usePick } from "@/sections/DayMatrix"
+import { coreModels, skillNote, skillWeights, weightedMedian, DayMatrix, HatchKey, dayLabel, listNames, MEDIAN, type MatrixRow, ModelPick, modelDays, modelsWith, RampStrip, rampCell, regionDays, usePick } from "@/sections/DayMatrix"
 import type { Briefing, N } from "@/types"
 import { MapButton } from "@/components/MapButton"
 
@@ -41,7 +41,8 @@ export function TempDepartureCard({ data }: { data: Briefing }) {
   const [win, setWin] = React.useState<number>(() => td?.windows.find((w) => w.days === 7)?.days ?? td?.windows[0]?.days ?? 7)
   const models = React.useMemo(() => modelsWith(data, KEY[v]), [data, v])
   const core = React.useMemo(() => coreModels(data, models), [data, models])
-  const { pick, model, setPick, only } = usePick(models, core)
+  const skillAll = React.useMemo(() => skillWeights(data, "temp"), [data])
+  const { pick, model, setPick, only, skill } = usePick(models, core, skillAll)
   if (!td) return null
   const w = td.windows.find((x) => x.days === win) ?? td.windows[0]
   const nd = td.dates.length
@@ -54,10 +55,12 @@ export function TempDepartureCard({ data }: { data: Briefing }) {
     const h = xs.length >> 1
     return xs.length % 2 ? xs[h] : (xs[h - 1] + xs[h]) / 2
   })
-  const actual = (p: string): N[] => model ? modelDays(model, p, KEY[v], nd) : only ? coreMedian(p) : (td.points[p]?.[v]?.forecast ?? []).slice(0, nd)
+  const skillMedian = (p: string): N[] => Array.from({ length: nd }, (_, k) =>
+    weightedMedian(models.flatMap((m) => { const x = modelDays(m, p, KEY[v], nd)[k]; return x == null ? [] : [[x, skill!.weight(m.label, k)] as [number, number]] })))
+  const actual = (p: string): N[] => model ? modelDays(model, p, KEY[v], nd) : only ? coreMedian(p) : skill ? skillMedian(p) : (td.points[p]?.[v]?.forecast ?? []).slice(0, nd)
   const byPoint = Object.fromEntries(data.points.map((p) => {
     if (show === "actual") return [p.name, actual(p.name)]
-    if (!model && !only) return [p.name, td.points[p.name]?.[v]?.departure ?? []]
+    if (!model && !only && !skill) return [p.name, td.points[p.name]?.[v]?.departure ?? []]
     return [p.name, actual(p.name).map((x, k) => { const n = normal(p.name, k); return x != null && n != null ? x - n : null })]
   })) as Record<string, N[]>
   const lead = (days: N[]) => mean(days.slice(0, w.days))
@@ -98,7 +101,7 @@ export function TempDepartureCard({ data }: { data: Briefing }) {
         <CardTitle>{show === "dep" ? "Temperatures vs normal" : "Daily temperatures"}</CardTitle>
         <Takeaway>{takeaway}</Takeaway>
         <CardDescription>
-          {model ? `${model.label}'s` : only ? `Each location's median of ${listNames(only)}` : "Each location's multi-model median"} daily {WORD[v]}{" "}
+          {model ? `${model.label}'s` : skill ? "Each location's skill-weighted median" : only ? `Each location's median of ${listNames(only)}` : "Each location's multi-model median"} daily {WORD[v]}{" "}
           {show === "dep" ? "against its 1991 – 2020 normal for the date (PRISM)" : "temperature"}{model && `, out to day ${model.days}`}.
           {" "}Region rows average their locations.
         </CardDescription>
@@ -112,7 +115,7 @@ export function TempDepartureCard({ data }: { data: Briefing }) {
           <Tabs value={show} onValueChange={(x) => setShow(x as Show)}>
             <TabsList><TabsTrigger value="dep">Vs normal</TabsTrigger><TabsTrigger value="actual">Actual</TabsTrigger></TabsList>
           </Tabs>
-          <ModelPick models={models} value={pick} onChange={setPick} core={core} />
+          <ModelPick models={models} value={pick} onChange={setPick} core={core} skill={skillAll} />
         </div>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <Tabs value={String(w.days)} onValueChange={(x) => setWin(Number(x))}>
@@ -124,7 +127,7 @@ export function TempDepartureCard({ data }: { data: Briefing }) {
           style={show === "dep" ? depCell : (x) => rampCell(x, TEMP)} fmt={show === "dep" ? (x) => signed(x) : deg} tip={tip} flag={model ? undefined : farApart} />
         <p className="text-xs text-muted-foreground">
           <HatchKey what="Hatched: models 10°F+ apart" />{" "}
-          Days past the selected window are shown too; the average covers only the window. Each day runs 4 AM to 4 AM
+          {skill && <>{skillNote(skill)} </>}Days past the selected window are shown too; the average covers only the window. Each day runs 4 AM to 4 AM
           Pacific, which holds the day's afternoon high and early-morning low.
           {show === "dep" && noNormal.length > 0 && ` PRISM normals cover the US only, so ${noNormal.join(", ")} ${noNormal.length > 1 ? "have" : "has"} no departure.`}
           {" "}The interactive map's Summary mode has the gridded version under “Temperature vs normal”.

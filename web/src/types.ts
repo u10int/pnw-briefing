@@ -233,6 +233,16 @@ export interface PointOdds {
   thresholds: { rain24: N; rain72: N; snow24: N }
   rain24?: N[]; rain72?: N[]; snow24?: N[]; rain24N?: number[]; rain72N?: number[]; snow24N?: number[]
 }
+/** Each location's station history: the wettest 1-, 3- and 7-day stretch in each past year over
+ *  the same part of the year (from – to, MM-DD). */
+export interface ClimoPoint { station: string; sid: string; elev_ft: N; years: number[]; max: Record<string, N[]> }
+export interface Climo { from: string; to: string; spans: number[]; source: string; points: Record<string, ClimoPoint> }
+/** NBM's own exceedance chances (percent) at fixed amounts: per variable, one row per threshold, one value per day. */
+export interface NbmOdds {
+  run: string; dates: string[]; source: string
+  variables: { key: "rain24" | "rain72" | "gust"; label: string; unit: "in" | "mph"; thresholds: number[] }[]
+  points: Record<string, Partial<Record<"rain24" | "rain72" | "gust", N[][]>>>
+}
 export interface Odds { dates: string[]; ensembles: { label: string; members: number; snow: boolean }[]; points: Record<string, PointOdds> }
 export interface ObservedStat { obs: N; normal: N; pct: N }
 export interface Observed {
@@ -289,11 +299,14 @@ export interface Briefing {
   verification?: Verification | null                   // recent forecasts scored against MRMS; absent before it was added
   tempVerification?: TempVerification | null           // recent highs and lows scored against URMA; absent before it was added
   // each region's value over the last few briefings, on dates they all share (oldest run first)
-  trendHistory?: { windows: { days: number; from: string; to: string; nDays: number; runs: (string | null)[]; regions: Record<string, ByVar<(number | null)[]>> }[] }
+  trendHistory?: { windows: { days: number; from: string; to: string; nDays: number; runs: (string | null)[]; regions: Record<string, ByVar<(number | null)[]>>
+    points?: Record<string, ByVar<(TrendStat | null)[]>> }[] }   // points: added with the run-to-run cards
   ar?: AtmosphericRivers | null
   gradients?: Gradient[]
   snowLevel?: SnowLevel | null
   odds?: Odds | null
+  climo?: Climo | null                                 // absent before station histories were added
+  nbmOdds?: NbmOdds | null                             // absent before NBM probabilities were added
   observed?: Observed | null
   snowpack?: Snowpack | null
   outlooks?: Outlooks | null
