@@ -1,7 +1,7 @@
 import * as React from "react"
 
 import { dayStats } from "@/sections/DayMatrix"
-import type { Briefing, N } from "@/types"
+import type { Briefing, N, TrendChangeVar, TrendVar } from "@/types"
 import { arEpisodes, type HazardTab, watchGust, windLevels } from "@/sections/Hazards"
 import { ptDay } from "@/lib/format"
 
@@ -14,7 +14,8 @@ export interface Spark {
   threshold?: { value: number; label: string }
   unit?: string
 }
-export interface Visual { value: string; unit?: string; caption: string; aside?: string; spark?: Spark }
+/** `change`: how the figure moved since the last update (over the days both briefings cover). */
+export interface Visual { value: string; unit?: string; caption: string; aside?: string; spark?: Spark; change?: { c: TrendChangeVar; k: TrendVar; days: number } }
 
 const PT = "America/Los_Angeles"
 const day = (t: number) => ptDay(t)
@@ -118,6 +119,20 @@ export function hazardVisuals(d: Briefing): Partial<Record<HazardTab, Visual>> {
         spark: { unit: "°F", diverging: true, series: [{ values: (td.regions[r0.id]?.tmax ?? []).slice(0, d.dates.length), color: "" }] },
       }
     }
+  }
+  // since the last update: the same figure in yesterday's briefing, over the days both cover
+  const ch = d.change
+  if (ch) {
+    const w7 = ch.windows.find((w) => w.days === 7)
+    const r0p = d.regions[0] && w7?.regions[d.regions[0].id]
+    if (out.precip && r0p) out.precip.change = { c: r0p, k: "precip", days: w7!.overlapDays }
+    const tw = ch.trends?.windows ?? []
+    const long = [...tw].sort((a, b) => b.days - a.days)[0]
+    if (out.wind && g && long?.points[g.name]?.gust) out.wind.change = { c: long.points[g.name].gust!, k: "gust", days: long.overlapDays }
+    const sn = passes.length ? passes.map((n) => ({ n, v: (snow[n] ?? []).map((x) => x.med).filter(fin).reduce((a, b) => a + b, 0) })).sort((a, b) => b.v - a.v)[0] : null
+    if (out.snow && sn && long?.points[sn.n]?.snow) out.snow.change = { c: long.points[sn.n].snow!, k: "snow", days: long.overlapDays }
+    const t7 = tw.find((w) => w.days === 7)
+    if (out.temp && d.regions[0] && t7?.regions[d.regions[0].id]?.tmax) out.temp.change = { c: t7.regions[d.regions[0].id].tmax!, k: "tmax", days: t7.overlapDays }
   }
   return out
 }

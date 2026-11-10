@@ -9,6 +9,7 @@ import { dateRange } from "@/lib/format"
 import { summarize } from "@/sections/Hazards"
 import { ChangedSince } from "@/sections/ChangedSince"
 import { ObservedHighlights } from "@/sections/ObsReports"
+import { AgreementBar, OverviewStrip } from "@/sections/OverviewStrip"
 import type { Briefing } from "@/types"
 
 const REGION_VAR: Record<string, string> = { wwa: "var(--wwa)", nwor: "var(--nwor)" }
@@ -40,6 +41,8 @@ function Hero({ data, children }: { data: Briefing; children: React.ReactNode })
     <div className="grid items-start gap-x-14 gap-y-8 lg:grid-cols-[minmax(0,1fr)_minmax(300px,380px)]">
       <div className="space-y-4">
         {children}
+        <AgreementBar data={data} />
+        <OverviewStrip data={data} />
         {data.meta.demo && <Badge variant="possible">Demo data, rendered from synthetic fields</Badge>}
       </div>
       <aside className="space-y-5 rounded-xl border bg-card p-5 empty:hidden">{side}</aside>

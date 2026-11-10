@@ -9,6 +9,7 @@ import { hazardVisuals, SparkBars } from "@/sections/HazardVisuals"
 import type { Briefing, Point, WindLevels } from "@/types"
 import { dateRange, ptDay } from "@/lib/format"
 import { dayStats } from "@/sections/DayMatrix"
+import { Chg, FLAT, fmtU } from "@/sections/Trends"
 
 export type HazardTab = "precip" | "flood" | "wind" | "coast" | "snow" | "temp"
 export type Tone = "quiet" | "watch" | "alert"
@@ -360,6 +361,11 @@ export function HazardStrip({ data, onOpen }: { data: Briefing; onOpen: (tab: Ha
                   <div className="flex items-baseline gap-1.5">
                     <span className="text-[2rem] leading-none font-semibold tracking-tight tabular-nums">{v.value}</span>
                     {v.unit && <span className="text-sm font-medium text-muted-foreground">{v.unit}</span>}
+                    {v.change && Math.abs(v.change.c.delta) >= FLAT[v.change.k] && (
+                      <span className="ml-auto self-center" title={`Since the last update, over the ${v.change.days} days both cover: ${fmtU(v.change.c.prev, v.change.k)} → ${fmtU(v.change.c.now, v.change.k)}`}>
+                        <Chg c={v.change.c} k={v.change.k} />
+                      </span>
+                    )}
                   </div>
                   <p className="mt-1.5 text-xs leading-snug text-muted-foreground">
                     <span className="text-foreground">{v.caption}</span>{v.aside && <span className="block">{v.aside}</span>}
