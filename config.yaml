@@ -249,6 +249,11 @@ snow_level_offset_ft: 1000
 # thresholds by place. Location odds use the impacts thresholds above.
 odds_map: {rain24_in: 1.0, rain72_in: 3.0}
 
+# NBM probabilities (nbmprob.py): the chances NBM itself publishes, at amounts it publishes
+# (24-hour rain in whole inches, 72-hour rain 3″ and 5″, gusts at its m/s steps of about
+# 39, 47, 55, 64 and 74 mph). gust_days: how many days of gusts to read (each day is 8 samples).
+nbm_odds: {enabled: true, rain24_in: [1, 2, 3], rain72_in: [3, 5], gust_mph: [39, 47, 55, 64], gust_days: 7}
+
 # Landslide risk: the USGS cumulative rainfall threshold for the Seattle area (OFR 2006-1064),
 # P3 >= 3.5 - 0.67 * P15 inches, run from observed rain into each model's forecast. It was
 # calibrated for Seattle and the nearby Puget Sound bluffs, so keep the list to that area.
@@ -289,6 +294,35 @@ obs_reports:
     Government Camp: {snotel: "651:OR:SNTL"}
     Vancouver BC: {asos: CYVR, eccc: "1108395"}
     Whistler BC: {asos: CWAE}
+
+# How unusual the totals are (climo.py): one long-record station per location, as an ACIS id
+# (GHCN where it has one). Its history ranks the forecast and recent totals against the same part
+# of past years: `before` days before the briefing's date to `after` days after.
+climo:
+  before: 30
+  after: 45
+  min_share: 0.8                # a year counts with at least this share of its window reported
+  min_years: 20
+  stations:
+    Bellingham: USW00024217       # Bellingham Intl AP, 1949 –
+    Everett: USW00024222          # Snohomish County AP (Paine Field), 1948 –
+    Seattle: USW00024233          # Sea-Tac, 1945 –
+    Tacoma: "458278 2"            # Tacoma No. 1, 1982 –
+    Olympia: USW00024227          # Olympia AP, 1941 –
+    Forks: USC00452914            # Forks 1 E, 1907 –
+    Aberdeen: USW00094225         # Hoquiam Bowerman AP, 1953 –
+    Stevens Pass: USS0021B01S     # Stevens Pass SNOTEL, 1982 –
+    Snoqualmie Pass: USW00024237  # Stampede Pass, 1944 – (3,959 ft, 10 miles south)
+    White Pass: USS0021C28S       # White Pass E.S. SNOTEL, 1980 –
+    Vancouver WA: USW00094298     # Pearson Field, 1998 –
+    Astoria: USW00094224          # Astoria AP, 1953 –
+    Tillamook: USC00358494        # Tillamook, 1948 – 2022
+    Portland: USW00024229         # Portland Intl AP, 1938 –
+    Salem: USW00024232            # Salem McNary Field, 1892 –
+    Corvallis: USC00351862        # Corvallis State University, 1893 –
+    Government Camp: USC00353402  # Government Camp, 1951 –
+    Vancouver BC: CA001108395     # Vancouver Intl A, 1937 – 2025
+    Whistler BC: CA001048898      # Whistler, 1976 – 2024
 
 # Coast and inland waters (coast.py). area groups rows on the page: "Outer coast", "Strait and
 # Puget Sound", "B.C. waters". near: the forecast location a row belongs with, if any.

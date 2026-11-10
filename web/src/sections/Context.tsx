@@ -11,7 +11,8 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { dateRange, dayShort, inch, issuedLabel, ptDay, ptDayHour } from "@/lib/format"
 import { pctCell } from "@/sections/Totals"
-import type { ArEvent, Avalanche, AvalancheDanger, Briefing, Gradient, Landslide, ModelSeries, N, PointOdds, Tier } from "@/types"
+import type { ArEvent, Avalanche, AvalancheDanger, Briefing, Gradient, Landslide, ModelSeries, N, NbmOdds, Tier } from "@/types"
+import { Takeaway } from "@/components/Takeaway"
 import { GRAD_COLORS, gradLevel, pairName, seriesAt } from "@/lib/gradients"
 import { arEpisodes, type Episode } from "@/sections/Hazards"
 import { contrastTextColor } from "@/lib/contrast"
@@ -657,74 +658,145 @@ function probCell(v: N) {
   return { background: PROB[i], color: contrastTextColor(PROB[i]) }
 }
 
-export function OddsCard({ data }: { data: Briefing }) {
-  const o = data.odds
-  const [key, setKey] = React.useState<OddsKey>("rain24")
-  if (!o) return null
-  const avail = ODDS.filter((d) => Object.values(o.points).some((p) => p[d.key]?.some((v) => v != null && v > 0) || (d.key !== "snow24" && p[d.key])))
-  const def = ODDS.find((d) => d.key === key) ?? ODDS[0]
+type OddsSource = "ens" | "nbm"
+type NbmKey = NbmOdds["variables"][number]["key"]
+const NBM_WHAT: Record<NbmKey, string> = {
+  rain24: "24-hour precipitation (4 AM – 4 AM) of at least",
+  rain72: "3-day precipitation ending that day of at least",
+  gust: "a gust of at least",
+}
+const amount = (v: number, unit: "in" | "mph") => (unit === "in" ? `${v}″` : `${v} mph`)
+
+/** Chances of reaching impact amounts at each location: the share of ensemble members reaching
+ *  the location's own thresholds, or NBM's calibrated probabilities at the amounts it publishes. */
+export function OddsCard({ data, vars, title = "Odds of impacts" }: { data: Briefing; vars?: (OddsKey | NbmKey)[]; title?: string }) {
+  const o = data.odds, nb = data.nbmOdds
+  const ensKeys = o ? ODDS.filter((d) => (!vars || vars.includes(d.key)) && Object.values(o.points).some((p) => p[d.key]?.some((v) => v != null && v > 0) || (d.key !== "snow24" && p[d.key]))) : []
+  const nbmVars = (nb?.variables ?? []).filter((v) => (!vars || vars.includes(v.key)) && v.thresholds.length && Object.values(nb!.points).some((p) => p[v.key]?.some((row) => row.some((x) => x != null))))
+  const sources = ([ensKeys.length ? "ens" : null, nbmVars.length ? "nbm" : null].filter(Boolean)) as OddsSource[]
+  const [srcSel, setSrc] = React.useState<OddsSource>("ens")
+  const [ensSel, setEns] = React.useState<OddsKey>("rain24")
+  const [nbmSel, setNbm] = React.useState<NbmKey>("rain24")
+  const [thrSel, setThr] = React.useState<Record<string, number>>({})
+  if (!sources.length) return null
+  const src = sources.includes(srcSel) ? srcSel : sources[0]
   const groups = [
     ...data.regions.map((r) => ({ name: r.name, pts: data.points.filter((p) => p.region === r.id) })),
     { name: "Other locations", pts: data.points.filter((p) => !data.regions.some((r) => r.id === p.region)) },
   ].filter((g) => g.pts.length)
-  const rowOf = (p: PointOdds | undefined) => p?.[key]
-  const total = o.ensembles.map((e) => `${e.label}, ${e.members} members`).join(" and ")
+
+  // the table's rows and columns for the chosen source
+  let dates: string[], cell: (name: string, i: number) => N, thrText: (name: string) => string | null, what: React.ReactNode, note: React.ReactNode
+  let mapReq: { variable: "p24" | "p72" } | null = null
+  let varTabs: React.ReactNode = null, thrTabs: React.ReactNode = null, label: string
+  if (src === "ens") {
+    const key = ensKeys.some((d) => d.key === ensSel) ? ensSel : ensKeys[0].key
+    const def = ODDS.find((d) => d.key === key)!
+    dates = o!.dates
+    cell = (n, i) => o!.points[n]?.[key]?.[i] ?? null
+    thrText = (n) => { const t = o!.points[n]?.thresholds[key]; return t == null ? "–" : `${t}″` }
+    label = def.label.toLowerCase()
+    what = <>Share of ensemble members ({o!.ensembles.map((e) => `${e.label}, ${e.members} members`).join(" and ")}, pooled) reaching each location's impact threshold: {def.what}.</>
+    note = <>Percent of members; blank under 5%. Thresholds are the impacts table's for lowland, coast and pass locations.
+      {key === "rain72" && " The first two days have no complete 3-day total."}
+      {key === "snow24" && " GEFS has no snowfall field, so snow odds come from ECMWF ENS alone."}
+      {" "}The interactive map's Summary mode has gridded odds for fixed amounts.</>
+    if (key !== "snow24") mapReq = { variable: key === "rain72" ? "p72" : "p24" }
+    if (ensKeys.length > 1) varTabs = (
+      <Tabs value={key} onValueChange={(v) => setEns(v as OddsKey)}>
+        <TabsList>{ensKeys.map((d) => <TabsTrigger key={d.key} value={d.key}>{d.label}</TabsTrigger>)}</TabsList>
+      </Tabs>
+    )
+  } else {
+    const v = nbmVars.find((x) => x.key === nbmSel) ?? nbmVars[0]
+    const ti = Math.min(thrSel[v.key] ?? (v.key === "gust" ? 1 : 0), v.thresholds.length - 1)
+    const t = v.thresholds[ti]
+    dates = nb!.dates
+    cell = (n, i) => nb!.points[n]?.[v.key]?.[ti]?.[i] ?? null
+    thrText = () => null
+    label = `${amount(t, v.unit)} ${v.key === "gust" ? "gusts" : v.key === "rain24" ? "in 24 h" : "in 72 h"}`
+    what = <>The National Blend of Models' own chance of {NBM_WHAT[v.key]} {amount(t, v.unit)} at each location ({ptDayHour(nb!.run)} run). NBM calibrates its blend against observations, so these are probabilities rather than a count of model runs.</>
+    note = <>Percent; blank under 5%. NBM publishes chances at fixed amounts, so these are the same for every location, unlike the ensemble tab's thresholds by kind of place.
+      {v.key === "gust" ? " Gust chances are for a single moment (sampled every 3 hours, then 6), the day's highest; the chance of a gust that strong at some point in the day runs higher."
+        : " NBM has no 24-hour snowfall chances."}
+      {v.key === "rain72" && " The first days without a complete 3-day total are blank."}</>
+    if (nbmVars.length > 1) varTabs = (
+      <Tabs value={v.key} onValueChange={(x) => setNbm(x as NbmKey)}>
+        <TabsList>{nbmVars.map((x) => <TabsTrigger key={x.key} value={x.key}>{x.label}</TabsTrigger>)}</TabsList>
+      </Tabs>
+    )
+    if (v.thresholds.length > 1) thrTabs = (
+      <Tabs value={String(ti)} onValueChange={(x) => setThr((s) => ({ ...s, [v.key]: Number(x) }))}>
+        <TabsList>{v.thresholds.map((x, i) => <TabsTrigger key={x} value={String(i)}>{v.unit === "in" ? `${x}″+` : `${x}+ mph`}</TabsTrigger>)}</TabsList>
+      </Tabs>
+    )
+  }
+  const showThr = src === "ens"
+  // NBM runs out at day 11 (gusts are read for the first week): leave off the empty days
+  const lastDay = dates.reduce((n, _d, i) => (data.points.some((p) => cell(p.name, i) != null) ? i : n), -1)
+  dates = dates.slice(0, lastDay + 1)
+
+  // the takeaway: the best chance in the first week
+  let best: { n: string; v: number; i: number } | null = null
+  for (const p of data.points) for (let i = 0; i < Math.min(7, dates.length); i++) {
+    const x = cell(p.name, i)
+    if (x != null && (!best || x > best.v)) best = { n: p.name, v: x, i }
+  }
+  const dayName = (d: string) => ptDay(`${d}T20:00:00Z`)
+  const takeaway = !best || best.v < 10 ? <>Under a 10% chance of {label} anywhere in the next week.</>
+    : <>Best chance: {best.n}, {best.v}% for {label}{src === "ens" ? ` (its ${thrText(best.n)} threshold)` : ""} {dayName(dates[best.i])}.</>
+
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Ensemble odds</CardTitle>
-        <CardDescription>
-          Share of ensemble members ({total}, pooled) reaching each location's impact threshold: {def.what}.
-        </CardDescription>
-        {key !== "snow24" && (
+        <CardTitle>{title}</CardTitle>
+        <Takeaway>{takeaway}</Takeaway>
+        <CardDescription>{what}</CardDescription>
+        {mapReq && (
           <CardAction>
-            <MapButton req={{ mode: "totals", variable: key === "rain72" ? "p72" : "p24", days: 7 }} label="Chances on the map" />
+            <MapButton req={{ mode: "totals", variable: mapReq.variable, days: 7 }} label="Chances on the map" />
           </CardAction>
         )}
       </CardHeader>
       <CardContent className="space-y-3">
-        {avail.length > 1 && (
-          <Tabs value={key} onValueChange={(v) => setKey(v as OddsKey)}>
-            <TabsList>{avail.map((d) => <TabsTrigger key={d.key} value={d.key}>{d.label}</TabsTrigger>)}</TabsList>
-          </Tabs>
+        {(sources.length > 1 || varTabs || thrTabs) && (
+          <div className="flex flex-wrap items-center gap-2">
+            {sources.length > 1 && (
+              <Tabs value={src} onValueChange={(x) => setSrc(x as OddsSource)}>
+                <TabsList><TabsTrigger value="ens">Ensembles</TabsTrigger><TabsTrigger value="nbm">NBM</TabsTrigger></TabsList>
+              </Tabs>
+            )}
+            {varTabs}
+            {thrTabs}
+          </div>
         )}
         <div className="overflow-x-auto">
         <Table className="min-w-[860px]">
           <TableHeader>
             <TableRow>
               <TableHead>Location</TableHead>
-              <TableHead className="text-right">Threshold</TableHead>
-              {o.dates.map((d) => <TableHead key={d} className="h-auto px-1 py-1.5 text-center text-xs"><DayHead day={d} /></TableHead>)}
+              {showThr && <TableHead className="text-right">Threshold</TableHead>}
+              {dates.map((d) => <TableHead key={d} className="h-auto px-1 py-1.5 text-center text-xs"><DayHead day={d} /></TableHead>)}
             </TableRow>
           </TableHeader>
           <TableBody>
             {groups.flatMap((g) => [
-              <TableRow key={g.name} className="hover:bg-transparent"><TableCell colSpan={o.dates.length + 2} className="pt-3 text-xs font-medium text-muted-foreground">{g.name}</TableCell></TableRow>,
-              ...g.pts.map((p) => {
-                const po = o.points[p.name]
-                const vals = rowOf(po)
-                const thr = po?.thresholds[key]
-                return (
-                  <TableRow key={p.name}>
-                    <TableCell className="whitespace-nowrap">{p.name}</TableCell>
-                    <TableCell className="text-right text-xs whitespace-nowrap text-muted-foreground tabular-nums">{thr == null ? "–" : `${thr}″`}</TableCell>
-                    {o.dates.map((d, i) => {
-                      const v = vals?.[i] ?? null
-                      return <TableCell key={d} className="px-1 text-center text-xs tabular-nums" style={probCell(v)}>{v == null ? "" : v < 5 ? "" : `${v}`}</TableCell>
-                    })}
-                  </TableRow>
-                )
-              }),
+              <TableRow key={g.name} className="hover:bg-transparent"><TableCell colSpan={dates.length + 2} className="pt-3 text-xs font-medium text-muted-foreground">{g.name}</TableCell></TableRow>,
+              ...g.pts.map((p) => (
+                <TableRow key={p.name}>
+                  <TableCell className="whitespace-nowrap">{p.name}</TableCell>
+                  {showThr && <TableCell className="text-right text-xs whitespace-nowrap text-muted-foreground tabular-nums">{thrText(p.name)}</TableCell>}
+                  {dates.map((d, i) => {
+                    const v = cell(p.name, i)
+                    return <TableCell key={d} className="px-1 text-center text-xs tabular-nums" style={probCell(v)}>{v == null ? "" : v < 5 ? "" : `${v}`}</TableCell>
+                  })}
+                </TableRow>
+              )),
             ])}
           </TableBody>
         </Table>
         </div>
-        <p className="mt-3 text-xs text-muted-foreground">
-          Percent of members; blank under 5%. Thresholds are the impacts table's for lowland, coast and pass locations.
-          {key === "rain72" && " The first two days have no complete 3-day total."}
-          {key === "snow24" && " GEFS has no snowfall field, so snow odds come from ECMWF ENS alone."}
-          {" "}The interactive map's Summary mode has gridded odds for fixed amounts.
-        </p>
+        <p className="mt-3 text-xs text-muted-foreground">{note}</p>
       </CardContent>
     </Card>
   )

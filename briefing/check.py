@@ -25,6 +25,7 @@ HOSTS = {
     "NWS API": "https://api.weather.gov/",
     "NOAA river forecasts (NWPS)": "https://api.water.noaa.gov/nwps/v1/gauges/MVEW1",
     "PRISM": "https://services.nacse.org/prism/data/public/normals/4km/ppt/01",
+    "ACIS station records": "https://data.rcc-acis.org/StnMeta?sids=USW00024233&meta=name",
 }
 
 

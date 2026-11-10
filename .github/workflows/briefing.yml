@@ -98,6 +98,13 @@ jobs:
           path: ~/.local/share/cartopy
           key: natural-earth-10m-v1
 
+      - name: Cache station histories
+        uses: actions/cache@v4
+        with:
+          path: .cache/climo
+          key: climo-${{ github.run_id }}
+          restore-keys: climo-          # the newest; climo.py refetches a station's record after a month
+
       - name: Cache PRISM normals
         uses: actions/cache@v4
         with:

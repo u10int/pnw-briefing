@@ -19,12 +19,12 @@ const COLS: { k: TrendVar; tab: Tab; head: string; sub: string }[] = [
 ]
 const WHAT: Record<TrendVar, string> = { precip: "Precipitation", snow: "Snowfall", gust: "Strongest gust", tmax: "Average high", tmin: "Average low" }
 const inches = (k: TrendVar) => k === "precip" || k === "snow"
-const fmt = (v: number, k: TrendVar) =>
+export const fmt = (v: number, k: TrendVar) =>
   inches(k) ? `${v >= 10 ? v.toFixed(0) : v.toFixed(v < 1 && k === "precip" ? 2 : 1).replace(/^0\./, ".")}″`
     : k === "gust" ? `${Math.round(v)}` : `${Math.round(v)}°`
-const fmtU = (v: number, k: TrendVar) => `${fmt(v, k)}${k === "gust" ? " mph" : ""}`
+export const fmtU = (v: number, k: TrendVar) => `${fmt(v, k)}${k === "gust" ? " mph" : ""}`
 // below these a change is noise and isn't shown
-const FLAT: Record<TrendVar, number> = { precip: 0.05, snow: 0.2, gust: 1, tmax: 0.5, tmin: 0.5 }
+export const FLAT: Record<TrendVar, number> = { precip: 0.05, snow: 0.2, gust: 1, tmax: 0.5, tmin: 0.5 }
 /** A change worth noticing: the cell gets a faint tint in the change's colour. */
 const big = (k: TrendVar, c: TrendChangeVar) =>
   k === "precip" ? Math.abs(c.delta) >= Math.max(0.1, 0.25 * Math.max(c.now, c.prev))
@@ -33,7 +33,7 @@ const big = (k: TrendVar, c: TrendChangeVar) =>
  *  gusts 15 mph apart, temperatures 8° apart. */
 const unsure = (k: TrendVar, s: TrendStat) =>
   inches(k) ? s.hi - s.lo >= Math.max(0.5, 1.5 * s.median) : k === "gust" ? s.hi - s.lo >= 15 : s.hi - s.lo >= 8
-const UP_COLOR: Record<TrendVar, [string, string]> = {          // [up, down]
+export const UP_COLOR: Record<TrendVar, [string, string]> = {          // [up, down]
   precip: ["var(--wetter)", "var(--drier)"], snow: ["var(--wetter)", "var(--drier)"],
   gust: ["#c2410c", "#0f766e"], tmax: ["#c0392b", "#2c6fbb"], tmin: ["#c0392b", "#2c6fbb"],   // gust: stronger orange, calmer teal
 }
@@ -45,7 +45,7 @@ const ask = <T,>(f: () => T, fallback: T): T => { try { return f() } catch { ret
 const STORE = "pnw-trends"
 
 /** The change since yesterday, compact: arrow and signed amount, coloured by direction. */
-function Chg({ c, k }: { c: TrendChangeVar | undefined; k: TrendVar }) {
+export function Chg({ c, k }: { c: TrendChangeVar | undefined; k: TrendVar }) {
   if (!c || Math.abs(c.delta) < FLAT[k]) return null
   const up = c.delta > 0
   const Icon = up ? ArrowUpRight : ArrowDownRight

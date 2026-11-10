@@ -16,8 +16,8 @@ from zoneinfo import ZoneInfo
 import numpy as np
 import yaml
 
-from . import (alerts, analysis, avalanche, change, coast, cogs, context, convective, extremes, fields, fronts, impacts, landslide,
-               maps, normals, observed, obsreports, odds, outlooks, report, rivers, snowpack, summary, tempdep, timing, trends, urma, verify, wildfire)
+from . import (alerts, analysis, avalanche, change, climo, coast, cogs, context, convective, extremes, fields, fronts, impacts, landslide,
+               maps, nbmprob, normals, observed, obsreports, odds, outlooks, report, rivers, snowpack, summary, tempdep, timing, trends, urma, verify, wildfire)
 from .grib import day0, day12, first_day_hours
 
 ROOT = Path(__file__).resolve().parent
@@ -241,6 +241,10 @@ def collect(cfg: dict, out: Path, demo: bool = False, products: bool = True) -> 
         "gradients": grads,
         "snowLevel": snow_lvl,
         "odds": ens_odds,
+        # each location's station history over this part of the year, to rank totals against
+        "climo": safe("station histories", lambda: climo.fetch(cfg, day12(start).date(), demo)) if products else None,
+        # the National Blend's own calibrated chances of heavy rain and strong gusts at each location
+        "nbmOdds": safe("NBM probabilities", lambda: nbmprob.fetch(cfg, start, models[0]["dates"], demo, models)) if products else None,
         "observed": obs,
         "landslide": slide,
         "avalanche": safe("avalanche danger", lambda: avalanche.fetch(cfg, demo)) if products else None,

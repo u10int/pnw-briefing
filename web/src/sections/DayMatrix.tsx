@@ -45,16 +45,69 @@ const median = (xs: number[]) => {
   const s = [...xs].sort((a, b) => a - b), k = s.length >> 1
   return s.length % 2 ? s[k] : (s[k - 1] + s[k]) / 2
 }
-/** Each location's multi-model median per day, with the range across models. */
-export function dayStats(data: Briefing, key: DailyKey, only?: Model[]): Record<string, DayStat[]> {
+/** The median of values with weights: the value where the running weight passes half the total. */
+export function weightedMedian(xs: [number, number][]): N {
+  if (!xs.length) return null
+  const s = [...xs].sort((a, b) => a[0] - b[0])
+  const half = s.reduce((a, x) => a + x[1], 0) / 2
+  let acc = 0
+  for (let i = 0; i < s.length; i++) {
+    acc += s[i][1]
+    if (Math.abs(acc - half) < 1e-9 && i + 1 < s.length) return (s[i][0] + s[i + 1][0]) / 2
+    if (acc > half) return s[i][0]
+  }
+  return s[s.length - 1][0]
+}
+
+/** Each location's multi-model median per day, with the range across models; with `skill`, the
+ *  median weights each model by its recent skill at that lead. */
+export function dayStats(data: Briefing, key: DailyKey, only?: Model[], skill?: Skill | null): Record<string, DayStat[]> {
   const nd = data.dates.length, out: Record<string, DayStat[]> = {}
   for (const p of data.points) {
     out[p.name] = Array.from({ length: nd }, (_, k) => {
-      const xs = (only ?? data.models).map((m) => m.data[p.name]?.[key]?.[k]).filter(finite)
-      return { med: median(xs), lo: xs.length ? Math.min(...xs) : null, hi: xs.length ? Math.max(...xs) : null, n: xs.length }
+      const ms = (only ?? data.models).filter((m) => finite(m.data[p.name]?.[key]?.[k]))
+      const xs = ms.map((m) => m.data[p.name]![key]![k] as number)
+      const med = skill ? weightedMedian(ms.map((m, i) => [xs[i], skill.weight(m.label, k)])) : median(xs)
+      return { med, lo: xs.length ? Math.min(...xs) : null, hi: xs.length ? Math.max(...xs) : null, n: xs.length }
     })
   }
   return out
+}
+
+// ------------------------------------------------------------------ skill weights
+
+/** The median weighted by each model's recent skill. */
+export const SKILL = "skill"
+export interface Skill {
+  /** A model's weight for briefing day k (1 is average; unscored models get 1). */
+  weight: (model: string, k: number) => number
+  kind: "precip" | "temp"; days: number; from: string; to: string
+  /** each scored model's weight by lead group, for the explanation */
+  table: { model: string; w: Record<string, number> }[]
+}
+const leadGroup = (k: number) => (k === 0 ? "d1" : k <= 2 ? "d23" : "d47")
+/** Weights from the verification cards: a model's typical error against the median model's, at
+ *  each lead group, squared (as for inverse-variance weights), pulled toward 1 when only a few
+ *  days are scored, and kept within ¼ – 4. Precipitation uses MRMS verification, temperature URMA. */
+export function skillWeights(data: Briefing, kind: "precip" | "temp"): Skill | null {
+  const v = kind === "precip" ? data.verification : data.tempVerification
+  if (!v || v.models.length < 3) return null
+  const groups = ["d1", "d23", "d47"]
+  const table: Skill["table"] = v.models.map((m) => ({ model: m.model, w: {} }))
+  for (const g of groups) {
+    const sc = v.models.map((m) => m.scores[g]).filter((x): x is NonNullable<typeof x> => !!x && x.mae > 0)
+    if (sc.length < 3) continue
+    const mid = median(sc.map((x) => x.mae))!
+    v.models.forEach((m, i) => {
+      const x = m.scores[g]
+      if (!x || !(x.mae > 0)) return
+      const shrink = x.days / (x.days + 5)
+      table[i].w[g] = Math.min(4, Math.max(0.25, Math.pow(mid / x.mae, 2 * shrink)))
+    })
+  }
+  if (!table.some((t) => Object.keys(t.w).length)) return null
+  const at = Object.fromEntries(table.map((t) => [t.model, t.w]))
+  return { weight: (m, k) => at[m]?.[leadGroup(k)] ?? 1, kind, days: v.nDays, from: v.from, to: v.to, table: table.filter((t) => Object.keys(t.w).length) }
 }
 
 /** Mean (or max, or min) across a region's locations, per day. */
@@ -70,7 +123,7 @@ export function regionDays(data: Briefing, region: string, byPoint: Record<strin
 const TIER_LABEL: Record<string, string> = { regional: "Regional", blend: "Blend", global: "Global" }
 
 /** "Model median", then each model with data, grouped by tier, with how many days it covers. */
-export function ModelPick({ models, value, onChange, core }: { models: Model[]; value: string; onChange: (v: string) => void; core?: Model[] }) {
+export function ModelPick({ models, value, onChange, core, skill }: { models: Model[]; value: string; onChange: (v: string) => void; core?: Model[]; skill?: Skill | null }) {
   const tiers = ["regional", "blend", "global"].map((t) => [t, models.filter((m) => m.tier === t)] as const).filter(([, ms]) => ms.length)
   return (
     <Select value={value} onValueChange={onChange}>
@@ -80,6 +133,7 @@ export function ModelPick({ models, value, onChange, core }: { models: Model[]; 
         {core && core.length >= 2 && (
           <SelectItem value={CORE}>Core median<span className="text-muted-foreground"> · {core.map((m) => m.label.replace(/^ECMWF /, "")).join(", ")}</span></SelectItem>
         )}
+        {skill && <SelectItem value={SKILL}>Skill-weighted median</SelectItem>}
         <SelectSeparator />
         {tiers.map(([t, ms]) => (
           <SelectGroup key={t}>
@@ -97,11 +151,19 @@ export function ModelPick({ models, value, onChange, core }: { models: Model[]; 
 }
 
 /** The picked model, falling back to the median when it isn't in this briefing (or has no data). */
-export function usePick(models: Model[], core?: Model[]) {
+export function usePick(models: Model[], core?: Model[], skill?: Skill | null) {
   const [pick, setPick] = React.useState(MEDIAN)
   const model = models.find((m) => m.label === pick)
   const useCore = pick === CORE && (core?.length ?? 0) >= 2
-  return { pick: model ? pick : useCore ? CORE : MEDIAN, model, setPick, only: useCore ? core : undefined }
+  const useSkill = pick === SKILL && !!skill
+  return { pick: model ? pick : useCore ? CORE : useSkill ? SKILL : MEDIAN, model, setPick, only: useCore ? core : undefined, skill: useSkill ? skill : null }
+}
+
+/** One line on what the skill weights did: the most and least trusted models. */
+export function skillNote(s: Skill) {
+  const avg = s.table.map((t) => ({ m: t.model, w: Object.values(t.w).reduce((a, b) => a + b, 0) / Object.values(t.w).length })).sort((a, b) => b.w - a.w)
+  const f = (x: { m: string; w: number }) => `${x.m} ×${x.w.toFixed(1)}`
+  return `Weights from each model's typical error against ${s.kind === "precip" ? "MRMS precipitation" : "URMA highs and lows"} over the last ${s.days} days, by lead: most weight ${avg.slice(0, 2).map(f).join(", ")}; least ${avg.slice(-2).reverse().map(f).join(", ")}. Models not yet scored count as average.`
 }
 
 /** Text that stays legible on a cell colour. */
@@ -146,7 +208,7 @@ export function hatchOn(style: React.CSSProperties): React.CSSProperties {
 }
 
 /** Narrow screens: region rows start collapsed, and open to their locations. */
-function useNarrow() {
+export function useNarrow() {
   const q = "(max-width: 639px)"
   const [narrow, setNarrow] = React.useState(() => typeof window !== "undefined" && window.matchMedia?.(q).matches)
   React.useEffect(() => {
