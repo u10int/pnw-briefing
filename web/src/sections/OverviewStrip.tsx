@@ -51,20 +51,20 @@ export function OverviewStrip({ data }: { data: Briefing }) {
   const dates = data.dates
   const rows = ROWS.map((r) => ({ ...r, es: data.events.filter((e) => r.match(e.hazard)) })).filter((r) => r.es.length)
   const top = Math.max(0.25, ...rain.map((x) => x ?? 0))
-  // dot area grows with the amount, up to 14 px across for the wettest day
-  const dot = (v: number | null) => (v == null || v < 0.01 ? 0 : 3 + 11 * Math.sqrt(v / top))
+  // dot area grows with the amount, up to 18 px across for the wettest day
+  const dot = (v: number | null) => (v == null || v < 0.01 ? 0 : 4 + 14 * Math.sqrt(v / top))
   const cols = `var(--lab) repeat(${dates.length}, minmax(0, 1fr))`
   const isLead = (d: string) => !!lead && inDay(lead, d)
   const SHADE = "bg-foreground/[0.06]"
 
   return (
     <div className="space-y-1.5 pt-2" role="img" aria-label="The next two weeks: daily rain and the days each hazard is flagged">
-      <div className="grid items-center gap-x-[3px] [--lab:76px] sm:[--lab:92px]" style={{ gridTemplateColumns: cols }}>
-        <div className="truncate pr-2 text-[11px] leading-6 text-muted-foreground">Rain</div>
+      <div className="grid items-center gap-x-[3px] [--lab:80px] sm:[--lab:100px]" style={{ gridTemplateColumns: cols }}>
+        <div className="truncate pr-2 text-xs leading-9 text-muted-foreground">Rain</div>
         {dates.map((d, k) => (
           <Tooltip key={d}>
             <TooltipTrigger asChild>
-              <div tabIndex={0} className={`flex h-6 items-center justify-center outline-none focus-visible:bg-muted ${isLead(d) ? SHADE : ""}`}>
+              <div tabIndex={0} className={`flex h-9 items-center justify-center outline-none focus-visible:bg-muted ${isLead(d) ? SHADE : ""}`}>
                 {dot(rain[k]) > 0 && <span className="rounded-full bg-foreground" style={{ width: dot(rain[k]), height: dot(rain[k]) }} />}
               </div>
             </TooltipTrigger>
@@ -77,12 +77,12 @@ export function OverviewStrip({ data }: { data: Briefing }) {
         ))}
         {rows.map((r) => (
           <React.Fragment key={r.key}>
-            <div className="truncate pr-2 text-[11px] leading-5 text-muted-foreground">{r.label}</div>
+            <div className="truncate pr-2 text-xs leading-7 text-muted-foreground">{r.label}</div>
             {dates.map((d) => {
               const l = lvl(r.es.filter((e) => inDay(e, d)))
               return (
-                <div key={d} className={`flex h-5 items-center justify-center ${isLead(d) ? SHADE : ""}`}>
-                  {l && <span className={`size-2 rounded-full ${l === "likely" ? "bg-foreground" : "border-[1.5px] border-foreground/70"}`} />}
+                <div key={d} className={`flex h-7 items-center justify-center ${isLead(d) ? SHADE : ""}`}>
+                  {l && <span className={`size-2.5 rounded-full ${l === "likely" ? "bg-foreground" : "border-[1.5px] border-foreground/70"}`} />}
                 </div>
               )
             })}
@@ -93,7 +93,7 @@ export function OverviewStrip({ data }: { data: Briefing }) {
           const t = new Date(`${d}T20:00:00Z`)
           const wd = t.toLocaleDateString("en-US", { weekday: "narrow", timeZone: "America/Los_Angeles" })
           return (
-            <div key={d} className="border-t pt-1 text-center text-[10.5px] leading-tight text-muted-foreground tabular-nums">
+            <div key={d} className="border-t pt-1.5 text-center text-[11px] leading-tight text-muted-foreground tabular-nums">
               {k === 0 ? <span className="font-medium text-foreground"><span className="sm:hidden">{wd}</span><span className="max-sm:hidden">Today</span></span> : wd}
               <span className="block max-sm:hidden">{t.toLocaleDateString("en-US", { month: "numeric", day: "numeric", timeZone: "America/Los_Angeles" })}</span>
             </div>

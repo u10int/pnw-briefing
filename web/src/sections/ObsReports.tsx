@@ -252,20 +252,22 @@ export function ObservedHighlights({ data }: { data: Briefing }) {
   const groups = React.useMemo(() => {
     if (!o) return []
     const sum = (xs: N[]) => xs.filter((x): x is number => x != null).reduce((a, b) => a + b, 0)
-    const top = (f: (r: ObsReports["points"][string]) => number) =>
-      Object.entries(o.points).map(([n, r]) => ({ n, v: f(r) })).filter((x) => x.v > 0).sort((a, b) => b.v - a.v).slice(0, 3)
+    // only what's worth noting: measurable rain, half an inch of snow, gusts of 25 mph or more
+    const top = (f: (r: ObsReports["points"][string]) => number, min: number) =>
+      Object.entries(o.points).map(([n, r]) => ({ n, v: f(r) })).filter((x) => x.v >= min).sort((a, b) => b.v - a.v).slice(0, 3)
     return [
-      { key: "precip", title: "Most rain", rows: top((r) => sum(r.precip)), color: "#2563c9", fmt: (v: number) => `${v.toFixed(2)}″` },
-      { key: "snow", title: "Most new snow", rows: top((r) => sum(r.snow)), color: "#6553cf", fmt: (v: number) => `${Math.round(v)}″` },
-      { key: "gust", title: "Strongest gusts", rows: top((r) => Math.max(0, ...r.gust.filter((x): x is number => x != null))), color: "#4b98b8", fmt: (v: number) => `${Math.round(v)} mph` },
+      { key: "precip", title: "Most rain", rows: top((r) => sum(r.precip), 0.01), color: "#2563c9", fmt: (v: number) => `${v.toFixed(2)}″` },
+      { key: "snow", title: "Most new snow", rows: top((r) => sum(r.snow), 0.5), color: "#6553cf", fmt: (v: number) => `${Math.round(v)}″` },
+      { key: "gust", title: "Strongest gusts", rows: top((r) => Math.max(0, ...r.gust.filter((x): x is number => x != null)), 25), color: "#4b98b8", fmt: (v: number) => `${Math.round(v)} mph` },
     ].filter((g) => g.rows.length)
   }, [o])
-  if (!o || !groups.length) return null
+  if (!o) return null
   return (
-    <section className="space-y-3">
+    <section className="space-y-2.5">
       <h2 className="text-sm font-semibold">Observed lately <span className="font-normal text-muted-foreground">· last {o.days.length - 1} days and today</span></h2>
+      {!groups.length && <p className="text-[13px] text-muted-foreground">Quiet: no measurable rain or snow, and no gusts of 25 mph or more, at the locations' stations.</p>}
       {groups.map((g) => (
-        <div key={g.key} className="space-y-1">
+        <div key={g.key} className="space-y-0.5">
           <p className="text-[12px] text-muted-foreground">{g.title}</p>
           {g.rows.map((x) => (
             <div key={x.n} className="grid grid-cols-[112px_minmax(0,1fr)_56px] items-center gap-2 text-[12.5px]">
@@ -276,7 +278,7 @@ export function ObservedHighlights({ data }: { data: Briefing }) {
           ))}
         </div>
       ))}
-      <p className="text-[11px] text-muted-foreground">At each location's station; today is so far.</p>
+      {groups.length > 0 && <p className="text-[11px] text-muted-foreground">At each location's station; today is so far.</p>}
     </section>
   )
 }

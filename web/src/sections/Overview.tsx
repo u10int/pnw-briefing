@@ -36,16 +36,22 @@ function Overview({ data }: { data: Briefing }) {
 /** The headline and lead on the left; what changed since the last update and what's been
  *  observed beside them on wide screens (below on narrow ones). */
 function Hero({ data, children }: { data: Briefing; children: React.ReactNode }) {
+  // the panel only when there's an earlier briefing to compare with or station observations
+  const hasSide = !!data.change?.prevIssued || !!data.obsReports
   const side = [<ChangedSince key="c" data={data} />, <ObservedHighlights key="o" data={data} />]
   return (
-    <div className="grid items-start gap-x-14 gap-y-8 lg:grid-cols-[minmax(0,1fr)_minmax(300px,380px)]">
-      <div className="space-y-4">
+    // the left column stretches to the panel's height with the strip at its foot, so the two
+    // columns end together instead of leaving a gap under the strip
+    <div className={`grid gap-x-14 gap-y-8 ${hasSide ? "lg:grid-cols-[minmax(0,1fr)_minmax(300px,380px)]" : ""}`}>
+      <div className="flex flex-col gap-4">
         {children}
-        <AgreementBar data={data} />
-        <OverviewStrip data={data} />
-        {data.meta.demo && <Badge variant="possible">Demo data, rendered from synthetic fields</Badge>}
+        {data.meta.demo && <div><Badge variant="possible">Demo data, rendered from synthetic fields</Badge></div>}
+        <div className="space-y-3 lg:mt-auto lg:pt-4">
+          <AgreementBar data={data} />
+          <OverviewStrip data={data} />
+        </div>
       </div>
-      <aside className="space-y-5 rounded-xl border bg-card p-5 empty:hidden">{side}</aside>
+      {hasSide && <aside className="space-y-5 self-start rounded-xl border bg-card p-5">{side}</aside>}
     </div>
   )
 }
