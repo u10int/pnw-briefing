@@ -1,7 +1,8 @@
 /** "Open on map" links: any card can ask the page to switch to the Map tab with a given mode and
  *  layer. The page listens, switches tabs, and hands the request to the map. */
 export interface MapRequest {
-  mode: "totals" | "hourly"
+  /** left out: keep whatever the map is showing (for a request that only turns overlays on) */
+  mode?: "totals" | "hourly"
   layer?: "radar" | "apcp" | "asnow" | "t2m" | "gust" | "wind" | "frz" | "ivt" | "pgrad" | "rh" | "smoke"
   variable?: string
   days?: number
@@ -12,6 +13,8 @@ export interface MapRequest {
    *  trying `fallback` layers in turn when no model has `layer` that far out. */
   time?: string
   fallback?: NonNullable<MapRequest["layer"]>[]
+  /** overlays to turn on (others are left as they are) */
+  overlays?: { fronts?: boolean; nwsReports?: boolean; fires?: boolean }
 }
 
 const EVENT = "briefing:open-map"

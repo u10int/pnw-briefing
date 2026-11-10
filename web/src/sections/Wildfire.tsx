@@ -17,6 +17,7 @@ import { FUEL, HDW, RH, type Ramp, SMOKE, spcColor, USDM } from "@/lib/ramps"
 import { DayMatrix, dayLabel, dayStats, type MatrixRow, ModelPick, modelDays, modelsWith, RampStrip, rampCell, regionDays, usePick } from "@/sections/DayMatrix"
 import type { Briefing, N, PsaDay, Wildfire } from "@/types"
 import { dayMD, ptDay, ptDayHour } from "@/lib/format"
+import { MapButton } from "@/components/MapButton"
 
 const WildfireMap = React.lazy(() => import("@/sections/WildfireMap"))
 
@@ -241,6 +242,7 @@ export function FireWeatherByDayCard({ data }: { data: Briefing }) {
           {model ? `${model.label}'s` : "Each location's multi-model median"} {FWORD[v]} for each 12Z – 12Z day
           {model && `, out to day ${model.days}`}. Region rows show their {lowIsBad ? "driest" : "worst"} location.
         </CardDescription>
+        <CardAction className="flex flex-wrap gap-2"><MapButton req={{ mode: "hourly", layer: "rh" }} label="Humidity on the map" /><MapButton req={{ mode: "hourly", layer: "smoke" }} label="Smoke on the map" /></CardAction>
       </CardHeader>
       <CardContent className="space-y-3">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-3">

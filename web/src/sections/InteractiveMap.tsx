@@ -28,7 +28,7 @@ import { ParticleLayer, type WindDraw } from "@/lib/gl/particle-layer"
 import { type Grid, sameGrid } from "@/lib/gl/util"
 import { AR_COLORS, AR_LABELS, FLOOD_COLORS, FLOOD_LABELS, FRZ, GUST, IVT, legendBins, PCT, PGRAD, PRECIP, PROB, PTYPE_COLORS, PTYPE_NAMES, type Ramp, REFC, RH, SMOKE, SNOW, SPREAD, TDEP, TEMP, WIND } from "@/lib/ramps"
 import { contrastTextColor } from "@/lib/contrast"
-import type { ArCoast, Briefing, Cog, Convective, ExtremeVar, FrontFrame, Fronts, ObsReport, RiverGauge, Rivers, FieldEntry, FieldsManifest, FieldVar, Gradient } from "@/types"
+import type { ArCoast, Briefing, Cog, Convective, ExtremeVar, FrontFrame, Fronts, ObsReport, RiverGauge, Wildfire, Rivers, FieldEntry, FieldsManifest, FieldVar, Gradient } from "@/types"
 import { ptDayHour } from "@/lib/format"
 import { liveReports } from "@/lib/obsreports"
 import { addFrontLayers, FRONT_COLORS, FRONT_LAYERS, frontFrame, frontGeoJSON } from "@/lib/fronts"
@@ -241,10 +241,11 @@ function chevronImage(): ImageData {
 
 type Status = { kind: "loading" | "ready" | "error" | "empty"; note?: string }
 
-function MapPane({ data, view, clock, opacity, smooth, particles, particleColor, sync, terrain, sat, fronts, reports }: {
+function MapPane({ data, view, clock, opacity, smooth, particles, particleColor, sync, terrain, sat, fronts, reports, fires }: {
   data: Briefing; view: View | null; clock: Clock; opacity: number; smooth: boolean
   particles: boolean; particleColor: [number, number, number, number]; sync: ReturnType<typeof useCameraSync>
   terrain: boolean; sat: { kind: SatKind; times: SatTimes } | null; fronts: Fronts | null; reports: ObsReport[] | null
+  fires: Wildfire | null
 }) {
   const el = React.useRef<HTMLDivElement>(null)
   const ready = React.useRef<Promise<maplibregl.Map> | null>(null)
@@ -358,6 +359,15 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
       // WPC fronts, over everything but the labels and markers (hidden until turned on); highs and
       // lows come from the models' own pressure fields
       addFrontLayers(m, labels)
+      // current fires: perimeters and incident dots sized by acres, hidden until turned on
+      m.addSource("fires", { type: "geojson", data: EMPTY })
+      m.addLayer({ id: "fire-perims", type: "fill", source: "fires", filter: ["==", ["geometry-type"], "Polygon"], layout: { visibility: "none" },
+        paint: { "fill-color": "#b3261e", "fill-opacity": 0.25 } }, labels)
+      m.addLayer({ id: "fire-perims-line", type: "line", source: "fires", filter: ["==", ["geometry-type"], "Polygon"], layout: { visibility: "none" },
+        paint: { "line-color": "#b3261e", "line-width": 1.2 } }, labels)
+      m.addLayer({ id: "fire-points", type: "circle", source: "fires", filter: ["==", ["geometry-type"], "Point"], layout: { visibility: "none" },
+        paint: { "circle-radius": ["interpolate", ["linear"], ["ln", ["max", ["get", "acres"], 1]], 0, 3, 11.5, 10],
+                 "circle-color": ["case", ["==", ["get", "rx"], 1], "#8a6d3b", "#e8590c"], "circle-stroke-color": "#fff", "circle-stroke-width": 1.5 } }, labels)
       // NWS reports (storm reports and report summaries), hidden until turned on
       m.addSource("nws-reports", { type: "geojson", data: EMPTY })
       m.addLayer({ id: "nws-reports", type: "circle", source: "nws-reports", layout: { visibility: "none" },
@@ -505,6 +515,23 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
     const unsub = clock.subscribe(update)
     return () => { stop = true; unsub(); hideAll() }
   }, [sat?.kind, sat?.times])
+
+  // current fires, not tied to the clock
+  React.useEffect(() => {
+    ready.current?.then((m) => {
+      const feats: GeoJSON.Feature[] = []
+      for (const f of fires?.perimeters?.features ?? []) {
+        const g = f.geometry
+        if (g?.type === "MultiPolygon") for (const c of g.coordinates) feats.push({ type: "Feature", properties: {}, geometry: { type: "Polygon", coordinates: c } })
+        else if (g?.type === "Polygon") feats.push({ type: "Feature", properties: {}, geometry: g })
+      }
+      for (const x of fires?.incidents ?? [])
+        feats.push({ type: "Feature", properties: { acres: x.acres ?? 0, rx: x.type === "Prescribed fire" ? 1 : 0 }, geometry: { type: "Point", coordinates: [x.lon, x.lat] } })
+      const fc: GeoJSON.FeatureCollection = fires ? { type: "FeatureCollection", features: feats } : EMPTY
+      ;(m.getSource("fires") as GeoJSONSource | undefined)?.setData(fc)
+      for (const id of ["fire-perims", "fire-perims-line", "fire-points"]) if (m.getLayer(id)) m.setLayoutProperty(id, "visibility", fires ? "visible" : "none")
+    })
+  }, [fires])
 
   // NWS reports: everything from the last few days, not tied to the clock
   React.useEffect(() => {
@@ -1362,6 +1389,9 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
   const [showReports, setShowReports] = useStoredFlag("pnw-briefing.map.nwsReports", false)
   const live = React.useMemo(() => liveReports(data.obsReports), [data.obsReports])
   const reportsOn = showReports && live.length ? live : null
+  const [showFires, setShowFires] = useStoredFlag("pnw-briefing.map.fires", false)
+  const hasFires = !!(data.wildfire?.incidents?.length || data.wildfire?.perimeters?.features.length)
+  const firesOn = showFires && hasFires ? data.wildfire! : null
   const pairList = React.useMemo(() => (data.gradients ?? []).filter((g) => g.locs && g.series.length), [data])
   const [compare, setCompare] = React.useState(false)
   const clock = React.useMemo(() => new Clock(), [])
@@ -1407,7 +1437,10 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
     // a request for a moment waits for the field list (the map may have only just mounted)
     if (request.mode === "hourly" && request.time && !ready) return
     handled.current = request.nonce
-    setMode(request.mode)
+    if (request.mode) setMode(request.mode)
+    if (request.overlays?.fronts != null) setShowFronts(request.overlays.fronts)
+    if (request.overlays?.nwsReports != null) setShowReports(request.overlays.nwsReports)
+    if (request.overlays?.fires != null) setShowFires(request.overlays.fires)
     if (request.mode === "hourly" && request.time) {
       const t = Date.parse(request.time)
       const covers = (e?: FieldEntry) => !!e?.times.length && Date.parse(e.times[0]) <= t && t <= Date.parse(e.times[e.times.length - 1])
@@ -1423,7 +1456,7 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
     } else if (request.mode === "hourly") {
       if (request.layer) setLayer(request.layer as HLayer)
       if (request.model) setHModel(request.model)
-    } else {
+    } else if (request.mode === "totals") {
       if (request.variable) setVariable(request.variable as TotVar)
       if (request.days) setDays(request.days)
       if (request.model) setModel(request.model)
@@ -1600,6 +1633,7 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
             <MapOptions
               overlays={[
                 !!data.fronts?.frames.length && <OptionRow key="fronts" id="fronts" label="Fronts (WPC)" checked={showFronts} onChange={setShowFronts} />,
+                hasFires && <OptionRow key="fires" id="fires" label="Fires and perimeters" checked={showFires} onChange={setShowFires} />,
                 live.length > 0 && <OptionRow key="reports" id="nws-reports" label={`NWS reports, last ${data.obsReports?.reportHours ?? 48} h`} checked={showReports} onChange={setShowReports} />,
               ...(mode === "hourly" ? [
                 entriesA.mslp && <OptionRow key="iso" id="isobars" label="Isobars" checked={isobars} onChange={setIsobars} />,
@@ -1618,7 +1652,7 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
                   </div>
                 ),
               ] : [])].filter(Boolean)}
-              active={(frontsOn ? 1 : 0) + (reportsOn ? 1 : 0) + (mode === "hourly" ? [entriesA.mslp && isobars, pairList.length > 0 && showPairs, hasWind && particles, satAll && satKind !== "off"].filter(Boolean).length : 0)}
+              active={(frontsOn ? 1 : 0) + (reportsOn ? 1 : 0) + (firesOn ? 1 : 0) + (mode === "hourly" ? [entriesA.mslp && isobars, pairList.length > 0 && showPairs, hasWind && particles, satAll && satKind !== "off"].filter(Boolean).length : 0)}
               display={<>
                 <OptionRow id="terrain" label="Terrain" checked={terrain} onChange={setTerrain} />
                 <OptionRow id="smooth" label="Smooth" checked={smooth} onChange={setSmooth} />
@@ -1634,12 +1668,20 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
         {mode === "hourly" && times.length > 0 && <TimeBar times={times} clock={clock} playing={playing} setPlaying={setPlaying} />}
 
         <div className={`grid gap-3 ${showB ? "lg:grid-cols-2" : ""}`}>
-          <MapPane data={data} view={viewA} clock={clock} opacity={opacity} smooth={smooth} particles={showParticles} particleColor={ink} sync={sync} terrain={terrain} sat={sat} fronts={frontsOn} reports={reportsOn} />
-          {showB && <MapPane data={data} view={viewB} clock={clock} opacity={opacity} smooth={smooth} particles={showParticles} particleColor={ink} sync={sync} terrain={terrain} sat={sat} fronts={frontsOn} reports={reportsOn} />}
+          <MapPane data={data} view={viewA} clock={clock} opacity={opacity} smooth={smooth} particles={showParticles} particleColor={ink} sync={sync} terrain={terrain} sat={sat} fronts={frontsOn} reports={reportsOn} fires={firesOn} />
+          {showB && <MapPane data={data} view={viewB} clock={clock} opacity={opacity} smooth={smooth} particles={showParticles} particleColor={ink} sync={sync} terrain={terrain} sat={sat} fronts={frontsOn} reports={reportsOn} fires={firesOn} />}
         </div>
 
         {frontsOn && <FrontLegend />}
         {reportsOn && <ReportLegend reports={reportsOn} hours={data.obsReports?.reportHours ?? 48} />}
+        {firesOn && (
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+            <span className="flex items-center gap-1.5"><span className="inline-block size-2.5 rounded-full ring-1 ring-white" style={{ background: "#e8590c" }} aria-hidden />Wildfire</span>
+            <span className="flex items-center gap-1.5"><span className="inline-block size-2.5 rounded-full ring-1 ring-white" style={{ background: "#8a6d3b" }} aria-hidden />Prescribed fire</span>
+            <span className="flex items-center gap-1.5"><span className="inline-block h-2.5 w-4 rounded-[2px] border border-[#b3261e] bg-[#b3261e]/25" aria-hidden />Perimeter</span>
+            <span>Current incidents (dots sized by acres) and perimeters, from the Wildfire tab's sources.</span>
+          </div>
+        )}
         {mode === "totals" ? (variable === "ar" ? <ArLegend /> : variable === "rivers" ? <RiverLegend /> : variable === "storms" ? <StormLegend day={d} /> : <RampLegend ramp={totRamp} every={totRamp.ticks ? 1 : totRamp.levels.length > 16 ? 2 : 1} />) : (
           <div className="space-y-2">
             {layer === "radar" && <RadarLegend withRefc={!!entriesA.refc} />}

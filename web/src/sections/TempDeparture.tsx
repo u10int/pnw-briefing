@@ -1,10 +1,11 @@
 import * as React from "react"
 
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { TDEP, TEMP } from "@/lib/ramps"
 import { DayMatrix, dayLabel, MEDIAN, type MatrixRow, ModelPick, modelDays, modelsWith, RampStrip, rampCell, regionDays, usePick } from "@/sections/DayMatrix"
 import type { Briefing, N } from "@/types"
+import { MapButton } from "@/components/MapButton"
 
 type Var = "tmax" | "tmin"
 type Show = "dep" | "actual"
@@ -78,6 +79,7 @@ export function TempDepartureCard({ data }: { data: Briefing }) {
           {show === "dep" ? "against its 1991 – 2020 normal for the date (PRISM)" : "temperature"}{model && `, out to day ${model.days}`}.
           {" "}Region rows average their locations.
         </CardDescription>
+        <CardAction className="flex flex-wrap gap-2"><MapButton req={{ mode: "totals", variable: "tmaxdep", days: 7 }} label="Highs vs normal on the map" /><MapButton req={{ mode: "totals", variable: "tmindep", days: 7 }} label="Lows vs normal on the map" /></CardAction>
       </CardHeader>
       <CardContent className="space-y-4">
         {pick === MEDIAN && (

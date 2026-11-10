@@ -3,12 +3,11 @@ import { ChevronRight, ExternalLink } from "lucide-react"
 import { CartesianGrid, Line, LineChart, ReferenceArea, ReferenceLine, XAxis, YAxis } from "recharts"
 
 import { Button } from "@/components/ui/button"
-import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { type ChartConfig, ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { contrastTextColor } from "@/lib/contrast"
 import { issuedLabel, ptDay, ptDayHour } from "@/lib/format"
-import { openOnMap } from "@/lib/maplink"
 import { FLOOD_COLORS, FLOOD_LABELS } from "@/lib/ramps"
 import type { Briefing, RiverGauge } from "@/types"
 
@@ -107,9 +106,6 @@ export function RiversCard({ data }: { data: Briefing }) {
           Official river forecasts from the Northwest River Forecast Center at {gs.length} gauges west of the Cascades, worst forecast crest first.
           Each row shows the stage now, the forecast crest and when, and how it compares with flood stage; click a row for its hydrograph.
         </CardDescription>
-        <CardAction>
-          <Button variant="outline" size="sm" onClick={() => openOnMap({ mode: "totals", variable: "rivers", days: 7 })}>River forecasts on the map</Button>
-        </CardAction>
       </CardHeader>
       <CardContent className="space-y-3">
         <p className="text-sm">

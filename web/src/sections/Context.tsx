@@ -16,6 +16,7 @@ import { GRAD_COLORS, gradLevel, pairName, seriesAt } from "@/lib/gradients"
 import { arEpisodes, type Episode } from "@/sections/Hazards"
 import { contrastTextColor } from "@/lib/contrast"
 import { AR_COLORS } from "@/lib/ramps"
+import { MapButton } from "@/components/MapButton"
 
 // ------------------------------------------------------------------ shared: multi-model time series
 
@@ -138,6 +139,7 @@ export function ObservedCard({ data }: { data: Briefing }) {
           Observed precipitation through {dateRange(w30.to, w30.to)}, from NOAA's radar-and-gauge analysis (MRMS),
           against 1991 – 2020 normals. Wet ground turns the same rain into more runoff.
         </CardDescription>
+        <CardAction className="flex flex-wrap gap-2"><MapButton req={{ mode: "totals", variable: "obs", days: 7 }} label="Observed rain on the map" /></CardAction>
       </CardHeader>
       <CardContent className="grid grid-cols-[minmax(0,1fr)] gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)]">
         <div className="min-w-0 space-y-3">
@@ -263,6 +265,7 @@ export function LandslideCard({ data }: { data: Briefing }) {
           {" "}{thr}″ minus {ls.p15Factor} × the 15 days before. The index (3-day rain + {ls.p15Factor} × the 15 days before)
           runs from observed rain into each model's forecast and reaches the threshold at {thr}.
         </CardDescription>
+        <CardAction className="flex flex-wrap gap-2"><MapButton req={{ mode: "totals", variable: "obs", days: 3 }} label="Recent rain on the map" /></CardAction>
       </CardHeader>
       <CardContent className="space-y-6">
         <ul className="space-y-1 text-sm">
@@ -599,6 +602,7 @@ export function ArCard({ data }: { data: Briefing }) {
           Water vapor transport (IVT) at the coast from {ar.models.map((m) => m.model).join(" and ")}, ranked on the
           CW3E AR scale: peak IVT sets the category, lasting 48 hours or more raises it one step and under 24 hours lowers it one.
         </CardDescription>
+        <CardAction className="flex flex-wrap gap-2"><MapButton req={{ mode: "totals", variable: "ar", days: 7 }} label="AR outlook on the map" /><MapButton req={{ mode: "hourly", layer: "ivt", isobars: true }} label="Moisture transport (IVT) on the map" /></CardAction>
       </CardHeader>
       <CardContent className="space-y-6">
         <div className="flex flex-wrap gap-x-6 gap-y-2">
@@ -673,6 +677,7 @@ export function OddsCard({ data }: { data: Briefing }) {
           Share of ensemble members ({total}, pooled) reaching each location's impact threshold: {def.what}.
         </CardDescription>
         <CardAction>
+          <MapButton req={{ mode: "totals", variable: "p24", days: 7 }} label="Chances on the map" />
           <Tabs value={key} onValueChange={(v) => setKey(v as OddsKey)}>
             <TabsList>{avail.map((d) => <TabsTrigger key={d.key} value={d.key}>{d.label}</TabsTrigger>)}</TabsList>
           </Tabs>
@@ -792,6 +797,7 @@ export function GradientsCard({ data }: { data: Briefing }) {
           Sea-level pressure difference between station pairs (hPa), from each model's grid. Dashed lines are rules of thumb
           for where impacts usually start.
         </CardDescription>
+        <CardAction className="flex flex-wrap gap-2"><MapButton req={{ mode: "hourly", layer: "pgrad", isobars: true, pairs: true }} label="Pressure gradients on the map" /></CardAction>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="space-y-2">
@@ -852,6 +858,7 @@ export function SnowLevelCard({ data }: { data: Briefing }) {
           Each model's freezing level minus {sl.offset_ft.toLocaleString("en-US")} ft, where snow usually starts reaching the
           ground. Below the pass elevation (shaded), precipitation at the pass falls as snow.
         </CardDescription>
+        <CardAction className="flex flex-wrap gap-2"><MapButton req={{ mode: "hourly", layer: "frz" }} label="Freezing level on the map" /></CardAction>
       </CardHeader>
       <CardContent className="space-y-2">
         <div className="overflow-x-auto">

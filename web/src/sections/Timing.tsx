@@ -1,6 +1,7 @@
 import * as React from "react"
 
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { MapButton } from "@/components/MapButton"
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { ptDay, ptDayHour, ptParts } from "@/lib/format"
 import { GUST } from "@/lib/ramps"
@@ -106,6 +107,12 @@ export function PeakTimingCard({ data, v }: { data: Briefing; v: Var }) {
         <CardDescription>
           The next {WINDOW_H} hours at the locations where {what}, from the median of {t.models.length} models with hourly output ({t.models.join(", ")}){t.weighted?.length && t.weighted.length < t.models.length ? `, with the high-resolution ones (${t.weighted.join(", ")}) counted double` : ""}. Each bar is how long it lasts and the dot marks the peak{v !== "gust" ? `; the pale fill is when any ${v === "snow" ? "snow" : "precipitation"} falls` : ""}; the red line is now. Hover for details.
         </CardDescription>
+        <CardAction>
+          {/* the hour-by-hour layer, opened at the strongest peak in the window */}
+          <MapButton label={v === "gust" ? "Gusts through time" : v === "snow" ? "Snowfall through time" : "Radar through time"}
+            req={{ mode: "hourly", layer: v === "gust" ? "gust" : v === "snow" ? "asnow" : "radar", fallback: v === "precip" ? ["apcp"] : undefined,
+                   time: rows.flatMap((r) => r.es).sort((a, b) => b.peak - a.peak)[0]?.peakTime }} />
+        </CardAction>
       </CardHeader>
       <CardContent>
         {!rows.length ? <p className="text-sm text-muted-foreground">{v === "gust" ? "No location reaches that" : `No ${v === "snow" ? "snow" : "precipitation"} at any location`} in the next {WINDOW_H} hours.</p> : (

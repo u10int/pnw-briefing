@@ -1,7 +1,8 @@
 import * as React from "react"
 
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { MapButton } from "@/components/MapButton"
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { DayHead } from "@/components/DayHead"
 import { ptDayHour } from "@/lib/format"
@@ -70,6 +71,12 @@ export function ObsReportsCard({ data, v }: { data: Briefing; v: V }) {
         <CardDescription>
           {WHAT[v]} over the last {o.days.length - 1} days and today so far (Pacific time){reports.length ? `, then what's been reported to NWS Seattle and Portland in the last ${o.reportHours ?? 48} hours` : ""}.
         </CardDescription>
+        {reports.length > 0 && (
+          <CardAction>
+            <MapButton label="Reports on the map"
+              req={v === "precip" ? { mode: "totals", variable: "obs", days: 3, overlays: { nwsReports: true } } : { overlays: { nwsReports: true } }} />
+          </CardAction>
+        )}
       </CardHeader>
       <CardContent className="space-y-6">
         {rows.length > 0 && (

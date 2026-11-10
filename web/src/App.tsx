@@ -273,6 +273,7 @@ export default function App() {
                   <LocationViews day={(sw) => <RainByDayCard data={data} switcher={sw} />} model={(sw) => <ByLocation data={data} switcher={sw} />} />
                   <PeakTimingCard data={data} v="precip" />
                   <MapCard title="Precipitation maps" description="Each model on its own grid, then the mean and spread on a common grid."
+                    map={{ req: { mode: "totals", variable: "spread", days: 7 }, label: "Model spread on the map" }}
                     tabs={[
                       { id: "p48", label: "Next 48 hours", src: data.maps.short, alt: "48-hour precipitation by model, with mean and spread", note: "Liquid equivalent. Spread is the highest minus the lowest model at each grid cell. Regional models next to the blend and the global models, over the same two 12Z – 12Z days." },
                       { id: "pl", label: `Through day ${meta.days}`, src: data.maps.long, alt: "Full-range precipitation by model", note: "Each panel is labeled with the number of days the model covers; mean and spread use only the days every model covers." },
@@ -290,10 +291,7 @@ export default function App() {
           <TabsContent value="flood">
             <Section title="Flooding" first
               description="What turns rain into a problem: the official river forecasts, whether an atmospheric river is coming, and how many ensemble members reach the heavy-rain thresholds; then how close recent rain puts the Seattle area to the landslide threshold. Recent rainfall itself is on the Precipitation tab."
-              action={<div className="flex flex-wrap gap-2">
-                <MapLink req={{ mode: "totals", variable: "ar", days: 7 }} label="AR outlook on the map" />
-                <MapLink req={{ mode: "hourly", layer: "ivt", isobars: true }} label="Moisture transport (IVT) on the map" />
-              </div>}>
+              action={data.rivers ? <MapLink req={{ mode: "totals", variable: "rivers", days: 7 }} label="River forecasts on the map" /> : undefined}>
               <Groups tab="flood" groups={[
                 { id: "forecast", title: GROUP_TITLES.forecast, show: true, children: <>
                   <RiversCard data={data} />
@@ -308,7 +306,7 @@ export default function App() {
           <TabsContent value="wind">
             <Section title="Wind" first
               description="The strongest gusts by region and location, by day or by model, when they come, the pressure gradients behind the region's classic wind events (south wind, Gorge and Fraser outflow, onshore pushes), and the model maps; then the gusts actually measured and reported."
-              action={<MapLink req={{ mode: "hourly", layer: "pgrad", isobars: true, pairs: true }} label="Pressure gradients on the map" />}>
+              action={<MapLink req={{ mode: "totals", variable: "gust", days: 7 }} label="Strongest gusts on the map" />}>
               <Groups tab="wind" groups={[
                 { id: "forecast", title: GROUP_TITLES.forecast, show: true, children: <>
                   <WindPeaks data={data} />
@@ -316,6 +314,7 @@ export default function App() {
                   <PeakTimingCard data={data} v="gust" />
                   <GradientsCard data={data} />
                   <MapCard title="Wind and gust maps" description="The strongest sustained wind and gust in each model."
+                    map={{ req: { mode: "totals", variable: "wind", days: 7 }, label: "Strongest wind on the map" }}
                     tabs={[...pickExtremes(data, "short", "the next 48 hours", ["gust", "wind"], " (48 h)"),
                            ...pickExtremes(data, "long", "each model's full range", ["gust", "wind"], ` (to day ${meta.days})`)]} />
                 </> },
@@ -342,7 +341,7 @@ export default function App() {
           <TabsContent value="snow">
             <Section title="Snow and mountains" first
               description="Where the snow level sits against the passes, how much snow the models put down and avalanche danger; then the new snow observed and the snowpack so far."
-              action={<MapLink req={{ mode: "hourly", layer: "frz" }} label="Freezing level on the map" />}>
+              action={<MapLink req={{ mode: "totals", variable: "snow", days: 7 }} label="Snowfall totals on the map" />}>
               <Groups tab="snow" groups={[
                 { id: "forecast", title: GROUP_TITLES.forecast, show: true, children: <>
                   <SnowLevelCard data={data} />
@@ -366,11 +365,12 @@ export default function App() {
           <TabsContent value="temp">
             <Section title="Temperature" first
               description="Daily highs and lows against normal for each location, the warmest and coldest each model gets, and how the models' highs and lows have verified lately."
-              action={<MapLink req={{ mode: "totals", variable: "tmaxdep", days: 7 }} label="Departures on the map" />}>
+              action={<MapLink req={{ mode: "hourly", layer: "t2m" }} label="Temperature on the map" />}>
               <Groups tab="temp" groups={[
                 { id: "forecast", title: GROUP_TITLES.forecast, show: true, children: <>
                   <TempDepartureCard data={data} />
                   <MapCard title="High and low temperature maps" description="The highest and lowest 2 m temperature in each model."
+                    map={{ req: { mode: "totals", variable: "tmax", days: 7 }, label: "Highs and lows on the map" }}
                     tabs={[...pickExtremes(data, "short", "the next 48 hours", ["tmax", "tmin"], " (48 h)"),
                            ...pickExtremes(data, "long", "each model's full range", ["tmax", "tmin"], ` (to day ${meta.days})`)]} />
                 </> },
@@ -382,7 +382,8 @@ export default function App() {
           <TabsContent value="fire">
             <Section title="Wildfire" first
               description="Red Flag Warnings, the fire outlooks from Predictive Services and SPC, humidity and Hot-Dry-Windy conditions in each model, current fires, smoke and drought."
-              action={<MapLink req={{ mode: "hourly", layer: "smoke" }} label="Smoke on the map" />}>
+              action={data.wildfire?.incidents?.length || data.wildfire?.perimeters?.features.length
+                ? <MapLink req={{ mode: "totals", overlays: { fires: true } }} label="Fires on the map" /> : undefined}>
               <WildfireTab data={data} />
             </Section>
           </TabsContent>

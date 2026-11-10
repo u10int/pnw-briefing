@@ -1,12 +1,13 @@
 import { ExternalLink } from "lucide-react"
 
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { contrastTextColor } from "@/lib/contrast"
 import { ptDayHour, ptParts } from "@/lib/format"
 import { openLocation } from "@/lib/locationlink"
 import { useMds } from "@/lib/useMds"
 import type { Briefing, ConvArea, StormReport } from "@/types"
+import { MapButton } from "@/components/MapButton"
 
 /** SPC's categorical colours, for days whose areas carry none. */
 export const SPC_CAT: Record<string, { name: string; fill: string }> = {
@@ -85,6 +86,7 @@ export function ConvectiveCard({ data, part }: { data: Briefing; part?: "outlook
             : part === "now" ? "The Storm Prediction Center's mesoscale discussions for the area right now, and storm reports from the last three days."
             : "The Storm Prediction Center's mesoscale discussions for the area right now, its convective outlook for each day, and storm reports from the last three days."}
         </CardDescription>
+        <CardAction className="flex flex-wrap gap-2">{part === "now" && <MapButton req={{ mode: "totals", variable: "storms", days: 1 }} label="Discussions and reports on the map" />}</CardAction>
       </CardHeader>
       <CardContent className="space-y-6">
         {showNow && <section>

@@ -1,6 +1,8 @@
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import type { Briefing, ExtremeVar } from "@/types"
+import { MapButton } from "@/components/MapButton"
+import type { MapRequest } from "@/lib/maplink"
 
 interface MapTab { id: string; label: string; src: string | null; alt: string; note: string }
 
@@ -25,7 +27,7 @@ export function extremeTabs(data: Briefing, horizon: "short" | "long", over: str
 }
 
 /** One card per horizon; tabs switch between the precipitation and snowfall small multiples. */
-export function MapCard({ title, description, tabs }: { title: string; description: string; tabs: MapTab[] }) {
+export function MapCard({ title, description, tabs, map }: { title: string; description: string; tabs: MapTab[]; map?: { req: MapRequest; label: string } }) {
   const available = tabs.filter((t) => t.src)
   if (!available.length) {
     return (
@@ -40,11 +42,14 @@ export function MapCard({ title, description, tabs }: { title: string; descripti
         <CardHeader>
           <CardTitle>{title}</CardTitle>
           <CardDescription>{description}</CardDescription>
-          {available.length > 1 && available.length <= 3 && (
-            <CardAction>
-              <TabsList>
-                {available.map((t) => <TabsTrigger key={t.id} value={t.id}>{t.label}</TabsTrigger>)}
-              </TabsList>
+          {(map || (available.length > 1 && available.length <= 3)) && (
+            <CardAction className="flex flex-wrap gap-2">
+              {map && <MapButton req={map.req} label={map.label} />}
+              {available.length > 1 && available.length <= 3 && (
+                <TabsList>
+                  {available.map((t) => <TabsTrigger key={t.id} value={t.id}>{t.label}</TabsTrigger>)}
+                </TabsList>
+              )}
             </CardAction>
           )}
         </CardHeader>
