@@ -2,7 +2,7 @@
  *  skimmed without reading the table. */
 export function Takeaway({ children }: { children: React.ReactNode }) {
   if (!children) return null
-  return <p data-slot="card-takeaway" className="col-start-1 text-[15px] leading-snug font-medium text-pretty">{children}</p>
+  return <p data-slot="card-takeaway" className="col-start-1 text-sm leading-snug text-pretty text-foreground">{children}</p>
 }
 
 /** "Fri 11/13" for a briefing date ("2026-11-13"). */
