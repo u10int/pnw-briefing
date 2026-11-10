@@ -141,8 +141,8 @@ export function hatchOn(style: React.CSSProperties): React.CSSProperties {
   const bg = typeof style.background === "string" && style.background.startsWith("#") ? style.background : null
   if (!bg) return { ...style, ...HATCH }
   const dark = contrastTextColor(bg).toLowerCase() === "#ffffff"
-  const line = `color-mix(in srgb, ${bg}, ${dark ? "white 22%" : "black 14%"})`
-  return { ...style, backgroundImage: `repeating-linear-gradient(135deg, ${line} 0 1.5px, transparent 1.5px 5px)` }
+  const line = `color-mix(in srgb, ${bg}, ${dark ? "white 12%" : "black 8%"})`
+  return { ...style, backgroundImage: `repeating-linear-gradient(135deg, ${line} 0 1.25px, transparent 1.25px 5px)` }
 }
 
 /** Narrow screens: region rows start collapsed, and open to their locations. */
