@@ -108,6 +108,8 @@ export interface PeakPeriod {
   start: string; end: string; peak: number; peakTime: string; models: number; of: number
   peakFrom: string | null; peakTo: string | null; total?: number; heavy?: boolean
 }
+/** A stretch with any measurable precipitation or snow (median rate over the floor), drawn light. */
+export interface LightPeriod { start: string; end: string; peak: number; peakTime: string; total: number }
 export interface Buoy {
   id: string; name: string; lat: number; lon: number; area: string; time: string
   wave: N; period: N; waveDir: N; wind: N; gust: N; windDir: N; water: N
@@ -160,8 +162,9 @@ export interface Fronts { source: string; frames: FrontFrame[] }
 export interface PeakTiming {
   hours: number; models: string[]
   weighted?: string[]                                  // the high-resolution models, counted double
-  thresholds: { gust_mph: Record<string, number>; rate_in_per_h: number; heavy_in_per_h: number }
-  points: Record<string, { gust?: PeakPeriod[]; precip?: PeakPeriod[] }>
+  thresholds: { gust_mph: Record<string, number>; rate_in_per_h: number; heavy_in_per_h: number
+    snow_in_per_h?: number; heavy_snow_in_per_h?: number; any_rate_in_per_h?: number; any_snow_in_per_h?: number }
+  points: Record<string, { gust?: PeakPeriod[]; precip?: PeakPeriod[]; snow?: PeakPeriod[]; precipAny?: LightPeriod[]; snowAny?: LightPeriod[] }>
 }
 
 export interface ArCoastRank { rank: number; peak: number | null; start: string | null }

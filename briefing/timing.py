@@ -17,6 +17,8 @@ from datetime import datetime, timedelta, timezone
 import numpy as np
 
 DEFAULTS = {"gust_mph": {"lowland": 35, "coast": 45, "pass": 50}, "rate_in_per_h": 0.10, "heavy_in_per_h": 0.30,
+            # snowfall (in/h): moderate and heavy; and the "any amount" floors for the light spans
+            "snow_in_per_h": 0.5, "heavy_snow_in_per_h": 1.0, "any_rate_in_per_h": 0.01, "any_snow_in_per_h": 0.1,
             "hours": 48, "max_gap_h": 2,
             # high-resolution models count more in the median: they resolve gusts and showers the
             # global ones smooth out
@@ -87,7 +89,9 @@ def compute(models, cfg, start):
     out = {}
     for p in cfg["points"]:
         rec = {}
-        for var, src, thr in (("gust", "gust", spec["gust_mph"].get(p["kind"], 40)), ("precip", "rate", spec["rate_in_per_h"])):
+        for var, src, thr, floor, heavy in (("gust", "gust", spec["gust_mph"].get(p["kind"], 40), None, None),
+                                            ("precip", "rate", spec["rate_in_per_h"], spec["any_rate_in_per_h"], spec["heavy_in_per_h"]),
+                                            ("snow", "snow", spec["snow_in_per_h"], spec["any_snow_in_per_h"], spec["heavy_snow_in_per_h"])):
             per = _series(ms, src, p["name"], grid)
             if not per:
                 continue
@@ -109,18 +113,29 @@ def compute(models, cfg, start):
                     t, v = max(win, key=lambda x: x[1])
                     peaks.append(t)
                     reach += v >= thr
-                ev = {"start": keys[a], "end": keys[b], "peak": round(med[pk], 2 if var == "precip" else 0), "peakTime": keys[pk],
+                ev = {"start": keys[a], "end": keys[b], "peak": round(med[pk], 0 if var == "gust" else 2 if var == "precip" else 1), "peakTime": keys[pk],
                       "models": reach, "of": len(per), "peakFrom": min(peaks) if peaks else None, "peakTo": max(peaks) if peaks else None}
-                if var == "precip":
-                    ev["total"] = round(sum(med[i] or 0 for i in range(a, b + 1)), 2)
-                    ev["heavy"] = ev["peak"] >= spec["heavy_in_per_h"]          # as shown, so 0.30 reads heavy
+                if heavy is not None:
+                    ev["total"] = round(sum(med[i] or 0 for i in range(a, b + 1)), 2 if var == "precip" else 1)
+                    ev["heavy"] = ev["peak"] >= heavy                          # as shown, so 0.30 reads heavy
                 events.append(ev)
             if events:
                 # the two strongest periods, in time order
                 rec[var] = sorted(sorted(events, key=lambda e: -e["peak"])[:2], key=lambda e: e["start"])
+            if floor is not None:
+                # every stretch with any measurable amount (gaps of an hour bridged), drawn light under the bars
+                light = []
+                for run in _periods(grid_t, med, floor, 1):
+                    a, b = run[0], run[-1]
+                    pk = max(run, key=lambda i: med[i])
+                    light.append({"start": keys[a], "end": keys[b], "peak": round(med[pk], 2 if var == "precip" else 1), "peakTime": keys[pk],
+                                  "total": round(sum(med[i] or 0 for i in range(a, b + 1)), 2 if var == "precip" else 1)})
+                if light:
+                    rec[f"{var}Any"] = light
         if rec:
             out[p["name"]] = rec
     return {"hours": spec["hours"], "models": [m["label"] for m in ms],
             "weighted": sorted({m["label"] for m in ms if wt[m["label"]] > 1}, key=[m["label"] for m in ms].index),
-            "thresholds": {"gust_mph": spec["gust_mph"], "rate_in_per_h": spec["rate_in_per_h"], "heavy_in_per_h": spec["heavy_in_per_h"]},
+            "thresholds": {k: spec[k] for k in ("gust_mph", "rate_in_per_h", "heavy_in_per_h", "snow_in_per_h", "heavy_snow_in_per_h",
+                                                "any_rate_in_per_h", "any_snow_in_per_h")},
             "points": out}

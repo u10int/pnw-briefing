@@ -74,7 +74,7 @@ def fetch_deterministic(cfg, start):
         try:
             mid, js = _first_working(FORECAST_URL, base, m["ids"])
             data = {}
-            hourly = {"gust": {}, "rate": {}}
+            hourly = {"gust": {}, "rate": {}, "snow": {}}
             hrs = None
             for p, loc in zip(pts, js):
                 h = loc["hourly"]
@@ -90,6 +90,7 @@ def fetch_deterministic(cfg, start):
                     num = lambda col: [None if not np.isfinite(x) else round(float(x), 3) for x in w[col].to_numpy(dtype=float)]
                     hourly["gust"][p["name"]] = num("wind_gusts_10m")
                     hourly["rate"][p["name"]] = num("precipitation")      # the hour ending at each time
+                    hourly["snow"][p["name"]] = num("snowfall")           # inches with precipitation_unit=inch
                 g = _days(df, start, n)
                 agg = pd.DataFrame({
                     "precipitation_sum": g["precipitation"].sum(min_count=1),

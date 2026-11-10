@@ -347,6 +347,7 @@ export default function App() {
                 { id: "forecast", title: GROUP_TITLES.forecast, show: true, children: <>
                   <SnowLevelCard data={data} />
                   <RainByDayCard data={data} only="snow" />
+                  <PeakTimingCard data={data} v="snow" />
                   <AvalancheCard data={data} />
                   <MapCard title="Snowfall maps" description="From each model's own snow field; models without one are left out."
                     tabs={[

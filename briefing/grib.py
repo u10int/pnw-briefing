@@ -582,25 +582,30 @@ def _point_series(entry, idx, grid):
 
 
 def point_hourly(model_fields, lat, lon, idx, points, run, lead0, upto):
-    """Gusts (mph) and precipitation rate (in/h) at each point for every map-field hour after the
-    start, up to forecast hour `upto`: {"times": [ISO], "step": [hours since the previous],
-    "gust": {name: [...]}, "rate": {name: [...]}} (None where a field is missing)."""
+    """Gusts (mph), precipitation rate and snowfall rate (in/h) at each point for every map-field
+    hour after the start, up to forecast hour `upto`: {"times": [ISO], "step": [hours since the
+    previous], "gust": {name: [...]}, "rate": {...}, "snow": {...}} (None where a field is missing)."""
     grid = lat.shape if lat.ndim == 2 else (lat.size, lon.size)
     g = _point_series(model_fields.get("gust"), idx, grid)
     a = _point_series(model_fields.get("apcp"), idx, grid)      # accumulated from the start, inches
+    sn = _point_series(model_fields.get("asnow"), idx, grid)    # snowfall accumulated from the start, inches
     hours = sorted(h for h in set(g) | set(a) if lead0 < h <= upto)
     if not hours:
         return None
-    acc_hours = sorted(h for h in a if lead0 < h <= upto)
-    rate, prev = {}, (lead0, np.zeros(len(points)))
-    for h in acc_hours:
-        rate[h] = np.maximum(a[h] - prev[1], 0) / (h - prev[0])
-        prev = (h, a[h])
+
+    def rates(acc):
+        out, prev = {}, (lead0, np.zeros(len(points)))
+        for h in sorted(h for h in acc if lead0 < h <= upto):
+            out[h] = np.maximum(acc[h] - prev[1], 0) / (h - prev[0])
+            prev = (h, acc[h])
+        return out
+    rate, snow = rates(a), rates(sn)
     val = lambda x, k: None if x is None or not np.isfinite(x[k]) else round(float(x[k]), 3)
     step = [h - p for p, h in zip([lead0] + hours[:-1], hours)]
     return {"times": [(run + timedelta(hours=h)).strftime("%Y-%m-%dT%H:00Z") for h in hours], "step": step,
             "gust": {p["name"]: [val(g.get(h), k) for h in hours] for k, p in enumerate(points)} if g else {},
-            "rate": {p["name"]: [val(rate.get(h), k) for h in hours] for k, p in enumerate(points)} if rate else {}}
+            "rate": {p["name"]: [val(rate.get(h), k) for h in hours] for k, p in enumerate(points)} if rate else {},
+            "snow": {p["name"]: [val(snow.get(h), k) for h in hours] for k, p in enumerate(points)} if snow else {}}
 
 
 def _daily_points(series, bounds, npts, reduce):

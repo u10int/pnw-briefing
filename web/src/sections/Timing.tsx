@@ -6,9 +6,9 @@ import { ptDay, ptDayHour, ptParts } from "@/lib/format"
 import { GUST } from "@/lib/ramps"
 import { rampCell } from "@/sections/DayMatrix"
 import { openLocation } from "@/lib/locationlink"
-import type { Briefing, PeakPeriod } from "@/types"
+import type { Briefing, LightPeriod, PeakPeriod } from "@/types"
 
-type Var = "gust" | "precip"
+type Var = "gust" | "precip" | "snow"
 
 const hourOnly = (t: string) => ptDayHour(t).replace(/^\S+ \S+ /, "")
 /** "Sat 11/7 4 – 10 PM", "Sat 11/7 10 PM – Sun 11/8 3 AM". */
@@ -18,7 +18,7 @@ export function hourRange(a: string, b: string) {
   return same ? `${ptDayHour(a)} – ${hourOnly(b)}` : `${ptDayHour(a)} – ${ptDayHour(b)}`
 }
 const peakText = (v: Var, e: PeakPeriod) =>
-  v === "gust" ? `${Math.round(e.peak)} mph` : `${e.peak.toFixed(2)} in/h${e.heavy ? " (heavy)" : ""}`
+  v === "gust" ? `${Math.round(e.peak)} mph` : v === "snow" ? `${e.peak.toFixed(1)} in/h${e.heavy ? " (heavy)" : ""}` : `${e.peak.toFixed(2)} in/h${e.heavy ? " (heavy)" : ""}`
 /** When the models put their own peaks, if they differ. */
 const spread = (e: PeakPeriod) =>
   e.peakFrom && e.peakTo && e.peakFrom !== e.peakTo ? `models peak ${hourRange(e.peakFrom, e.peakTo)}` : null
@@ -40,21 +40,27 @@ export function timingWindow(data: Briefing) {
 }
 /** A period's span on the axis: precipitation rates are for the hour ending at each time, gusts
  *  are the value at it. */
-const spanOf = (v: Var, e: PeakPeriod) => {
+const spanOf = (v: Var, e: { start: string; end: string }) => {
   const s = Date.parse(e.start), x = Date.parse(e.end)
-  return v === "precip" ? [s - HOUR, x] : [s - HOUR / 2, x + HOUR / 2]
+  return v === "gust" ? [s - HOUR / 2, x + HOUR / 2] : [s - HOUR, x]
 }
 /** Periods that reach into the window. */
-export function inWindow(data: Briefing, v: Var, list: PeakPeriod[] | undefined) {
+export function inWindow<T extends { start: string; end: string }>(data: Briefing, v: Var, list: T[] | undefined): T[] {
   const { t0, t1 } = timingWindow(data)
   return (list ?? []).filter((e) => { const [a, b] = spanOf(v, e); return b > t0 && a < t1 })
 }
 
 /** The current time: a red line, so it can't be mistaken for a peak marker. */
 const NOW = "#e5484d"
-const PRECIP_BAR = { moderate: "#9cc5ef", heavy: "#2563c9" }
+/** Light: any measurable amount; moderate: over the threshold; heavy: heavy at its peak. */
+const BARS = {
+  precip: { light: "#e3eefa", moderate: "#9cc5ef", heavy: "#2563c9", ink: "#10243f" },
+  snow: { light: "#ece8f8", moderate: "#b9a8ea", heavy: "#6142c4", ink: "#221446" },
+}
 const barStyle = (v: Var, e: PeakPeriod): React.CSSProperties =>
-  v === "gust" ? rampCell(e.peak, GUST) : { background: e.heavy ? PRECIP_BAR.heavy : PRECIP_BAR.moderate, color: e.heavy ? "#fff" : "#10243f" }
+  v === "gust" ? rampCell(e.peak, GUST) : { background: e.heavy ? BARS[v].heavy : BARS[v].moderate, color: e.heavy ? "#fff" : BARS[v].ink }
+const lightText = (v: Var, e: LightPeriod) =>
+  `${hourRange(e.start, e.end)}: ${v === "snow" ? `about ${e.total.toFixed(1)}″ of snow` : `about ${e.total.toFixed(2)}″`}, peaking near ${ptDayHour(e.peakTime)} at ${v === "snow" ? e.peak.toFixed(1) : e.peak.toFixed(2)} in/h`
 
 /** Locations where gusts or precipitation reach their threshold in the next 36 hours, as bars on
  *  a shared Pacific-time axis: how long it lasts, when it peaks (the tick), and how strong. */
@@ -71,7 +77,9 @@ export function PeakTimingCard({ data, v }: { data: Briefing; v: Var }) {
   }, [t])
   if (!t) return null
   const { t0, t1 } = timingWindow(data)
-  const rows = data.points.map((p) => ({ p, es: inWindow(data, v, t.points[p.name]?.[v]) })).filter((r) => r.es.length)
+  const anyKey = v === "precip" ? "precipAny" : v === "snow" ? "snowAny" : null
+  const rows = data.points.map((p) => ({ p, es: inWindow(data, v, t.points[p.name]?.[v]), light: anyKey ? inWindow(data, v, t.points[p.name]?.[anyKey]) : [] }))
+    .filter((r) => r.es.length || r.light.length)
   const th = t.thresholds
   const pct = (x: number) => (100 * (Math.min(Math.max(x, t0), t1) - t0)) / (t1 - t0)
   // axis: Pacific midnights (day lines) and every 6 hours (ticks)
@@ -89,17 +97,18 @@ export function PeakTimingCard({ data, v }: { data: Briefing; v: Var }) {
   )
   const what = v === "gust"
     ? `gusts reach ${th.gust_mph.lowland} mph in the lowlands, ${th.gust_mph.coast} on the coast or ${th.gust_mph.pass} at the passes`
-    : `precipitation falls at ${th.rate_in_per_h}″ an hour or more (${th.heavy_in_per_h}″+ is heavy)`
+    : v === "snow" ? `snow falls, with the bars where it comes at ${th.snow_in_per_h ?? 0.5}″ an hour or more (${th.heavy_snow_in_per_h ?? 1}″+ is heavy)`
+    : `precipitation falls, with the bars where it comes at ${th.rate_in_per_h}″ an hour or more (${th.heavy_in_per_h}″+ is heavy)`
   return (
     <Card>
       <CardHeader>
-        <CardTitle>{v === "gust" ? "When the strongest gusts come" : "When the heaviest precipitation comes"}</CardTitle>
+        <CardTitle>{v === "gust" ? "When the strongest gusts come" : v === "snow" ? "When the heaviest snow comes" : "When the heaviest precipitation comes"}</CardTitle>
         <CardDescription>
-          The next {WINDOW_H} hours at the locations where {what}, from the median of {t.models.length} models with hourly output ({t.models.join(", ")}){t.weighted?.length && t.weighted.length < t.models.length ? `, with the high-resolution ones (${t.weighted.join(", ")}) counted double` : ""}. Each bar is how long it lasts and the dot marks the peak; the red line is now. Hover for details.
+          The next {WINDOW_H} hours at the locations where {what}, from the median of {t.models.length} models with hourly output ({t.models.join(", ")}){t.weighted?.length && t.weighted.length < t.models.length ? `, with the high-resolution ones (${t.weighted.join(", ")}) counted double` : ""}. Each bar is how long it lasts and the dot marks the peak{v !== "gust" ? `; the pale fill is when any ${v === "snow" ? "snow" : "precipitation"} falls` : ""}; the red line is now. Hover for details.
         </CardDescription>
       </CardHeader>
       <CardContent>
-        {!rows.length ? <p className="text-sm text-muted-foreground">No location reaches that in the next {WINDOW_H} hours.</p> : (
+        {!rows.length ? <p className="text-sm text-muted-foreground">{v === "gust" ? "No location reaches that" : `No ${v === "snow" ? "snow" : "precipitation"} at any location`} in the next {WINDOW_H} hours.</p> : (
           <div className="space-y-1">
             <div className="grid grid-cols-[7.5rem_1fr] gap-3 sm:grid-cols-[11rem_1fr]">
               <div />
@@ -115,11 +124,26 @@ export function PeakTimingCard({ data, v }: { data: Briefing; v: Var }) {
                 )}
               </div>
             </div>
-            {rows.map(({ p, es }) => (
+            {rows.map(({ p, es, light }) => (
               <div key={p.name} className="grid grid-cols-[7.5rem_1fr] items-center gap-3 border-t py-1 sm:grid-cols-[11rem_1fr]">
                 <button type="button" onClick={() => openLocation(p.name)} className="truncate text-left text-sm hover:underline">{p.name}</button>
                 <div className="relative h-7">
                   {lines}
+                  {light.map((e, i) => {
+                    // any amount: a pale band the threshold bars sit on
+                    const [a, b] = spanOf(v, e)
+                    const l = pct(a), w = Math.max(pct(b) - l, 0)
+                    return (
+                      <Tooltip key={`l${i}`}>
+                        <TooltipTrigger asChild>
+                          <div tabIndex={0} aria-label={`${p.name}: ${lightText(v, e)}`}
+                            className="absolute top-1/2 h-4 -translate-y-1/2 rounded-[3px] outline-offset-1 focus-visible:outline-2 focus-visible:outline-ring"
+                            style={{ left: `${l}%`, width: `max(${w}%, 4px)`, background: BARS[v === "snow" ? "snow" : "precip"].light }} />
+                        </TooltipTrigger>
+                        <TooltipContent className="max-w-xs"><p className="font-semibold">{p.name}</p><p>{lightText(v, e)}</p></TooltipContent>
+                      </Tooltip>
+                    )
+                  })}
                   {es.map((e, i) => {
                     const [a, b] = spanOf(v, e)
                     const l = pct(a), w = Math.max(pct(b) - l, 0)
@@ -166,10 +190,11 @@ export function PeakTimingCard({ data, v }: { data: Briefing; v: Var }) {
                 </div>
               </div>
             ))}
-            {v === "precip" && (
+            {v !== "gust" && (
               <div className="flex flex-wrap gap-x-4 pt-2 text-xs text-muted-foreground">
-                <span className="flex items-center gap-1.5"><span className="h-3 w-5 rounded-[3px]" style={{ background: PRECIP_BAR.moderate }} />Moderate ({th.rate_in_per_h}″+ an hour)</span>
-                <span className="flex items-center gap-1.5"><span className="h-3 w-5 rounded-[3px]" style={{ background: PRECIP_BAR.heavy }} />Heavy at its peak ({th.heavy_in_per_h}″+)</span>
+                <span className="flex items-center gap-1.5"><span className="h-3 w-5 rounded-[3px]" style={{ background: BARS[v].light }} />Any {v === "snow" ? "snow" : "precipitation"}</span>
+                <span className="flex items-center gap-1.5"><span className="h-3 w-5 rounded-[3px]" style={{ background: BARS[v].moderate }} />Moderate ({v === "snow" ? th.snow_in_per_h ?? 0.5 : th.rate_in_per_h}″+ an hour)</span>
+                <span className="flex items-center gap-1.5"><span className="h-3 w-5 rounded-[3px]" style={{ background: BARS[v].heavy }} />Heavy at its peak ({v === "snow" ? th.heavy_snow_in_per_h ?? 1 : th.heavy_in_per_h}″+)</span>
               </div>
             )}
             {v === "gust" && <p className="pt-2 text-xs text-muted-foreground">Bars are coloured by the peak gust, on the same scale as the wind maps.</p>}
@@ -183,14 +208,15 @@ export function PeakTimingCard({ data, v }: { data: Briefing; v: Var }) {
 /** The location panel's lines: only the periods it has. */
 export function PeakTimingLines({ data, name }: { data: Briefing; name: string }) {
   const p = data.timing?.points[name]
-  const r = p && { gust: inWindow(data, "gust", p.gust), precip: inWindow(data, "precip", p.precip) }
-  if (!r || (!r.gust.length && !r.precip.length)) return null
+  const r = p && { gust: inWindow(data, "gust", p.gust), precip: inWindow(data, "precip", p.precip), snow: inWindow(data, "snow", p.snow) }
+  if (!r || (!r.gust.length && !r.precip.length && !r.snow.length)) return null
   return (
     <div>
       <p className="mb-1.5 text-sm font-medium">Peak timing, next {WINDOW_H} hours</p>
       <ul className="space-y-1 text-sm">
         {(r.gust ?? []).map((e, i) => <li key={`g${i}`}><span className="text-muted-foreground">Strongest gusts:</span> {periodLine("gust", e)}</li>)}
         {(r.precip ?? []).map((e, i) => <li key={`p${i}`}><span className="text-muted-foreground">Heaviest {e.heavy ? "rain, heavy at times" : "rain"}:</span> {periodLine("precip", e)}</li>)}
+        {(r.snow ?? []).map((e, i) => <li key={`s${i}`}><span className="text-muted-foreground">Heaviest {e.heavy ? "snow, heavy at times" : "snow"}:</span> {periodLine("snow", e)}</li>)}
       </ul>
     </div>
   )
