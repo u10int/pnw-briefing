@@ -14,7 +14,7 @@ import { ArCard, AvalancheCard, ForecasterNotes, FullDiscussions, GradientsCard,
 import { LocationPanel } from "@/sections/Location"
 import { onOpenLocation } from "@/lib/locationlink"
 import { extremeTabs, MapCard } from "@/sections/Maps"
-import { Headline } from "@/sections/Overview"
+import { EditionNote, Headline, RunStatus } from "@/sections/Overview"
 import { RunTrendCard } from "@/sections/RunTrend"
 import { UnusualCard } from "@/sections/Unusual"
 import { TrendsCard } from "@/sections/Trends"
@@ -196,27 +196,34 @@ export default function App() {
   return (
     <TooltipProvider delayDuration={100}>
       <header className="border-b bg-card">
-        <div className="mx-auto flex max-w-[1320px] flex-wrap items-baseline justify-between gap-3 px-8 py-3.5 max-sm:px-4">
-          <div className="font-semibold">
-            {meta.title}<span className="ml-2.5 font-normal text-muted-foreground max-2xl:hidden">Western Washington and Northwest Oregon</span>
+        <div className="mx-auto max-w-[1320px] px-8 max-sm:px-4">
+          <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 pt-3.5 pb-2.5 max-md:pb-3.5">
+            <div className="font-semibold">
+              {meta.title}<span className="ml-2.5 font-normal text-muted-foreground max-2xl:hidden">Western Washington and Northwest Oregon</span>
+            </div>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px] text-muted-foreground">
+              <span>Issued {issuedLabel(meta.issued)}</span>
+              <span aria-hidden>·</span>
+              <EditionNote data={data} />
+              <RunStatus data={data} />
+            </div>
           </div>
           {/* the sections, reachable from the top of the page before scrolling to the tab bar */}
-          <nav aria-label="Sections" className="flex items-center gap-0.5 max-md:hidden">
+          <nav aria-label="Sections" className="-ml-1.5 xl:-ml-2 flex items-center gap-0.5 overflow-x-auto pb-2 max-md:hidden">
             {TABS.map((t) => {
               const Icon = t.icon
               return (
                 <button key={t.id} type="button" onClick={() => openTab(t.id)} title={t.label}
-                  className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-sm text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring">
+                  className="inline-flex shrink-0 items-center gap-1.5 rounded-md px-1.5 py-1 text-[13px] text-muted-foreground xl:px-2 xl:text-sm hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring">
                   <Icon className="size-4" aria-hidden /><span className="max-lg:hidden">{t.label}</span>
                 </button>
               )
             })}
             <button type="button" onClick={() => setPoint(lastPoint.current)} title="Locations"
-              className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-sm text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring">
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-md px-1.5 py-1 text-[13px] text-muted-foreground xl:px-2 xl:text-sm hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring">
               <MapPin className="size-4" aria-hidden /><span className="max-lg:hidden">Locations</span>
             </button>
           </nav>
-          <div className="text-sm text-muted-foreground">Issued {issuedLabel(meta.issued)}</div>
         </div>
       </header>
 

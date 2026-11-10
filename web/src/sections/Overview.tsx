@@ -25,16 +25,24 @@ export function Headline({ data }: { data: Briefing }) {
 function Overview({ data }: { data: Briefing }) {
   const s = data.summary!
   return (
-    <div className="space-y-4">
-      <h1 className="max-w-[26ch] text-[2.75rem] leading-[1.08] font-semibold tracking-tight text-balance max-sm:text-3xl">{s.headline}</h1>
-      {s.lede && <p className="max-w-[68ch] text-base text-pretty text-muted-foreground">{s.lede}</p>}
-      <ChangedSince data={data} />
-      <ObservedHighlights data={data} />
-      <div className="flex flex-wrap items-center gap-2">
-        <RunStatus data={data} />
-        <EditionNote data={data} />
+    <Hero data={data}>
+      <h1 className="max-w-[24ch] text-[2.75rem] leading-[1.08] font-semibold tracking-tight text-balance max-sm:text-3xl">{s.headline}</h1>
+      {s.lede && <p className="max-w-[62ch] text-[17px] leading-relaxed text-pretty text-muted-foreground">{s.lede}</p>}
+    </Hero>
+  )
+}
+
+/** The headline and lead on the left; what changed since the last update and what's been
+ *  observed beside them on wide screens (below on narrow ones). */
+function Hero({ data, children }: { data: Briefing; children: React.ReactNode }) {
+  const side = [<ChangedSince key="c" data={data} />, <ObservedHighlights key="o" data={data} />]
+  return (
+    <div className="grid items-start gap-x-14 gap-y-8 lg:grid-cols-[minmax(0,1fr)_minmax(300px,380px)]">
+      <div className="space-y-4">
+        {children}
         {data.meta.demo && <Badge variant="possible">Demo data, rendered from synthetic fields</Badge>}
       </div>
+      <aside className="space-y-5 rounded-xl border bg-card p-5 empty:hidden">{side}</aside>
     </div>
   )
 }
@@ -48,7 +56,7 @@ function LegacyHeadline({ data }: { data: Briefing }) {
   const w = data.wettest
   const list = (xs: string[]) => (xs.length < 2 ? xs.join("") : `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`)
   return (
-    <div className="space-y-4">
+    <Hero data={data}>
       <h1 className="max-w-[26ch] text-[2.75rem] leading-[1.08] font-semibold tracking-tight text-balance max-sm:text-3xl">
         {notable.length ? `${notable[0].lead}.` : "A quiet two weeks: nothing stands out across the region."}
       </h1>
@@ -69,26 +77,21 @@ function LegacyHeadline({ data }: { data: Briefing }) {
         )}
         {quiet.length > 0 && notable.length > 0 && <>Quiet: {list(quiet)}.</>}
       </p>
-      <div className="flex flex-wrap items-center gap-2">
-        <RunStatus data={data} />
-        <EditionNote data={data} />
-        {data.meta.demo && <Badge variant="possible">Demo data, rendered from synthetic fields</Badge>}
-      </div>
-    </div>
+    </Hero>
   )
 }
 
 /** Which model cycle this edition is built on, and, after a 18Z, 00Z or 06Z cycle, that the first
  *  day's figures only cover the rest of that day. */
-function EditionNote({ data }: { data: Briefing }) {
+export function EditionNote({ data }: { data: Briefing }) {
   const c = data.meta.cycle
   if (!c) return null
   const t = new Date(c)
   const local = t.toLocaleTimeString("en-US", { timeZone: "America/Los_Angeles", hour: "numeric" })
   const partial = (data.meta.firstDayHours ?? 24) < 24
   return (
-    <span className="text-[13px] text-muted-foreground">
-      {String(t.getUTCHours()).padStart(2, "0")}Z update{partial && <> · the first day covers {local} onward</>}
+    <span>
+      {String(t.getUTCHours()).padStart(2, "0")}Z run{partial && <span className="max-2xl:hidden"> · first day from {local}</span>}
     </span>
   )
 }

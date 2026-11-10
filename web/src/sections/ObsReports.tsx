@@ -274,16 +274,20 @@ export function ObservedHighlights({ data }: { data: Briefing }) {
   }, [o])
   if (!items.length) return null
   return (
-    <p className="max-w-[68ch] text-[13px] text-muted-foreground">
-      <span className="font-medium text-foreground">Observed lately: </span>
-      {items.map((x, i) => (
-        <span key={x.what}>
-          {i > 0 && " · "}
-          {x.what} <span className="font-semibold text-foreground tabular-nums">{x.text}</span>{" "}
-          {x.loc ? <button type="button" onClick={() => openLocation(x.loc!)} className="hover:underline">at {x.where}</button> : `at ${x.where}`}
-          {x.when && <> ({ptDayHour(x.when)})</>}
-        </span>
-      ))}
-    </p>
+    <section className="space-y-2">
+      <h2 className="text-sm font-semibold">Observed lately</h2>
+      <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-[13px]">
+        {items.map((x) => (
+          <React.Fragment key={x.what}>
+            <dt className="text-muted-foreground">{x.what}</dt>
+            <dd>
+              <span className="font-semibold tabular-nums">{x.text}</span>{" "}
+              {x.loc ? <button type="button" onClick={() => openLocation(x.loc!)} className="hover:underline">at {x.where}</button> : `at ${x.where}`}
+              {x.when && <span className="text-muted-foreground"> · {ptDayHour(x.when)}</span>}
+            </dd>
+          </React.Fragment>
+        ))}
+      </dl>
+    </section>
   )
 }

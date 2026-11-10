@@ -1,3 +1,5 @@
+import * as React from "react"
+
 import { dayOf } from "@/components/Takeaway"
 import { ptDayHour } from "@/lib/format"
 import type { Briefing, EventChange } from "@/types"
@@ -12,25 +14,33 @@ export function ChangedSince({ data }: { data: Briefing }) {
   if (!c?.prevIssued) return null
   const ev = c.events
   const rank = (e: EventChange) => (e.level === "likely" ? 0 : 1)
-  const items: string[] = []
-  const nw = [...ev.new].sort((a, b) => rank(a) - rank(b) || a.start.localeCompare(b.start)).slice(0, 2)
-  if (nw.length) items.push(`new: ${nw.map((e) => `${e.label.toLowerCase()} ${when(e)}${e.level ? ` (${LEVEL[e.level]})` : ""}`).join(", ")}`)
-  for (const e of ev.upgraded.slice(0, 2)) items.push(`${e.label.toLowerCase()} ${when(e)} up to ${e.level}`)
-  for (const e of ev.downgraded.slice(0, 1)) items.push(`${e.label.toLowerCase()} ${when(e)} down to ${e.level ?? "unlikely"}`)
-  for (const e of ev.dropped.slice(0, 1)) items.push(`${e.label.toLowerCase()} ${when(e)} dropped`)
-  for (const e of ev.same.filter((x) => x.shifted).slice(0, 1)) items.push(`${e.label.toLowerCase()} moved to ${when(e)}`)
+  const cap = (x: string) => x.charAt(0).toUpperCase() + x.slice(1)
+  const rows: [string, string][] = []
+  for (const e of [...ev.new].sort((a, b) => rank(a) - rank(b) || a.start.localeCompare(b.start)).slice(0, 2))
+    rows.push(["New", `${cap(e.label)}, ${when(e)}${e.level ? ` (${LEVEL[e.level]})` : ""}`])
+  for (const e of ev.upgraded.slice(0, 2)) rows.push(["Raised", `${cap(e.label)}, ${when(e)}, now ${e.level}`])
+  for (const e of ev.downgraded.slice(0, 1)) rows.push(["Lowered", `${cap(e.label)}, ${when(e)}, now ${e.level ?? "unlikely"}`])
+  for (const e of ev.dropped.slice(0, 1)) rows.push(["Dropped", `${cap(e.label)}, ${when(e)}`])
+  for (const e of ev.same.filter((x) => x.shifted).slice(0, 1)) rows.push(["Moved", `${cap(e.label)}, now ${when(e)}`])
   // a region's week total that moved by a quarter inch and 15% or more
   const w = c.windows.find((x) => x.days === 7) ?? c.windows[1] ?? c.windows[0]
   if (w) for (const r of data.regions) {
     const x = w.regions[r.id]
     if (x && Math.abs(x.delta) >= 0.25 && Math.abs(x.delta) >= 0.15 * Math.max(x.prev, 0.01))
-      items.push(`${r.name} ${w.label.toLowerCase().replace(/^next /, "")} rain ${x.delta > 0 ? "up" : "down"} ${Math.abs(x.delta).toFixed(2)}″ to ${x.now.toFixed(2)}″`)
+      rows.push([x.delta > 0 ? "Wetter" : "Drier", `${r.name}, ${w.label.toLowerCase().replace(/^next /, "")}: ${x.prev.toFixed(2)}″ → ${x.now.toFixed(2)}″`])
   }
   const more = ev.new.length + ev.upgraded.length + ev.downgraded.length + ev.dropped.length - Math.min(ev.new.length, 2) - Math.min(ev.upgraded.length, 2) - Math.min(ev.downgraded.length, 1) - Math.min(ev.dropped.length, 1)
   return (
-    <p className="max-w-[68ch] text-[13px] text-muted-foreground">
-      <span className="font-medium text-foreground">Changed since {ptDayHour(c.prevIssued)}: </span>
-      {items.length ? <>{items.map((x, i) => <span key={i}>{i > 0 && " · "}{i === 0 ? x.charAt(0).toUpperCase() + x.slice(1) : x}</span>)}{more > 0 && ` · ${more} more in the timeline`}.</> : "No meaningful changes."}
-    </p>
+    <section className="space-y-2">
+      <h2 className="text-sm font-semibold">Since the last update <span className="font-normal text-muted-foreground">· {ptDayHour(c.prevIssued)}</span></h2>
+      {rows.length ? (
+        <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-[13px]">
+          {rows.map(([k, v], i) => (
+            <React.Fragment key={i}><dt className="text-muted-foreground">{k}</dt><dd>{v}</dd></React.Fragment>
+          ))}
+        </dl>
+      ) : <p className="text-[13px] text-muted-foreground">No meaningful changes.</p>}
+      {more > 0 && <p className="text-xs text-muted-foreground">{more} more change{more > 1 ? "s" : ""} in Impacts to watch.</p>}
+    </section>
   )
 }
