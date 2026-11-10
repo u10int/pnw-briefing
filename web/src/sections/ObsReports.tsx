@@ -21,6 +21,8 @@ const WHAT: Record<V, string> = {
 /** Which storm report kinds go with each card. */
 const KINDS: Record<V, ObsReport["kind"][]> = { precip: ["rain", "flood", "ice"], gust: ["gust", "damage"], snow: ["snow", "ice"] }
 const RAMP = { precip: PRECIP, gust: GUST, snow: SNOW }
+/** The colour scale for each kind of report with an amount (wind damage, flooding and ice have none). */
+const REPORT_RAMP: Partial<Record<ObsReport["kind"], typeof PRECIP>> = { gust: GUST, rain: PRECIP, snow: SNOW }
 
 export function fmt(v: V, x: N) {
   if (x == null) return "–"
@@ -140,9 +142,13 @@ function ReportList({ reports }: { reports: ObsReport[] }) {
         <table className="w-full min-w-[480px] max-w-3xl text-sm">
           <tbody>
             {shown.map((r, i) => (
-              <tr key={i} className="border-b border-border/60 align-top last:border-b-0">
-                <td className="w-[88px] py-1.5 pr-3 font-semibold whitespace-nowrap tabular-nums">
-                  {reportMag(r) ?? <span className="font-normal">{typeName(r.type).replace(/^./, (c) => c.toUpperCase())}</span>}
+              <tr key={i} className="border-b border-border/60 align-middle last:border-b-0">
+                <td className="w-[96px] py-1.5 pr-3">
+                  {/* the value on its data type's colour scale, as in the tables above */}
+                  <div className={`rounded-[4px] px-2 py-1 text-center whitespace-nowrap tabular-nums ${r.mag != null ? "font-semibold" : "bg-muted/60"}`}
+                    style={r.mag != null && REPORT_RAMP[r.kind] ? rampCell(r.mag, REPORT_RAMP[r.kind]!, true) : undefined}>
+                    {reportMag(r) ?? typeName(r.type).replace(/^./, (c) => c.toUpperCase())}
+                  </div>
                 </td>
                 <td className="py-1.5 pr-3">
                   {r.place}{r.state ? `, ${r.state}` : ""}
