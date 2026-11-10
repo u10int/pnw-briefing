@@ -60,7 +60,7 @@ function useMarineAlerts(data: Briefing): { items: MarineAlert[] | null; live: b
 
 const RANK = (e: string) => (/hurricane/i.test(e) ? 0 : /storm/i.test(e) ? 1 : /gale/i.test(e) ? 2 : /hazardous seas/i.test(e) ? 3 : /warning/i.test(e) ? 4 : /watch/i.test(e) ? 5 : 6)
 
-function MarineWarningsCard({ data }: { data: Briefing }) {
+export function MarineWarningsCard({ data }: { data: Briefing }) {
   const { items, live } = useMarineAlerts(data)
   const coastal: Alert[] = (data.alerts?.items ?? []).filter((a) => COASTAL_EVENTS.test(a.event))
   const marine = [...(items ?? [])].sort((a, b) => RANK(a.event) - RANK(b.event))
@@ -101,7 +101,7 @@ function Spark({ xs }: { xs: number[] }) {
   return <svg width={w} height={h} className="text-muted-foreground" aria-hidden><polyline points={pts} fill="none" stroke="currentColor" strokeWidth="1.5" /></svg>
 }
 
-function BuoysCard({ data }: { data: Briefing }) {
+export function BuoysCard({ data }: { data: Briefing }) {
   const bs = data.coast?.buoys ?? []
   if (!bs.length) return null
   return (
@@ -157,7 +157,7 @@ function BuoysCard({ data }: { data: Briefing }) {
 
 const LINE_COLORS = ["#1f5bd6", "#d62d20", "#1e9e4a", "#8e3fb5", "#e08a0b", "#0b7a75", "#6b7280"]
 
-function WaveForecastCard({ data }: { data: Briefing }) {
+export function WaveForecastCard({ data }: { data: Briefing }) {
   const ws = data.coast?.waves ?? []
   const groups = groupBy(ws)
   const [area, setArea] = React.useState<string>(groups[0]?.[0] ?? AREAS[0])
@@ -239,7 +239,7 @@ function TideFlag({ m }: { m: N }) {
   return <Badge variant={m <= 0 ? "likely" : "possible"} className="mt-0.5 px-1.5 py-0 text-[10px]">{m <= 0 ? `${Math.abs(m).toFixed(1)} ft over` : `${m.toFixed(1)} ft below`}</Badge>
 }
 
-function TidesCard({ data }: { data: Briefing }) {
+export function TidesCard({ data }: { data: Briefing }) {
   const ts = data.coast?.tides ?? []
   if (!ts.length) return null
   const days = [...new Set(ts.flatMap((g) => g.highs.map((h) => h.time.slice(0, 10))))].sort().slice(0, 7)

@@ -1,6 +1,6 @@
 import * as React from "react"
 
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { PRECIP, type Ramp, SNOW } from "@/lib/ramps"
 import { DayMatrix, dayLabel, dayStats, MEDIAN, type MatrixRow, ModelPick, modelDays, modelsWith, RampStrip, rampCell, regionDays, usePick } from "@/sections/DayMatrix"
@@ -21,7 +21,8 @@ const amt = (v: N, ramp: Ramp) => {
 const total = (xs: N[]) => (xs.some((x) => x != null) ? xs.reduce<number>((a, b) => a + (b ?? 0), 0) : null)
 
 /** `only` pins the card to one variable and hides the Rain/Snow switch (the Snow tab's copy). */
-export function RainByDayCard({ data, only }: { data: Briefing; only?: Var }) {
+/** `switcher`, when given, makes this the "By day" view of a combined By location card. */
+export function RainByDayCard({ data, only, switcher }: { data: Briefing; only?: Var; switcher?: React.ReactNode }) {
   const [sel, setV] = React.useState<Var>(only ?? "precip")
   const v = only ?? sel
   const nd = data.dates.length
@@ -56,12 +57,13 @@ export function RainByDayCard({ data, only }: { data: Briefing; only?: Var }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>{v === "precip" ? "Rain by day" : "Snow by day"}</CardTitle>
+        <CardTitle>{switcher ? "By location" : v === "precip" ? "Rain by day" : "Snow by day"}</CardTitle>
         <CardDescription>
           {model ? <>{model.label}'s forecast for each 12Z – 12Z day ({what}), out to day {model.days}.</>
                  : <>Each location's multi-model median for each 12Z – 12Z day ({what}).</>}
           {" "}Region rows average their locations. Hover for the range across models{v === "precip" && " and the normal for the day"}.
         </CardDescription>
+        {switcher && <CardAction>{switcher}</CardAction>}
       </CardHeader>
       <CardContent className="space-y-3">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-3">

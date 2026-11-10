@@ -1,6 +1,6 @@
 import * as React from "react"
 
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { GUST, type Ramp, WIND } from "@/lib/ramps"
 import { DayMatrix, dayLabel, dayStats, MEDIAN, type MatrixRow, ModelPick, modelDays, modelsWith, RampStrip, rampCell, regionDays, usePick } from "@/sections/DayMatrix"
@@ -17,7 +17,7 @@ const peak = (xs: N[]) => {
 }
 
 /** Each location's strongest gust or sustained wind per day, as a multi-model median or one model. */
-export function WindByDayCard({ data }: { data: Briefing }) {
+export function WindByDayCard({ data, switcher }: { data: Briefing; switcher?: React.ReactNode }) {
   const nd = data.dates.length
   const avail = React.useMemo(() => (["gust", "wind"] as Var[]).filter((x) => modelsWith(data, KEY[x]).length), [data])
   const [sel, setV] = React.useState<Var>("gust")
@@ -48,11 +48,12 @@ export function WindByDayCard({ data }: { data: Briefing }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>{v === "gust" ? "Gusts by day" : "Wind by day"}</CardTitle>
+        <CardTitle>{switcher ? "By location" : v === "gust" ? "Gusts by day" : "Wind by day"}</CardTitle>
         <CardDescription>
           {model ? `${model.label}'s` : "Each location's multi-model median"} {WORD[v]} for each 12Z – 12Z day, in mph
           {model && `, out to day ${model.days}`}. Region rows show their windiest location.
         </CardDescription>
+        {switcher && <CardAction>{switcher}</CardAction>}
       </CardHeader>
       <CardContent className="space-y-3">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-3">

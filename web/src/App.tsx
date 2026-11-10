@@ -19,7 +19,7 @@ import { TrendsCard } from "@/sections/Trends"
 import { TempVerificationCard, VerificationCard } from "@/sections/Verify"
 import { ConvectiveCard } from "@/sections/Convective"
 import { ObsReportsCard } from "@/sections/ObsReports"
-import { CoastSection } from "@/sections/Coast"
+import { BuoysCard, MarineWarningsCard, TidesCard, WaveForecastCard } from "@/sections/Coast"
 import { PeakTimingCard } from "@/sections/Timing"
 import { ByLocation, RegionTotals } from "@/sections/Totals"
 import { WindByLocation, WindPeaks } from "@/sections/WindTotals"
@@ -82,6 +82,52 @@ function Section({ title, description, action, children, first }: {
       {children}
     </section>
   )
+}
+
+/** One of a tab's groups (Forecast, Observed, How the models have done), under a small rule. */
+type Group = { id: string; title: string; show: unknown; children: React.ReactNode }
+const GROUP_TITLES = { forecast: "Forecast", observed: "Observed", verify: "How the models have done" }
+
+/** A tab's cards in its groups, with links at the top that jump to each (when there's more than one). */
+function Groups({ tab, groups }: { tab: string; groups: Group[] }) {
+  const gs = groups.filter((g) => g.show)
+  return (
+    <>
+      {gs.length > 1 && (
+        <nav className="flex flex-wrap items-center gap-x-1.5 text-sm text-muted-foreground" aria-label="Sections of this tab">
+          {gs.map((g, i) => (
+            <React.Fragment key={g.id}>
+              {i > 0 && <span aria-hidden>·</span>}
+              <a href={`#${tab}`} onClick={(e) => { e.preventDefault(); document.getElementById(`${tab}-${g.id}`)?.scrollIntoView({ behavior: "smooth", block: "start" }) }}
+                className="hover:text-foreground hover:underline">{g.title}</a>
+            </React.Fragment>
+          ))}
+        </nav>
+      )}
+      {gs.map((g) => (
+        <div key={g.id} className="space-y-4">
+          {gs.length > 1 && (
+            <div id={`${tab}-${g.id}`} className="flex scroll-mt-24 items-center gap-3 pt-4">
+              <h3 className="text-xs font-semibold tracking-wide whitespace-nowrap text-muted-foreground uppercase">{g.title}</h3>
+              <div className="h-px flex-1 bg-border" />
+            </div>
+          )}
+          {g.children}
+        </div>
+      ))}
+    </>
+  )
+}
+
+/** "By day" and "By model" views of one By location card. */
+function LocationViews({ day, model }: { day: (s: React.ReactNode) => React.ReactNode; model: (s: React.ReactNode) => React.ReactNode }) {
+  const [view, setView] = React.useState<"day" | "model">("day")
+  const sw = (
+    <Tabs value={view} onValueChange={(v) => setView(v as "day" | "model")}>
+      <TabsList><TabsTrigger value="day">By day</TabsTrigger><TabsTrigger value="model">By model</TabsTrigger></TabsList>
+    </Tabs>
+  )
+  return <>{view === "day" ? day(sw) : model(sw)}</>
 }
 
 export default function App() {
@@ -222,74 +268,100 @@ export default function App() {
 
           <TabsContent value="precip">
             <Section title="Precipitation" first
-              description="How much falls, when and where: region totals for each window, each location and day, every model's total at each location, the model maps, and how the models have been doing lately."
+              description="How much falls, when and where: region totals for each window, each location by day or by model, when the heaviest comes, and the model maps; then what has fallen lately, and how the models have been doing."
               action={<MapLink req={{ mode: "totals", variable: "precip", days: 7 }} label="Precipitation totals on the map" />}>
-              <RegionTotals data={data} />
-              <RainByDayCard data={data} />
-              <PeakTimingCard data={data} v="precip" />
-              <ObsReportsCard data={data} v="precip" />
-              <ByLocation data={data} />
-              <MapCard title="Precipitation maps" description="Each model on its own grid, then the mean and spread on a common grid."
-                tabs={[
-                  { id: "p48", label: "Next 48 hours", src: data.maps.short, alt: "48-hour precipitation by model, with mean and spread", note: "Liquid equivalent. Spread is the highest minus the lowest model at each grid cell. Regional models next to the blend and the global models, over the same two 12Z – 12Z days." },
-                  { id: "pl", label: `Through day ${meta.days}`, src: data.maps.long, alt: "Full-range precipitation by model", note: "Each panel is labeled with the number of days the model covers; mean and spread use only the days every model covers." },
-                ]} />
-              <VerificationCard data={data} />
+              <Groups tab="precip" groups={[
+                { id: "forecast", title: GROUP_TITLES.forecast, show: true, children: <>
+                  <RegionTotals data={data} />
+                  <LocationViews day={(sw) => <RainByDayCard data={data} switcher={sw} />} model={(sw) => <ByLocation data={data} switcher={sw} />} />
+                  <PeakTimingCard data={data} v="precip" />
+                  <MapCard title="Precipitation maps" description="Each model on its own grid, then the mean and spread on a common grid."
+                    tabs={[
+                      { id: "p48", label: "Next 48 hours", src: data.maps.short, alt: "48-hour precipitation by model, with mean and spread", note: "Liquid equivalent. Spread is the highest minus the lowest model at each grid cell. Regional models next to the blend and the global models, over the same two 12Z – 12Z days." },
+                      { id: "pl", label: `Through day ${meta.days}`, src: data.maps.long, alt: "Full-range precipitation by model", note: "Each panel is labeled with the number of days the model covers; mean and spread use only the days every model covers." },
+                    ]} />
+                </> },
+                { id: "observed", title: GROUP_TITLES.observed, show: data.obsReports || data.observed, children: <>
+                  <ObsReportsCard data={data} v="precip" />
+                  <ObservedCard data={data} />
+                </> },
+                { id: "verify", title: GROUP_TITLES.verify, show: data.verification, children: <VerificationCard data={data} /> },
+              ]} />
             </Section>
           </TabsContent>
 
           <TabsContent value="flood">
             <Section title="Flooding" first
-              description="What turns rain into a problem: the official river forecasts, how wet it has already been, how close that puts the Seattle area to the landslide threshold, whether an atmospheric river is coming, and how many ensemble members reach the heavy-rain thresholds."
+              description="What turns rain into a problem: the official river forecasts, whether an atmospheric river is coming, and how many ensemble members reach the heavy-rain thresholds; then how close recent rain puts the Seattle area to the landslide threshold. Recent rainfall itself is on the Precipitation tab."
               action={<div className="flex flex-wrap gap-2">
                 <MapLink req={{ mode: "totals", variable: "ar", days: 7 }} label="AR outlook on the map" />
                 <MapLink req={{ mode: "hourly", layer: "ivt", isobars: true }} label="Moisture transport (IVT) on the map" />
               </div>}>
-              <RiversCard data={data} />
-              <ObservedCard data={data} />
-              <LandslideCard data={data} />
-              <ArCard data={data} />
-              <OddsCard data={data} />
+              <Groups tab="flood" groups={[
+                { id: "forecast", title: GROUP_TITLES.forecast, show: true, children: <>
+                  <RiversCard data={data} />
+                  <ArCard data={data} />
+                  <OddsCard data={data} />
+                </> },
+                { id: "observed", title: GROUP_TITLES.observed, show: data.landslide?.points.length, children: <LandslideCard data={data} /> },
+              ]} />
             </Section>
           </TabsContent>
 
           <TabsContent value="wind">
             <Section title="Wind" first
-              description="The strongest gusts by region and location in each model, day by day, the pressure gradients behind the region's classic wind events (south wind, Gorge and Fraser outflow, onshore pushes), and the model maps."
+              description="The strongest gusts by region and location, by day or by model, when they come, the pressure gradients behind the region's classic wind events (south wind, Gorge and Fraser outflow, onshore pushes), and the model maps; then the gusts actually measured and reported."
               action={<MapLink req={{ mode: "hourly", layer: "pgrad", isobars: true, pairs: true }} label="Pressure gradients on the map" />}>
-              <WindPeaks data={data} />
-              <WindByDayCard data={data} />
-              <PeakTimingCard data={data} v="gust" />
-              <ObsReportsCard data={data} v="gust" />
-              <WindByLocation data={data} />
-              <GradientsCard data={data} />
-              <MapCard title="Wind and gust maps" description="The strongest sustained wind and gust in each model."
-                tabs={[...pickExtremes(data, "short", "the next 48 hours", ["gust", "wind"], " (48 h)"),
-                       ...pickExtremes(data, "long", "each model's full range", ["gust", "wind"], ` (to day ${meta.days})`)]} />
+              <Groups tab="wind" groups={[
+                { id: "forecast", title: GROUP_TITLES.forecast, show: true, children: <>
+                  <WindPeaks data={data} />
+                  <LocationViews day={(sw) => <WindByDayCard data={data} switcher={sw} />} model={(sw) => <WindByLocation data={data} switcher={sw} />} />
+                  <PeakTimingCard data={data} v="gust" />
+                  <GradientsCard data={data} />
+                  <MapCard title="Wind and gust maps" description="The strongest sustained wind and gust in each model."
+                    tabs={[...pickExtremes(data, "short", "the next 48 hours", ["gust", "wind"], " (48 h)"),
+                           ...pickExtremes(data, "long", "each model's full range", ["gust", "wind"], ` (to day ${meta.days})`)]} />
+                </> },
+                { id: "observed", title: GROUP_TITLES.observed, show: data.obsReports, children: <ObsReportsCard data={data} v="gust" /> },
+              ]} />
             </Section>
           </TabsContent>
 
           <TabsContent value="coast">
             <Section title="Coast and marine" first
-              description="The outer coast, the Strait of Juan de Fuca, the San Juans and Puget Sound: marine warnings, what the buoys are reading, the wave forecast, and the week's high tides against each gauge's flood level.">
-              <CoastSection data={data} />
+              description="The outer coast, the Strait of Juan de Fuca, the San Juans and Puget Sound: marine warnings, the wave forecast and the week's high tides against each gauge's flood level; then what the buoys are reading.">
+              {data.coast ? <Groups tab="coast" groups={[
+                { id: "forecast", title: GROUP_TITLES.forecast, show: true, children: <>
+                  <MarineWarningsCard data={data} />
+                  <WaveForecastCard data={data} />
+                  <TidesCard data={data} />
+                </> },
+                { id: "observed", title: GROUP_TITLES.observed, show: data.coast.buoys.length, children: <BuoysCard data={data} /> },
+              ]} /> : <p className="text-sm text-muted-foreground">Coast and marine data aren't in this briefing.</p>}
+              {data.coast && <p className="text-xs text-muted-foreground">Sources: {data.coast.source}.</p>}
             </Section>
           </TabsContent>
 
           <TabsContent value="snow">
             <Section title="Snow and mountains" first
-              description="Where the snow level sits against the passes, how much snow the models put down, the snowpack so far, and avalanche danger."
+              description="Where the snow level sits against the passes, how much snow the models put down and avalanche danger; then the new snow observed and the snowpack so far."
               action={<MapLink req={{ mode: "hourly", layer: "frz" }} label="Freezing level on the map" />}>
-              <SnowLevelCard data={data} />
-              <RainByDayCard data={data} only="snow" />
-              <ObsReportsCard data={data} v="snow" />
-              <MapCard title="Snowfall maps" description="From each model's own snow field; models without one are left out."
-                tabs={[
-                  { id: "s48", label: "Next 48 hours", src: data.maps.snow_short, alt: "48-hour snowfall by model", note: "Model snowfall over the next two 12Z – 12Z days." },
-                  { id: "s7", label: "7 days", src: data.maps.snow_long, alt: "7-day snowfall by model", note: "Models with their own snow field." },
-                ]} />
-              <SnowpackCard data={data} />
-              <AvalancheCard data={data} />
+              <Groups tab="snow" groups={[
+                { id: "forecast", title: GROUP_TITLES.forecast, show: true, children: <>
+                  <SnowLevelCard data={data} />
+                  <RainByDayCard data={data} only="snow" />
+                  <AvalancheCard data={data} />
+                  <MapCard title="Snowfall maps" description="From each model's own snow field; models without one are left out."
+                    tabs={[
+                      { id: "s48", label: "Next 48 hours", src: data.maps.snow_short, alt: "48-hour snowfall by model", note: "Model snowfall over the next two 12Z – 12Z days." },
+                      { id: "s7", label: "7 days", src: data.maps.snow_long, alt: "7-day snowfall by model", note: "Models with their own snow field." },
+                    ]} />
+                </> },
+                { id: "observed", title: GROUP_TITLES.observed, show: data.obsReports || data.snowpack?.areas.length, children: <>
+                  <ObsReportsCard data={data} v="snow" />
+                  <SnowpackCard data={data} />
+                </> },
+              ]} />
             </Section>
           </TabsContent>
 
@@ -297,11 +369,15 @@ export default function App() {
             <Section title="Temperature" first
               description="Daily highs and lows against normal for each location, the warmest and coldest each model gets, and how the models' highs and lows have verified lately."
               action={<MapLink req={{ mode: "totals", variable: "tmaxdep", days: 7 }} label="Departures on the map" />}>
-              <TempDepartureCard data={data} />
-              <MapCard title="High and low temperature maps" description="The highest and lowest 2 m temperature in each model."
-                tabs={[...pickExtremes(data, "short", "the next 48 hours", ["tmax", "tmin"], " (48 h)"),
-                       ...pickExtremes(data, "long", "each model's full range", ["tmax", "tmin"], ` (to day ${meta.days})`)]} />
-              <TempVerificationCard data={data} />
+              <Groups tab="temp" groups={[
+                { id: "forecast", title: GROUP_TITLES.forecast, show: true, children: <>
+                  <TempDepartureCard data={data} />
+                  <MapCard title="High and low temperature maps" description="The highest and lowest 2 m temperature in each model."
+                    tabs={[...pickExtremes(data, "short", "the next 48 hours", ["tmax", "tmin"], " (48 h)"),
+                           ...pickExtremes(data, "long", "each model's full range", ["tmax", "tmin"], ` (to day ${meta.days})`)]} />
+                </> },
+                { id: "verify", title: GROUP_TITLES.verify, show: data.tempVerification, children: <TempVerificationCard data={data} /> },
+              ]} />
             </Section>
           </TabsContent>
 
@@ -328,11 +404,16 @@ export default function App() {
             <Section title="Outlooks and discussions" first
               description="Thunderstorm outlooks, mesoscale discussions and storm reports from SPC, the national excessive rainfall and extended outlooks, and the full forecast discussions from the Seattle and Portland offices."
               action={data.convective ? <MapLink req={{ mode: "totals", variable: "storms", days: 1 }} label="Thunderstorm outlook on the map" /> : undefined}>
-              <ConvectiveCard data={data} />
-              {data.outlooks ? <>
-                <OutlooksCard data={data} />
-                <FullDiscussions data={data} />
-              </> : <p className="text-muted-foreground">The outlooks and discussions weren't available for this briefing.</p>}
+              <Groups tab="outlooks" groups={[
+                { id: "forecast", title: GROUP_TITLES.forecast, show: true, children: <>
+                  <ConvectiveCard data={data} part="outlook" />
+                  {data.outlooks ? <>
+                    <OutlooksCard data={data} />
+                    <FullDiscussions data={data} />
+                  </> : <p className="text-muted-foreground">The outlooks and discussions weren't available for this briefing.</p>}
+                </> },
+                { id: "observed", title: GROUP_TITLES.observed, show: data.convective, children: <ConvectiveCard data={data} part="now" /> },
+              ]} />
             </Section>
           </TabsContent>
 

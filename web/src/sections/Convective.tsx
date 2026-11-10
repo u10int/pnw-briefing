@@ -67,22 +67,27 @@ function Places({ names }: { names: string[] }) {
 
 /** Thunderstorms: SPC's mesoscale discussions for the area right now (fetched live), its
  *  convective outlook for each day, and the storm reports from the last three days. */
-export function ConvectiveCard({ data }: { data: Briefing }) {
+/** `part` splits the card for the tab's groups: "outlook" is SPC's day-by-day outlook (forecast),
+ *  "now" the current mesoscale discussions and recent storm reports (observed). */
+export function ConvectiveCard({ data, part }: { data: Briefing; part?: "outlook" | "now" }) {
   const c = data.convective
   const mds = useMds(data)
   if (!c) return null
+  const showNow = part !== "outlook", showOutlook = part !== "now"
   const days = c.outlooks.filter((o) => o.areas.length)
   const cats = (areas: ConvArea[]) => areas.filter((a) => a.kind === "cat").sort((a, b) => b.rank - a.rank)
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Thunderstorms</CardTitle>
+        <CardTitle>{part === "outlook" ? "Thunderstorm outlook" : part === "now" ? "Thunderstorms now and lately" : "Thunderstorms"}</CardTitle>
         <CardDescription>
-          The Storm Prediction Center's mesoscale discussions for the area right now, its convective outlook for each day, and storm reports from the last three days.
+          {part === "outlook" ? "The Storm Prediction Center's convective outlook for each day."
+            : part === "now" ? "The Storm Prediction Center's mesoscale discussions for the area right now, and storm reports from the last three days."
+            : "The Storm Prediction Center's mesoscale discussions for the area right now, its convective outlook for each day, and storm reports from the last three days."}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
-        <section>
+        {showNow && <section>
           <SectionHead>Mesoscale discussions</SectionHead>
           {mds == null ? <p className="text-sm text-muted-foreground">Checking SPC for current discussions…</p>
             : !mds.length ? <p className="text-sm text-muted-foreground">No mesoscale discussions for the region right now.</p>
@@ -105,9 +110,9 @@ export function ConvectiveCard({ data }: { data: Briefing }) {
                 ))}
               </ul>
             )}
-        </section>
+        </section>}
 
-        <section>
+        {showOutlook && <section>
           <SectionHead>Convective outlook</SectionHead>
           {!days.length ? <p className="text-sm text-muted-foreground">No thunderstorms in SPC's outlook for the region.</p> : (
             <ul className="divide-y divide-border/70 rounded-md border text-sm">
@@ -151,9 +156,9 @@ export function ConvectiveCard({ data }: { data: Briefing }) {
               })}
             </ul>
           )}
-        </section>
+        </section>}
 
-        <section>
+        {showNow && <section>
           <SectionHead>Storm reports, last three days</SectionHead>
           {!c.reports.length ? <p className="text-sm text-muted-foreground">No tornado, wind or hail reports in the region.</p> : (
             <div className="overflow-x-auto">
@@ -174,7 +179,7 @@ export function ConvectiveCard({ data }: { data: Briefing }) {
               </table>
             </div>
           )}
-        </section>
+        </section>}
       </CardContent>
     </Card>
   )

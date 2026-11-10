@@ -249,7 +249,7 @@ function DumbbellPanel({ rows: list, order, regions, row: ROW, label, unit }: {
 }
 
 /** Model × location table with a window switch; cells shaded by amount. */
-export function ByLocation({ data }: { data: Briefing }) {
+export function ByLocation({ data, switcher }: { data: Briefing; switcher?: React.ReactNode }) {
   const [win, setWin] = React.useState(String(data.totals[data.totals.length - 1].days))
   const [mode, setMode] = React.useState<"in" | "pct">("in")
   const t = data.totals.find((x) => String(x.days) === win)!
@@ -278,6 +278,7 @@ export function ByLocation({ data }: { data: Briefing }) {
           {ens.length > 0 && <> Hover an ensemble median for the 10th – 90th percentile range{ensPts.length < pts.length ? ` (ensembles are computed for ${ensPts.join(", ")})` : ""}.</>}
         </CardDescription>
         <CardAction className="flex flex-wrap justify-start gap-2 @xl/card-header:justify-end">
+          {switcher}
           {data.normals && (
             <Tabs value={mode} onValueChange={(v) => setMode(v as "in" | "pct")}>
               <TabsList>

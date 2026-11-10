@@ -61,7 +61,7 @@ export function WindPeaks({ data }: { data: Briefing }) {
 }
 
 /** Model × location table of the strongest gust (or sustained wind) in a window. */
-export function WindByLocation({ data }: { data: Briefing }) {
+export function WindByLocation({ data, switcher }: { data: Briefing; switcher?: React.ReactNode }) {
   const tw = data.trends?.windows ?? []
   const wins = tw.length ? tw.map((w) => ({ days: w.days, label: w.label })) : data.totals.map((t) => ({ days: t.days, label: t.label }))
   const [win, setWin] = React.useState(String(wins[Math.min(1, wins.length - 1)]?.days ?? 7))
@@ -83,6 +83,7 @@ export function WindByLocation({ data }: { data: Briefing }) {
           {chg ? "; the row below it is the change in that median since yesterday" : ""}.
         </CardDescription>
         <CardAction className="flex flex-wrap justify-start gap-2 @xl/card-header:justify-end">
+          {switcher}
           <Tabs value={v} onValueChange={(x) => setV(x as Var)}>
             <TabsList>
               <TabsTrigger value="gust">Gust</TabsTrigger>
