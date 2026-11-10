@@ -3,7 +3,7 @@ import * as React from "react"
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { PRECIP, type Ramp, SNOW } from "@/lib/ramps"
-import { DayMatrix, dayLabel, dayStats, MEDIAN, type MatrixRow, ModelPick, modelDays, modelsWith, RampStrip, rampCell, regionDays, usePick } from "@/sections/DayMatrix"
+import { coreModels, DayMatrix, dayLabel, dayStats, listNames, MEDIAN, type MatrixRow, ModelPick, modelDays, modelsWith, RampStrip, rampCell, regionDays, usePick } from "@/sections/DayMatrix"
 import type { Briefing, N } from "@/types"
 
 type Var = "precip" | "snow"
@@ -28,10 +28,11 @@ export function RainByDayCard({ data, only, switcher }: { data: Briefing; only?:
   const nd = data.dates.length
   const ramp = RAMP[v]
   const models = React.useMemo(() => modelsWith(data, KEY[v]), [data, v])
-  const { pick, model, setPick } = usePick(models)
+  const core = React.useMemo(() => coreModels(data, models), [data, models])
+  const { pick, model, setPick, only: coreOnly } = usePick(models, core)
   const hasSnow = React.useMemo(() => data.models.some((m) => Object.values(m.data).some((d) => d.snowfall_sum?.some((x) => (x ?? 0) > 0))), [data])
 
-  const stats = React.useMemo(() => dayStats(data, KEY[v]), [data, v])
+  const stats = React.useMemo(() => dayStats(data, KEY[v], coreOnly), [data, v, coreOnly])
   const byPoint = React.useMemo(() => Object.fromEntries(data.points.map((p) =>
     [p.name, model ? modelDays(model, p.name, KEY[v], nd) : stats[p.name].map((s) => s.med)])), [data, v, model, stats, nd])
 
@@ -60,6 +61,7 @@ export function RainByDayCard({ data, only, switcher }: { data: Briefing; only?:
         <CardTitle>{switcher ? "By location" : v === "precip" ? "Rain by day" : "Snow by day"}</CardTitle>
         <CardDescription>
           {model ? <>{model.label}'s forecast for each 12Z – 12Z day ({what}), out to day {model.days}.</>
+                 : coreOnly ? <>Each location's median of {listNames(coreOnly)} for each 12Z – 12Z day ({what}).</>
                  : <>Each location's multi-model median for each 12Z – 12Z day ({what}).</>}
           {" "}Region rows average their locations. Hover for the range across models{v === "precip" && " and the normal for the day"}.
         </CardDescription>
@@ -72,7 +74,7 @@ export function RainByDayCard({ data, only, switcher }: { data: Briefing; only?:
               <TabsList><TabsTrigger value="precip">Rain</TabsTrigger><TabsTrigger value="snow">Snow</TabsTrigger></TabsList>
             </Tabs>
           )}
-          <ModelPick models={models} value={pick} onChange={setPick} />
+          <ModelPick models={models} value={pick} onChange={setPick} core={core} />
           <div className="sm:ml-auto">
             <RampStrip ramp={ramp} range={v === "precip" ? [0.01, 4] : [0.1, 24]} unit="″" extra={<span className="ml-2">T = trace</span>} />
           </div>
@@ -80,7 +82,8 @@ export function RainByDayCard({ data, only, switcher }: { data: Briefing; only?:
         <DayMatrix dates={data.dates} rows={rows} leadHead="Total" leadSub={`${span} days`} dimFrom={model ? model.days : undefined}
           style={(x) => rampCell(x, ramp, true)} fmt={(x) => amt(x, ramp)} tip={tip} />
         <p className="text-xs text-muted-foreground">
-          {pick === MEDIAN
+          {coreOnly ? `The core median uses only ${listNames(coreOnly)} on every day, so it stays the same set of models through the range; it leaves out the high-resolution regional models' detail in the first two days.`
+            : pick === MEDIAN
             ? "The median uses whichever models reach that day, so the first two days include the high-resolution regional models and later days only the global ones."
             : `Days past ${model!.label}'s range are blank; the total covers its ${span} days.`}
         </p>

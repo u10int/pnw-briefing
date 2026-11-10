@@ -3,7 +3,7 @@ import * as React from "react"
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { TDEP, TEMP } from "@/lib/ramps"
-import { DayMatrix, dayLabel, MEDIAN, type MatrixRow, ModelPick, modelDays, modelsWith, RampStrip, rampCell, regionDays, usePick } from "@/sections/DayMatrix"
+import { coreModels, DayMatrix, dayLabel, listNames, MEDIAN, type MatrixRow, ModelPick, modelDays, modelsWith, RampStrip, rampCell, regionDays, usePick } from "@/sections/DayMatrix"
 import type { Briefing, N } from "@/types"
 import { MapButton } from "@/components/MapButton"
 
@@ -38,17 +38,24 @@ export function TempDepartureCard({ data }: { data: Briefing }) {
   const [show, setShow] = React.useState<Show>("dep")
   const [win, setWin] = React.useState<number>(() => td?.windows.find((w) => w.days === 7)?.days ?? td?.windows[0]?.days ?? 7)
   const models = React.useMemo(() => modelsWith(data, KEY[v]), [data, v])
-  const { pick, model, setPick } = usePick(models)
+  const core = React.useMemo(() => coreModels(data, models), [data, models])
+  const { pick, model, setPick, only } = usePick(models, core)
   if (!td) return null
   const w = td.windows.find((x) => x.days === win) ?? td.windows[0]
   const nd = td.dates.length
   const normal = (p: string, k: number) => td.normals[p]?.[v]?.[k] ?? null
 
   // each location's values: the multi-model median (as computed for the briefing) or one model
-  const actual = (p: string): N[] => model ? modelDays(model, p, KEY[v], nd) : (td.points[p]?.[v]?.forecast ?? []).slice(0, nd)
+  const coreMedian = (p: string): N[] => Array.from({ length: nd }, (_, k) => {
+    const xs = (only ?? []).map((m) => modelDays(m, p, KEY[v], nd)[k]).filter((x): x is number => x != null).sort((a, b) => a - b)
+    if (!xs.length) return null
+    const h = xs.length >> 1
+    return xs.length % 2 ? xs[h] : (xs[h - 1] + xs[h]) / 2
+  })
+  const actual = (p: string): N[] => model ? modelDays(model, p, KEY[v], nd) : only ? coreMedian(p) : (td.points[p]?.[v]?.forecast ?? []).slice(0, nd)
   const byPoint = Object.fromEntries(data.points.map((p) => {
     if (show === "actual") return [p.name, actual(p.name)]
-    if (!model) return [p.name, td.points[p.name]?.[v]?.departure ?? []]
+    if (!model && !only) return [p.name, td.points[p.name]?.[v]?.departure ?? []]
     return [p.name, actual(p.name).map((x, k) => { const n = normal(p.name, k); return x != null && n != null ? x - n : null })]
   })) as Record<string, N[]>
   const lead = (days: N[]) => mean(days.slice(0, w.days))
@@ -75,7 +82,7 @@ export function TempDepartureCard({ data }: { data: Briefing }) {
       <CardHeader>
         <CardTitle>{show === "dep" ? "Temperatures vs normal" : "Daily temperatures"}</CardTitle>
         <CardDescription>
-          {model ? `${model.label}'s` : "Each location's multi-model median"} daily {WORD[v]}{" "}
+          {model ? `${model.label}'s` : only ? `Each location's median of ${listNames(only)}` : "Each location's multi-model median"} daily {WORD[v]}{" "}
           {show === "dep" ? "against its 1991 – 2020 normal for the date (PRISM)" : "temperature"}{model && `, out to day ${model.days}`}.
           {" "}Region rows average their locations.
         </CardDescription>
@@ -101,7 +108,7 @@ export function TempDepartureCard({ data }: { data: Briefing }) {
           <Tabs value={show} onValueChange={(x) => setShow(x as Show)}>
             <TabsList><TabsTrigger value="dep">Vs normal</TabsTrigger><TabsTrigger value="actual">Actual</TabsTrigger></TabsList>
           </Tabs>
-          <ModelPick models={models} value={pick} onChange={setPick} />
+          <ModelPick models={models} value={pick} onChange={setPick} core={core} />
         </div>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <Tabs value={String(w.days)} onValueChange={(x) => setWin(Number(x))}>

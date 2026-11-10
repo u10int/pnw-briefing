@@ -13,6 +13,16 @@ import { openLocation } from "@/lib/locationlink"
  *  multi-model values behind them, cell colouring and the table itself. */
 
 export const MEDIAN = "median"
+/** The median of a few chosen models only (config core_models), every day the same set. */
+export const CORE = "core"
+const CORE_DEFAULT = ["GFS", "ECMWF IFS", "ECMWF AIFS"]
+/** The core models among `models`, in config order. */
+export function coreModels(data: Briefing, models: Model[]): Model[] {
+  const want = data.meta.coreModels?.length ? data.meta.coreModels : CORE_DEFAULT
+  return want.map((l) => models.find((m) => m.label === l)).filter((m): m is Model => !!m)
+}
+/** "GFS, ECMWF IFS and ECMWF AIFS". */
+export const listNames = (ms: Model[]) => ms.length < 2 ? ms.map((m) => m.label).join("") : `${ms.slice(0, -1).map((m) => m.label).join(", ")} and ${ms[ms.length - 1].label}`
 export type DailyKey = keyof DailyVars
 
 const finite = (x: unknown): x is number => typeof x === "number" && Number.isFinite(x)
@@ -35,11 +45,11 @@ const median = (xs: number[]) => {
   return s.length % 2 ? s[k] : (s[k - 1] + s[k]) / 2
 }
 /** Each location's multi-model median per day, with the range across models. */
-export function dayStats(data: Briefing, key: DailyKey): Record<string, DayStat[]> {
+export function dayStats(data: Briefing, key: DailyKey, only?: Model[]): Record<string, DayStat[]> {
   const nd = data.dates.length, out: Record<string, DayStat[]> = {}
   for (const p of data.points) {
     out[p.name] = Array.from({ length: nd }, (_, k) => {
-      const xs = data.models.map((m) => m.data[p.name]?.[key]?.[k]).filter(finite)
+      const xs = (only ?? data.models).map((m) => m.data[p.name]?.[key]?.[k]).filter(finite)
       return { med: median(xs), lo: xs.length ? Math.min(...xs) : null, hi: xs.length ? Math.max(...xs) : null, n: xs.length }
     })
   }
@@ -59,13 +69,16 @@ export function regionDays(data: Briefing, region: string, byPoint: Record<strin
 const TIER_LABEL: Record<string, string> = { regional: "Regional", blend: "Blend", global: "Global" }
 
 /** "Model median", then each model with data, grouped by tier, with how many days it covers. */
-export function ModelPick({ models, value, onChange }: { models: Model[]; value: string; onChange: (v: string) => void }) {
+export function ModelPick({ models, value, onChange, core }: { models: Model[]; value: string; onChange: (v: string) => void; core?: Model[] }) {
   const tiers = ["regional", "blend", "global"].map((t) => [t, models.filter((m) => m.tier === t)] as const).filter(([, ms]) => ms.length)
   return (
     <Select value={value} onValueChange={onChange}>
       <SelectTrigger className="w-full sm:w-[210px]" aria-label="Model"><SelectValue /></SelectTrigger>
       <SelectContent>
         <SelectItem value={MEDIAN}>Model median</SelectItem>
+        {core && core.length >= 2 && (
+          <SelectItem value={CORE}>Core median<span className="text-muted-foreground"> · {core.map((m) => m.label.replace(/^ECMWF /, "")).join(", ")}</span></SelectItem>
+        )}
         <SelectSeparator />
         {tiers.map(([t, ms]) => (
           <SelectGroup key={t}>
@@ -83,10 +96,11 @@ export function ModelPick({ models, value, onChange }: { models: Model[]; value:
 }
 
 /** The picked model, falling back to the median when it isn't in this briefing (or has no data). */
-export function usePick(models: Model[]) {
+export function usePick(models: Model[], core?: Model[]) {
   const [pick, setPick] = React.useState(MEDIAN)
   const model = models.find((m) => m.label === pick)
-  return { pick: model ? pick : MEDIAN, model, setPick }
+  const useCore = pick === CORE && (core?.length ?? 0) >= 2
+  return { pick: model ? pick : useCore ? CORE : MEDIAN, model, setPick, only: useCore ? core : undefined }
 }
 
 /** Text that stays legible on a cell colour. */

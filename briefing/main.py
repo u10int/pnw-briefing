@@ -195,6 +195,8 @@ def collect(cfg: dict, out: Path, demo: bool = False, products: bool = True) -> 
                  # the edition's model cycle, and how much of the first 12Z – 12Z day it covers
                  "cycle": start.strftime("%Y-%m-%dT%H:00Z"), "firstDayHours": h1,
                  "minAgreement": cfg["impacts"]["min_agreement"],
+                 # the few models behind the "core median" choice in the by-location tables
+                 "coreModels": cfg.get("core_models") or [],
                  "hasSupplement": any(m.get("source") == "open-meteo" for m in models),
                  "sources": {"ncep": [m["label"] for m in grib_models if m.get("family") == "ncep"],
                              "ecmwf": [m["label"] for m in grib_models if m.get("family") == "ecmwf"]}},

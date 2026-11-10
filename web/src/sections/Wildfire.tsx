@@ -14,7 +14,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { isActive } from "@/lib/fire"
 import { FUEL, HDW, RH, type Ramp, SMOKE, spcColor, USDM } from "@/lib/ramps"
-import { DayMatrix, dayLabel, dayStats, type MatrixRow, ModelPick, modelDays, modelsWith, RampStrip, rampCell, regionDays, usePick } from "@/sections/DayMatrix"
+import { coreModels, DayMatrix, dayLabel, dayStats, listNames, type MatrixRow, ModelPick, modelDays, modelsWith, RampStrip, rampCell, regionDays, usePick } from "@/sections/DayMatrix"
 import type { Briefing, N, PsaDay, Wildfire } from "@/types"
 import { dayMD, ptDay, ptDayHour } from "@/lib/format"
 import { MapButton } from "@/components/MapButton"
@@ -206,8 +206,9 @@ export function FireWeatherByDayCard({ data }: { data: Briefing }) {
   const [sel, setSel] = React.useState<FVar>("rh")
   const v = avail.includes(sel) ? sel : avail[0]
   const models = React.useMemo(() => (v ? modelsWith(data, FKEY[v]) : []), [data, v])
-  const { pick, model, setPick } = usePick(models)
-  const stats = React.useMemo(() => (v ? dayStats(data, FKEY[v]) : {}), [data, v])
+  const core = React.useMemo(() => coreModels(data, models), [data, models])
+  const { pick, model, setPick, only } = usePick(models, core)
+  const stats = React.useMemo(() => (v ? dayStats(data, FKEY[v], only) : {}), [data, v, only])
   if (!v) {
     return (
       <Card>
@@ -239,7 +240,7 @@ export function FireWeatherByDayCard({ data }: { data: Briefing }) {
       <CardHeader>
         <CardTitle>Fire weather by day</CardTitle>
         <CardDescription>
-          {model ? `${model.label}'s` : "Each location's multi-model median"} {FWORD[v]} for each 12Z – 12Z day
+          {model ? `${model.label}'s` : only ? `Each location's median of ${listNames(only)}` : "Each location's multi-model median"} {FWORD[v]} for each 12Z – 12Z day
           {model && `, out to day ${model.days}`}. Region rows show their {lowIsBad ? "driest" : "worst"} location.
         </CardDescription>
         <CardAction className="flex flex-wrap gap-2"><MapButton req={{ mode: "hourly", layer: "rh" }} label="Humidity on the map" /><MapButton req={{ mode: "hourly", layer: "smoke" }} label="Smoke on the map" /></CardAction>
@@ -255,7 +256,7 @@ export function FireWeatherByDayCard({ data }: { data: Briefing }) {
               </TabsList>
             </Tabs>
           )}
-          <ModelPick models={models} value={pick} onChange={setPick} />
+          <ModelPick models={models} value={pick} onChange={setPick} core={core} />
           <div className="sm:ml-auto">
             {v === "rh" ? <RampStrip ramp={RH} range={[10, 90]} unit="%" from="10%" />
               : v === "hdw" ? <RampStrip ramp={HDW} range={[0, 400]} />

@@ -3,7 +3,7 @@ import * as React from "react"
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { GUST, type Ramp, WIND } from "@/lib/ramps"
-import { DayMatrix, dayLabel, dayStats, MEDIAN, type MatrixRow, ModelPick, modelDays, modelsWith, RampStrip, rampCell, regionDays, usePick } from "@/sections/DayMatrix"
+import { coreModels, DayMatrix, dayLabel, dayStats, listNames, MEDIAN, type MatrixRow, ModelPick, modelDays, modelsWith, RampStrip, rampCell, regionDays, usePick } from "@/sections/DayMatrix"
 import type { Briefing, N } from "@/types"
 
 type Var = "gust" | "wind"
@@ -23,8 +23,9 @@ export function WindByDayCard({ data, switcher }: { data: Briefing; switcher?: R
   const [sel, setV] = React.useState<Var>("gust")
   const v = avail.includes(sel) ? sel : avail[0]
   const models = React.useMemo(() => (v ? modelsWith(data, KEY[v]) : []), [data, v])
-  const { pick, model, setPick } = usePick(models)
-  const stats = React.useMemo(() => (v ? dayStats(data, KEY[v]) : {}), [data, v])
+  const core = React.useMemo(() => coreModels(data, models), [data, models])
+  const { pick, model, setPick, only } = usePick(models, core)
+  const stats = React.useMemo(() => (v ? dayStats(data, KEY[v], only) : {}), [data, v, only])
   if (!v) return null
   const ramp = RAMP[v]
   const byPoint = Object.fromEntries(data.points.map((p) =>
@@ -50,7 +51,7 @@ export function WindByDayCard({ data, switcher }: { data: Briefing; switcher?: R
       <CardHeader>
         <CardTitle>{switcher ? "By location" : v === "gust" ? "Gusts by day" : "Wind by day"}</CardTitle>
         <CardDescription>
-          {model ? `${model.label}'s` : "Each location's multi-model median"} {WORD[v]} for each 12Z – 12Z day, in mph
+          {model ? `${model.label}'s` : only ? `Each location's median of ${listNames(only)}` : "Each location's multi-model median"} {WORD[v]} for each 12Z – 12Z day, in mph
           {model && `, out to day ${model.days}`}. Region rows show their windiest location.
         </CardDescription>
         {switcher && <CardAction>{switcher}</CardAction>}
@@ -62,13 +63,14 @@ export function WindByDayCard({ data, switcher }: { data: Briefing; switcher?: R
               <TabsList><TabsTrigger value="gust">Gusts</TabsTrigger><TabsTrigger value="wind">Sustained wind</TabsTrigger></TabsList>
             </Tabs>
           )}
-          <ModelPick models={models} value={pick} onChange={setPick} />
+          <ModelPick models={models} value={pick} onChange={setPick} core={core} />
           <div className="sm:ml-auto"><RampStrip ramp={ramp} range={[6.9, 69.05]} extra={<span>mph</span>} /></div>
         </div>
         <DayMatrix dates={data.dates} rows={rows} leadHead="Peak" leadSub={`${span} days`} dimFrom={model ? model.days : undefined}
           style={(x) => rampCell(x, ramp)} fmt={mph} tip={tip} />
         <p className="text-xs text-muted-foreground">
-          {pick === MEDIAN
+          {only ? `The core median uses only ${listNames(only)} on every day. Point values are the nearest model cell, which on coarse global grids smooths out terrain-driven winds.`
+            : pick === MEDIAN
             ? "The median uses whichever models reach that day. Point values are the nearest model cell, which on coarse global grids smooths out terrain-driven winds."
             : `Days past ${model!.label}'s range are blank. Point values are the nearest model cell.`}
           {v === "gust" && " Some models (ECMWF AIFS among them) have no gust field and are left out."}

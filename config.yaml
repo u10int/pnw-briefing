@@ -133,6 +133,9 @@ points:
 # ECMWF from dewpoint), smoke (near-surface smoke, HRRR/RRFS). A field a model doesn't publish is
 # skipped and logged.
 # ----------------------------------------------------------------------------
+# The "core median" option in the by-location tables: the median of just these models (labels).
+core_models: [GFS, ECMWF IFS, ECMWF AIFS]
+
 grib_models:
   # regional, convection-allowing
   - {id: hrrr, label: HRRR, tier: regional, family: ncep, herbie: {model: hrrr, product: sfc},
