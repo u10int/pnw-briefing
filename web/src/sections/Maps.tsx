@@ -42,19 +42,14 @@ export function MapCard({ title, description, tabs, map }: { title: string; desc
         <CardHeader>
           <CardTitle>{title}</CardTitle>
           <CardDescription>{description}</CardDescription>
-          {(map || (available.length > 1 && available.length <= 3)) && (
-            <CardAction className="flex flex-wrap gap-2">
-              {map && <MapButton req={map.req} label={map.label} />}
-              {available.length > 1 && available.length <= 3 && (
-                <TabsList>
-                  {available.map((t) => <TabsTrigger key={t.id} value={t.id}>{t.label}</TabsTrigger>)}
-                </TabsList>
-              )}
-            </CardAction>
+          {map && <CardAction><MapButton req={map.req} label={map.label} /></CardAction>}
+          {/* with no map button the view tabs can sit in the header; with one, they go below it */}
+          {!map && available.length > 1 && available.length <= 3 && (
+            <CardAction><TabsList>{available.map((t) => <TabsTrigger key={t.id} value={t.id}>{t.label}</TabsTrigger>)}</TabsList></CardAction>
           )}
         </CardHeader>
         <CardContent className="space-y-4">
-          {available.length > 3 && (
+          {(available.length > 3 || (map && available.length > 1)) && (
             <div className="overflow-x-auto">
               <TabsList>
                 {available.map((t) => <TabsTrigger key={t.id} value={t.id}>{t.label}</TabsTrigger>)}

@@ -676,14 +676,19 @@ export function OddsCard({ data }: { data: Briefing }) {
         <CardDescription>
           Share of ensemble members ({total}, pooled) reaching each location's impact threshold: {def.what}.
         </CardDescription>
-        <CardAction>
-          <MapButton req={{ mode: "totals", variable: "p24", days: 7 }} label="Chances on the map" />
+        {key !== "snow24" && (
+          <CardAction>
+            <MapButton req={{ mode: "totals", variable: key === "rain72" ? "p72" : "p24", days: 7 }} label="Chances on the map" />
+          </CardAction>
+        )}
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {avail.length > 1 && (
           <Tabs value={key} onValueChange={(v) => setKey(v as OddsKey)}>
             <TabsList>{avail.map((d) => <TabsTrigger key={d.key} value={d.key}>{d.label}</TabsTrigger>)}</TabsList>
           </Tabs>
-        </CardAction>
-      </CardHeader>
-      <CardContent className="overflow-x-auto">
+        )}
+        <div className="overflow-x-auto">
         <Table className="min-w-[860px]">
           <TableHeader>
             <TableRow>
@@ -713,6 +718,7 @@ export function OddsCard({ data }: { data: Briefing }) {
             ])}
           </TableBody>
         </Table>
+        </div>
         <p className="mt-3 text-xs text-muted-foreground">
           Percent of members; blank under 5%. Thresholds are the impacts table's for lowland, coast and pass locations.
           {key === "rain72" && " The first two days have no complete 3-day total."}
