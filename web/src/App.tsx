@@ -84,9 +84,9 @@ function Section({ title, description, action, children, first }: {
   )
 }
 
-/** One of a tab's groups (Forecast, Observed, How the models have done), under a small rule. */
+/** One of a tab's groups (Forecast, Observed, Model verification), under a heading a step above the card titles. */
 type Group = { id: string; title: string; show: unknown; children: React.ReactNode }
-const GROUP_TITLES = { forecast: "Forecast", observed: "Observed", verify: "How the models have done" }
+const GROUP_TITLES = { forecast: "Forecast", observed: "Observed", verify: "Model verification" }
 
 /** A tab's cards in its groups, with links at the top that jump to each (when there's more than one). */
 function Groups({ tab, groups }: { tab: string; groups: Group[] }) {
@@ -104,13 +104,10 @@ function Groups({ tab, groups }: { tab: string; groups: Group[] }) {
           ))}
         </nav>
       )}
-      {gs.map((g) => (
-        <div key={g.id} className="space-y-4">
+      {gs.map((g, i) => (
+        <div key={g.id} className={`space-y-4 ${i > 0 ? "pt-8" : "pt-2"}`}>
           {gs.length > 1 && (
-            <div id={`${tab}-${g.id}`} className="flex scroll-mt-24 items-center gap-3 pt-4">
-              <h3 className="text-xs font-semibold tracking-wide whitespace-nowrap text-muted-foreground uppercase">{g.title}</h3>
-              <div className="h-px flex-1 bg-border" />
-            </div>
+            <h3 id={`${tab}-${g.id}`} className="scroll-mt-24 text-lg font-semibold">{g.title}</h3>
           )}
           {g.children}
         </div>
