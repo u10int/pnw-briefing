@@ -135,6 +135,15 @@ export interface MatrixRow { name: string; group?: boolean; point?: string; regi
 
 /** A light diagonal hatch over a cell where the models are far apart. */
 export const HATCH: React.CSSProperties = { backgroundImage: "repeating-linear-gradient(135deg, rgb(0 0 0 / 0.16) 0 1.5px, transparent 1.5px 5px)" }
+/** The hatch in a shade of the cell's own colour: darker on a light cell, lighter on a dark one
+ *  (the grey hatch where the cell has no colour). */
+export function hatchOn(style: React.CSSProperties): React.CSSProperties {
+  const bg = typeof style.background === "string" && style.background.startsWith("#") ? style.background : null
+  if (!bg) return { ...style, ...HATCH }
+  const dark = contrastTextColor(bg).toLowerCase() === "#ffffff"
+  const line = `color-mix(in srgb, ${bg}, ${dark ? "white 22%" : "black 14%"})`
+  return { ...style, backgroundImage: `repeating-linear-gradient(135deg, ${line} 0 1.5px, transparent 1.5px 5px)` }
+}
 
 /** Narrow screens: region rows start collapsed, and open to their locations. */
 function useNarrow() {
@@ -199,7 +208,7 @@ export function DayMatrix({ dates, rows, leadHead, leadSub, style, fmt, tip, dim
               {dates.map((_, k) => {
                 const x = r.days[k] ?? null
                 const hatched = x != null && flag?.(r, k)
-                const td = <td key={k} className="px-1 py-1 text-center" style={hatched ? { ...style(x), ...HATCH } : style(x)}>{fmt(x)}</td>
+                const td = <td key={k} className="px-1 py-1 text-center" style={hatched ? hatchOn(style(x)) : style(x)}>{fmt(x)}</td>
                 const body = r.point && x != null ? tip?.(r, k) : null
                 if (!body) return td
                 return (
