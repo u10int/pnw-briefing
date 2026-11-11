@@ -109,9 +109,12 @@ points:
   - {name: Salem,            lat: 44.94, lon: -123.04, kind: lowland, region: nwor, area: Central Willamette Valley, zone: Willamette Valley}
   - {name: Corvallis,        lat: 44.56, lon: -123.26, kind: lowland, region: nwor, area: Southern Willamette Valley, zone: Willamette Valley}
   - {name: Government Camp,  lat: 45.30, lon: -121.75, kind: pass,    region: nwor, plume: true, elev_ft: 3980, area: Northern OR Cascades, zone: OR Cascades}
-  # outside the comparison regions (no PRISM normals or NWS alerts in Canada)
-  - {name: Vancouver BC,     lat: 49.28, lon: -123.12, kind: lowland, area: Lower Mainland BC, zone: Southwest BC}
-  - {name: Whistler BC,      lat: 50.12, lon: -122.95, kind: pass,    elev_ft: 2214, area: Sea to Sky BC, zone: Southwest BC}   # village; pass thresholds for snow
+  # outside the comparison regions (no PRISM normals in Canada). country: CA takes Environment
+  # Canada's alerts (eccc_alerts.py) in place of NWS's.
+  - {name: Vancouver BC,     lat: 49.28, lon: -123.12, kind: lowland, country: CA, area: Lower Mainland BC, zone: Southwest BC}
+  - {name: Whistler BC,      lat: 50.12, lon: -122.95, kind: pass,    country: CA, elev_ft: 2214, area: Sea to Sky BC, zone: Southwest BC}   # village; pass thresholds for snow
+  - {name: Nanaimo,          lat: 49.17, lon: -123.94, kind: lowland, country: CA, area: East Vancouver Island, zone: Vancouver Island}
+  - {name: Tofino,           lat: 49.15, lon: -125.91, kind: coast,   country: CA, area: West Vancouver Island, zone: Vancouver Island}
 
 # ----------------------------------------------------------------------------
 # GRIB models — the primary source. NOAA models come from NODD (AWS, with
@@ -294,6 +297,8 @@ obs_reports:
     Government Camp: {snotel: "651:OR:SNTL"}
     Vancouver BC: {asos: CYVR, eccc: "1108395"}
     Whistler BC: {asos: CWAE}
+    Nanaimo: {asos: CYCD, eccc: "10253G0"}       # gusts at the airport; rain at Nanaimo City Yard (the airport reports none)
+    Tofino: {asos: CYAZ, eccc: "1034600"}        # gusts at the airport; rain at Lennard Island, 5 km off Tofino
 
 # How unusual the totals are (climo.py): one long-record station per location, as an ACIS id
 # (GHCN where it has one). Its history ranks the forecast and recent totals against the same part
@@ -323,6 +328,8 @@ climo:
     Government Camp: USC00353402  # Government Camp, 1951 –
     Vancouver BC: CA001108395     # Vancouver Intl A, 1937 – 2025
     Whistler BC: CA001048898      # Whistler, 1976 – 2024
+    Nanaimo: CA001025370          # Nanaimo A, 1947 – 2016
+    Tofino: CA001038205           # Tofino A, 1942 – 2023
 
 # Coast and inland waters (coast.py). area groups rows on the page: "Outer coast", "Strait and
 # Puget Sound", "B.C. waters". near: the forecast location a row belongs with, if any.
@@ -353,6 +360,7 @@ coast:
     - {name: East Strait,            lat: 48.25, lon: -123.35, area: Strait and Puget Sound}
     - {name: Admiralty Inlet,        lat: 48.05, lon: -122.65, area: Strait and Puget Sound}
     - {name: Central Puget Sound,    lat: 47.65, lon: -122.42, near: Seattle, area: Strait and Puget Sound}
+    - {name: Off Tofino,             lat: 49.10, lon: -126.05, near: Tofino, area: B.C. waters}
     - {name: Southern Strait of Georgia, lat: 49.05, lon: -123.25, near: Vancouver BC, area: B.C. waters}
   tides:
     - {id: "9443090", name: Neah Bay,      area: Outer coast}

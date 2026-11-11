@@ -16,7 +16,7 @@ from zoneinfo import ZoneInfo
 import numpy as np
 import yaml
 
-from . import (alerts, analysis, avalanche, change, climo, coast, cogs, context, convective, extremes, fields, fronts, impacts, landslide,
+from . import (alerts, analysis, avalanche, change, climo, coast, cogs, context, convective, eccc_alerts, extremes, fields, fronts, impacts, landslide,
                maps, nbmprob, normals, observed, obsreports, odds, outlooks, report, rivers, snowpack, summary, tempdep, timing, trends, urma, verify, wildfire)
 from .grib import day0, day12, first_day_hours
 
@@ -230,6 +230,8 @@ def collect(cfg: dict, out: Path, demo: bool = False, products: bool = True) -> 
         "normals": norm,
         "tempDeparture": tdep,
         "alerts": nws_alerts,
+        # Environment Canada's alerts for the B.C. locations, alongside the NWS ones
+        "ecccAlerts": safe("Environment Canada alerts", lambda: eccc_alerts.fetch(cfg, demo)) if products else None,
         # thunderstorms: SPC convective outlooks and recent storm reports (mesoscale discussions load live)
         "convective": safe("thunderstorm outlooks", lambda: convective.fetch(cfg, demo)) if products else None,
         # WPC surface fronts and highs and lows: the last day's analyses and the day 1 – 3 forecast chart

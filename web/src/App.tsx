@@ -445,7 +445,7 @@ export default function App() {
               {meta.hasSupplement && " Models marked * come from Open-Meteo."}</p>
             <p className="mt-2">Observed precipitation from NOAA MRMS; snowpack from USDA NRCS SNOTEL; avalanche danger from the
               Northwest Avalanche Center (avalanche.org); landslide threshold from USGS; forecast discussions,
-              alerts and outlooks from NWS, WPC and CPC; fire outlooks from SPC and NWCC Predictive Services; fire incidents
+              alerts and outlooks from NWS, WPC and CPC; B.C. alerts from Environment Canada (MSC GeoMet); fire outlooks from SPC and NWCC Predictive Services; fire incidents
               and perimeters from NIFC; drought from the US Drought Monitor.</p>
           </div>
           <div>
