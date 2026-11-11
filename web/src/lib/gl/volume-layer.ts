@@ -1,5 +1,7 @@
 import type { CustomLayerInterface, CustomRenderMethodInput, Map as MlMap } from "maplibre-gl"
 
+import { WIND } from "@/lib/ramps"
+
 import { mercatorMatrix, mercX, mercY, program, type Program, resetUnpack, unitQuad } from "./util"
 
 /** One model's volume grid, as described in data/volume.json. */
@@ -19,6 +21,18 @@ export interface VolumeDraw {
   key: string
   /** Shade by the field above (clouds, water, ice, humidity). */
   lit: boolean
+  /** Surfaces at set values: the packed fraction (0 – 1) and premultiplied-ready RGBA (0 – 1). */
+  isos?: { at: number; rgba: [number, number, number, number] }[]
+  /** Colour the surfaces by height instead (256 RGBA over 0 – topKm). */
+  heightLut?: Uint8Array
+}
+
+/** Wind for the particles: u and v (m/s) packed like the other fields, every time step. */
+export interface VolumeWind {
+  u: Uint8Array; v: Uint8Array
+  range: [number, number]
+  /** The heights (km) to release particles at, one layer each. */
+  heightsKm: number[]
 }
 
 /** Screen positions (CSS px) of the height and pressure ticks, for the page to label. */
@@ -81,7 +95,15 @@ uniform vec2 uMercY;            // box north and south edges, Web Mercator y
 uniform vec2 uLat;              // data rows' first and last latitude
 uniform vec3 uSize;             // nx, ny, nz
 uniform int uSteps;
+uniform vec2 uZr;               // the heights drawn, as fractions of the box's height
 uniform bool uLit;              // shade by what lies above (clouds and the like); else flat colour
+// surfaces where the field crosses set values (isotherms, isotachs, the freezing level), lit by
+// the field's gradient; coloured by height (uHeight) when uIsoByHeight
+uniform int uIsoN;
+uniform float uIso[6];
+uniform vec4 uIsoCol[6];
+uniform bool uIsoByHeight;
+uniform sampler2D uHeight;
 out vec4 fragColor;
 const float PI = 3.141592653589793;
 
@@ -91,6 +113,17 @@ vec3 texPos(vec3 p) {
   return (f * (uSize - 1.0) + 0.5) / uSize;               // cell centres span the box
 }
 float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+float val(vec3 q) { return mix(texture(uA, q).r, texture(uB, q).r, uT); }
+// the field's gradient in the box's true proportions (texture rows run north, the box's y south)
+vec3 normalAt(vec3 p) {
+  vec3 q = texPos(p), e = 1.0 / uSize;
+  vec3 g = vec3(val(q + vec3(e.x, 0, 0)) - val(q - vec3(e.x, 0, 0)),
+                -(val(q + vec3(0, e.y, 0)) - val(q - vec3(0, e.y, 0))),
+                val(q + vec3(0, 0, e.z)) - val(q - vec3(0, 0, e.z)));
+  g /= uScale / uSize;
+  float l = length(g);
+  return l > 0.0 ? g / l : vec3(0, 0, 1);
+}
 float extinction(vec3 p) {
   vec3 q = texPos(p);
   float v = mix(texture(uA, q).r, texture(uB, q).r, uT);
@@ -102,7 +135,7 @@ void main() {
   vec4 n = uInv * vec4(ndc, -1.0, 1.0), f = uInv * vec4(ndc, 1.0, 1.0);
   vec3 ro = n.xyz / n.w, rd = f.xyz / f.w - ro;
   vec3 inv = 1.0 / rd;
-  vec3 t0 = (vec3(0.0) - ro) * inv, t1 = (vec3(1.0) - ro) * inv;
+  vec3 t0 = (vec3(0.0, 0.0, uZr.x) - ro) * inv, t1 = (vec3(1.0, 1.0, uZr.y) - ro) * inv;
   vec3 tlo = min(t0, t1), thi = max(t0, t1);
   float tn = max(max(tlo.x, tlo.y), max(tlo.z, 0.0));
   float tf = min(min(thi.x, thi.y), thi.z);
@@ -112,12 +145,31 @@ void main() {
   float worldStep = length(rd * dt * uScale) / uScale.x;   // in box widths
   vec4 acc = vec4(0.0);
   float t = tn + dt * hash(gl_FragCoord.xy);
+  float prev = -1.0;
+  vec3 Ldir = normalize(vec3(-0.45, 0.55, 1.0));
   for (int i = 0; i < 512; i++) {
     if (t > tf || acc.a > 0.97) break;
     vec3 p = ro + rd * t;
     vec3 q = texPos(p);
     if (q.y >= 0.0 && q.y <= 1.0) {
-      float v = mix(texture(uA, q).r, texture(uB, q).r, uT);
+      float v = val(q);
+      // a surface between the last sample and this one: composite it first, where it falls
+      if (prev >= 0.0) {
+        for (int k = 0; k < 6; k++) {
+          if (k >= uIsoN) break;
+          float iso = uIso[k];
+          if ((prev - iso) * (v - iso) < 0.0) {
+            float f = (iso - prev) / (v - prev);
+            vec3 ph = p - rd * dt * (1.0 - f);
+            float lam = 0.5 + 0.5 * abs(dot(normalAt(ph), Ldir));
+            vec4 ic = uIsoCol[k];
+            vec3 col = uIsoByHeight ? texture(uHeight, vec2(clamp(ph.z, 0.0, 1.0), 0.5)).rgb : ic.rgb;
+            acc.rgb += (1.0 - acc.a) * ic.a * col * lam;
+            acc.a += (1.0 - acc.a) * ic.a;
+          }
+        }
+      }
+      prev = v;
       vec4 c = texture(uLut, vec2((v * 255.0 + 0.5) / 256.0, 0.5));
       float a = 1.0 - exp(-c.a * 4.0 * uDensity * worldStep);
       vec3 col = c.rgb;
@@ -145,6 +197,31 @@ uniform sampler2D uImg;
 uniform vec2 uViewport;
 out vec4 fragColor;
 void main() { fragColor = texture(uImg, gl_FragCoord.xy / uViewport); }`
+
+// wind particles: short trails in box coordinates, colour premultiplied per vertex
+const TRAIL_VS = /* glsl */ `#version 300 es
+layout(location = 0) in vec3 aPos;
+layout(location = 1) in vec4 aCol;
+uniform mat4 uMVP;
+out vec4 vCol;
+void main() { vCol = aCol; gl_Position = uMVP * vec4(aPos, 1.0); }`
+const TRAIL_FS = /* glsl */ `#version 300 es
+precision highp float;
+in vec4 vCol;
+out vec4 fragColor;
+void main() { fragColor = vCol; }`
+
+const TRAIL = 7               // positions kept per particle
+const PER_LAYER = 650         // particles per height
+const SIM_SECONDS = 160       // simulated seconds per 60th of a second
+const WIND_RGB = (() => {     // the wind scale, a little deeper so trails read on a light map
+  const hex = (h: string) => { const n = parseInt(h.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((c) => (c / 255) * 0.82) }
+  return (mph: number) => {
+    let i = 0
+    while (i < WIND.levels.length - 1 && mph >= WIND.levels[i + 1]) i++
+    return hex(WIND.colors[i])
+  }
+})()
 
 // the box's edges, faintly
 const LINE_VS = /* glsl */ `#version 300 es
@@ -181,6 +258,8 @@ export class VolumeLayer implements CustomLayerInterface {
   private fboTex?: WebGLTexture
   private fboSize = [0, 0]
   private lastKey = ""
+  private heightTex?: WebGLTexture
+  private heightKey = ""
   private vao?: WebGLVertexArrayObject
   private lineVao?: WebGLVertexArrayObject
   private lut?: WebGLTexture
@@ -191,11 +270,23 @@ export class VolumeLayer implements CustomLayerInterface {
   private i1 = 0
   private t = 0
   private exaggeration = 25
+  private zr: [number, number] = [0, 1]
   private opacity = 1
   private moving = false
   private dataChanged = false
   private levels: { hPa: number; km: number }[] = []
   onAxis: ((pts: AxisPoint[]) => void) | null = null
+  // ---- wind particles
+  private wind: VolumeWind | null = null
+  private trailProg?: Program
+  private trailVao?: WebGLVertexArrayObject
+  private trailBuf?: WebGLBuffer
+  private pos = new Float32Array(0)       // [particle, history, xyz] in box coordinates, newest first
+  private age = new Float32Array(0)
+  private life = new Float32Array(0)
+  private speed = new Float32Array(0)     // mph, for colour
+  private verts = new Float32Array(0)
+  private lastFrame = 0
 
   constructor(readonly id: string) {}
 
@@ -207,6 +298,19 @@ export class VolumeLayer implements CustomLayerInterface {
     this.blitProg = program(gl, VS, BLIT_FS)
     this.fbo = gl.createFramebuffer()!
     this.fboTex = gl.createTexture()!
+    this.heightTex = gl.createTexture()!
+    gl.bindTexture(gl.TEXTURE_2D, this.heightTex)
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([255, 255, 255, 255]))
+    this.trailProg = program(gl, TRAIL_VS, TRAIL_FS)
+    this.trailVao = gl.createVertexArray()!
+    gl.bindVertexArray(this.trailVao)
+    this.trailBuf = gl.createBuffer()!
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.trailBuf)
+    gl.enableVertexAttribArray(0)
+    gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 28, 0)
+    gl.enableVertexAttribArray(1)
+    gl.vertexAttribPointer(1, 4, gl.FLOAT, false, 28, 12)
+    gl.bindVertexArray(null)
     this.vao = unitQuad(gl)
     const vao = (data: Float32Array) => {
       const v = gl.createVertexArray()!
@@ -236,6 +340,8 @@ export class VolumeLayer implements CustomLayerInterface {
     if (this.prog) gl.deleteProgram(this.prog.program)
     if (this.lineProg) gl.deleteProgram(this.lineProg.program)
     if (this.blitProg) gl.deleteProgram(this.blitProg.program)
+    if (this.trailProg) gl.deleteProgram(this.trailProg.program)
+    if (this.trailBuf) gl.deleteBuffer(this.trailBuf)
     if (this.fbo) gl.deleteFramebuffer(this.fbo)
     if (this.fboTex) gl.deleteTexture(this.fboTex)
     if (this.vao) gl.deleteVertexArray(this.vao)
@@ -260,6 +366,101 @@ export class VolumeLayer implements CustomLayerInterface {
   setTime(i0: number, i1: number, t: number) {
     if (i0 === this.i0 && i1 === this.i1 && t === this.t) return
     this.i0 = i0; this.i1 = i1; this.t = t
+    this.map?.triggerRepaint()
+  }
+  /** Particles carried by the wind at a few heights (null: none). */
+  setWind(w: VolumeWind | null) {
+    this.wind = w
+    const n = w ? w.heightsKm.length * PER_LAYER : 0
+    this.pos = new Float32Array(n * TRAIL * 3)
+    this.age = new Float32Array(n)
+    this.life = new Float32Array(n)
+    this.speed = new Float32Array(n)
+    this.verts = new Float32Array(n * (TRAIL - 1) * 2 * 7)
+    for (let i = 0; i < n; i++) this.spawn(i, true)
+    this.map?.triggerRepaint()
+  }
+  private spawn(i: number, scatter = false) {
+    const w = this.wind!, top = this.draw?.grid.topKm ?? 12
+    const z = Math.min(1, w.heightsKm[Math.floor(i / PER_LAYER)] / top)
+    const x = Math.random(), y = Math.random()
+    for (let k = 0; k < TRAIL; k++) this.pos.set([x, y, z], (i * TRAIL + k) * 3)
+    this.life[i] = 70 + Math.random() * 90
+    this.age[i] = scatter ? Math.random() * this.life[i] : 0
+  }
+  /** u and v (m/s) at a point of the box, trilinear, blended between the two time steps. */
+  private sampleWind(x: number, y: number, z: number, latOf: (y: number) => number): [number, number] {
+    const d = this.draw!, g = d.grid, w = this.wind!
+    const fx = x * (g.nx - 1), fy = ((latOf(y) - g.lat[0]) / (g.lat[1] - g.lat[0])) * (g.ny - 1), fz = z * (g.nz - 1)
+    const x0 = Math.max(0, Math.min(g.nx - 2, Math.floor(fx))), y0 = Math.max(0, Math.min(g.ny - 2, Math.floor(fy))), z0 = Math.max(0, Math.min(g.nz - 2, Math.floor(fz)))
+    const ax = Math.min(1, Math.max(0, fx - x0)), ay = Math.min(1, Math.max(0, fy - y0)), az = Math.min(1, Math.max(0, fz - z0))
+    const n = g.nx * g.ny * g.nz
+    const one = (arr: Uint8Array, step: number) => {
+      let s = 0
+      for (let c = 0; c < 8; c++) {
+        const dx = c & 1, dy = (c >> 1) & 1, dz = (c >> 2) & 1
+        const b = arr[step * n + (z0 + dz) * g.nx * g.ny + (y0 + dy) * g.nx + x0 + dx]
+        s += (b === 255 ? 127 : b) * (dx ? ax : 1 - ax) * (dy ? ay : 1 - ay) * (dz ? az : 1 - az)
+      }
+      return w.range[0] + (s / 254) * (w.range[1] - w.range[0])
+    }
+    const t = this.i0 === this.i1 ? 0 : this.t
+    const i0 = Math.min(this.i0, d.steps - 1), i1 = Math.min(this.i1, d.steps - 1)
+    return [one(w.u, i0) * (1 - t) + one(w.u, i1) * t, one(w.v, i0) * (1 - t) + one(w.v, i1) * t]
+  }
+  private stepParticles(now: number) {
+    const d = this.draw!, g = d.grid
+    const dtf = this.lastFrame ? Math.min(3, (now - this.lastFrame) / 16.7) : 1
+    this.lastFrame = now
+    const yN = mercY(g.lat[1]), yS = mercY(g.lat[0])
+    const latOf = (y: number) => (Math.atan(Math.sinh(Math.PI * (1 - 2 * (yN + y * (yS - yN))))) * 180) / Math.PI
+    const midLat = (g.lat[0] + g.lat[1]) / 2
+    const wM = (g.lon[1] - g.lon[0]) * 111320 * Math.cos((midLat * Math.PI) / 180), hM = (g.lat[1] - g.lat[0]) * 110540
+    const n = this.age.length, P = this.pos
+    let o = 0
+    for (let i = 0; i < n; i++) {
+      const b = i * TRAIL * 3
+      if (P[b + 2] < this.zr[0] - 1e-6 || P[b + 2] > this.zr[1] + 1e-6) continue   // a layer outside the heights shown
+      if (this.age[i] > this.life[i]) this.spawn(i)
+      this.age[i] += dtf
+      const x = P[b], y = P[b + 1], z = P[b + 2]
+      const [u, v] = this.sampleWind(x, y, z, latOf)
+      this.speed[i] = Math.hypot(u, v) * 2.23694
+      P.copyWithin(b + 3, b, b + (TRAIL - 1) * 3)          // shift the history back one
+      const nx = x + (u * SIM_SECONDS * dtf) / wM, ny = y - (v * SIM_SECONDS * dtf) / hM
+      if (nx < 0 || nx > 1 || ny < 0 || ny > 1) { this.spawn(i); continue }
+      P[b] = nx; P[b + 1] = ny
+      // fade in and out over the particle's life, and along the trail
+      const life = Math.min(1, this.age[i] / 12, (this.life[i] - this.age[i]) / 12)
+      const [r, gg, bb] = WIND_RGB(this.speed[i])
+      for (let k = 0; k < TRAIL - 1; k++) {
+        const a0 = 0.95 * life * (1 - k / (TRAIL - 1)), a1 = 0.95 * life * (1 - (k + 1) / (TRAIL - 1))
+        const p0 = b + k * 3, p1 = b + (k + 1) * 3
+        this.verts.set([P[p0], P[p0 + 1], P[p0 + 2], r * a0, gg * a0, bb * a0, a0, P[p1], P[p1 + 1], P[p1 + 2], r * a1, gg * a1, bb * a1, a1], o)
+        o += 14
+      }
+    }
+    return o / 7
+  }
+  private drawParticles(gl: WebGL2RenderingContext, mvp: M4) {
+    if (!this.wind || !this.trailProg || !this.draw || !this.age.length) return
+    const count = this.stepParticles(performance.now())
+    gl.useProgram(this.trailProg.program)
+    gl.uniformMatrix4fv(this.trailProg.u("uMVP"), false, Float32Array.from(mvp))
+    gl.bindVertexArray(this.trailVao!)
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.trailBuf!)
+    gl.bufferData(gl.ARRAY_BUFFER, this.verts.subarray(0, count * 7), gl.STREAM_DRAW)
+    gl.drawArrays(gl.LINES, 0, count)
+    gl.bindVertexArray(null)
+    this.map?.triggerRepaint()                               // keep them moving
+  }
+
+  /** Draw only between these heights (km); the full box by default. */
+  setHeightRange(loKm: number, hiKm: number) {
+    const top = this.draw?.grid.topKm ?? 12
+    const zr: [number, number] = [Math.max(0, loKm / top), Math.min(1, hiKm / top)]
+    if (zr[0] === this.zr[0] && zr[1] === this.zr[1]) return
+    this.zr = zr
     this.map?.triggerRepaint()
   }
   setExaggeration(x: number) {
@@ -315,7 +516,7 @@ export class VolumeLayer implements CustomLayerInterface {
     const W = gl.drawingBufferWidth, H = gl.drawingBufferHeight
     const scale = this.moving ? 0.5 : 1
     const fw = Math.max(1, Math.round(W * scale)), fh = Math.max(1, Math.round(H * scale))
-    const key = [Array.from(mvp, (x) => x.toPrecision(9)).join(","), fw, fh, this.i0, this.i1, this.t.toFixed(4), this.exaggeration, this.opacity, d.key].join("|")
+    const key = [Array.from(mvp, (x) => x.toPrecision(9)).join(","), fw, fh, this.i0, this.i1, this.t.toFixed(4), this.exaggeration, this.opacity, this.zr.join(","), d.key].join("|")
     if (fw !== this.fboSize[0] || fh !== this.fboSize[1]) {
       gl.bindTexture(gl.TEXTURE_2D, this.fboTex!)
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, fw, fh, 0, gl.RGBA, gl.UNSIGNED_BYTE, null)
@@ -351,12 +552,21 @@ export class VolumeLayer implements CustomLayerInterface {
     gl.bindVertexArray(this.vao!)
     gl.drawArrays(gl.TRIANGLES, 0, 6)
 
+    this.drawParticles(gl, mvp)
+
     if (this.lineProg && this.lineVao) {
       gl.useProgram(this.lineProg.program)
       gl.uniformMatrix4fv(this.lineProg.u("uMVP"), false, Float32Array.from(mvp))
       gl.uniform4f(this.lineProg.u("uColor"), 0.55, 0.6, 0.68, 0.55)
       gl.bindVertexArray(this.lineVao)
       gl.drawArrays(gl.LINES, 0, EDGES.length / 3)
+      if (this.zr[0] > 0 || this.zr[1] < 1) {
+        // the slab being drawn, outlined a little stronger inside the full box
+        const slab = mul(mvp, new Float64Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, this.zr[1] - this.zr[0], 0, 0, 0, this.zr[0], 1]))
+        gl.uniformMatrix4fv(this.lineProg.u("uMVP"), false, Float32Array.from(slab))
+        gl.uniform4f(this.lineProg.u("uColor"), 0.35, 0.4, 0.5, 0.8)
+        gl.drawArrays(gl.LINES, 0, EDGES.length / 3)
+      }
     }
     gl.bindVertexArray(null)
     gl.activeTexture(gl.TEXTURE0)
@@ -388,7 +598,29 @@ export class VolumeLayer implements CustomLayerInterface {
     gl.uniform2f(p.u("uLat"), g.lat[0], g.lat[1])
     gl.uniform3f(p.u("uSize"), g.nx, g.ny, g.nz)
     gl.uniform1i(p.u("uSteps"), this.moving ? 96 : 192)
+    gl.uniform2f(p.u("uZr"), this.zr[0], this.zr[1])
     gl.uniform1i(p.u("uLit"), d.lit ? 1 : 0)
+    const isos = d.isos ?? []
+    gl.uniform1i(p.u("uIsoN"), isos.length)
+    if (isos.length) {
+      gl.uniform1fv(p.u("uIso[0]"), Float32Array.from({ length: 6 }, (_, i) => isos[i]?.at ?? 2))
+      gl.uniform4fv(p.u("uIsoCol[0]"), Float32Array.from({ length: 24 }, (_, i) => isos[i >> 2]?.rgba[i & 3] ?? 0))
+    }
+    gl.uniform1i(p.u("uIsoByHeight"), d.heightLut ? 1 : 0)
+    // always bound to its own unit: a 2D sampler left on unit 0 would share it with uA's 3D texture,
+    // which WebGL refuses to draw
+    gl.activeTexture(gl.TEXTURE3)
+    gl.bindTexture(gl.TEXTURE_2D, this.heightTex!)
+    gl.uniform1i(p.u("uHeight"), 3)
+    if (d.heightLut) {
+      if (this.heightKey !== d.key) {
+        resetUnpack(gl)
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, 256, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, d.heightLut)
+        for (const [k, v] of [[gl.TEXTURE_MIN_FILTER, gl.LINEAR], [gl.TEXTURE_MAG_FILTER, gl.LINEAR], [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE]])
+          gl.texParameteri(gl.TEXTURE_2D, k, v)
+        this.heightKey = d.key
+      }
+    }
 
     gl.disable(gl.DEPTH_TEST)
     gl.disable(gl.CULL_FACE)

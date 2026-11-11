@@ -27,7 +27,8 @@ import type { MapRequest } from "@/lib/maplink"
 import { GridLayer, type GridDraw } from "@/lib/gl/grid-layer"
 import { ParticleLayer, type WindDraw } from "@/lib/gl/particle-layer"
 import { VolumeLayer } from "@/lib/gl/volume-layer"
-import { legendStops, loadVolume, lutFor, transfer, useVolumes, VOL_ORDER, type VolumeEntry, type VolVar } from "@/lib/volume"
+import { frac, frzColor, heightLut, hexRgb, ISOS, legendStops, loadVolume, lutFor, SOURCE, transfer, useVolumes, VIEW_LABEL, VOL_ORDER,
+  type VolumeEntry, type VolumeVar, type VolVar } from "@/lib/volume"
 import { type Grid, sameGrid } from "@/lib/gl/util"
 import { AR_COLORS, AR_LABELS, FLOOD_COLORS, FLOOD_LABELS, FRZ, GUST, IVT, legendBins, PCT, PGRAD, PRECIP, PROB, PTYPE_COLORS, PTYPE_NAMES, type Ramp, REFC, RH, SMOKE, SNOW, SPREAD, TDEP, TEMP, WIND } from "@/lib/ramps"
 import { contrastTextColor } from "@/lib/contrast"
@@ -245,7 +246,18 @@ function chevronImage(): ImageData {
 type Status = { kind: "loading" | "ready" | "error" | "empty"; note?: string }
 
 /** The 3D view's volume for a pane: one model's variable, all its time steps. */
-export interface PaneVolume { entry: VolumeEntry; name: VolVar; data: Uint8Array | null; exaggeration: number }
+export interface PaneVolume {
+  entry: VolumeEntry; name: VolVar; data: Uint8Array | null; exaggeration: number
+  /** The heights drawn (km above sea level). */
+  range: [number, number]
+  /** u and v for the wind particles, when they're on */
+  wind: { u: Uint8Array; v: Uint8Array } | null
+}
+/** A 3D view's data file and label (the freezing level draws from temperature). */
+const volVarOf = (e: VolumeEntry, n: VolVar): VolumeVar | undefined => e.vars[SOURCE[n]]
+const volLabel = (e: VolumeEntry, n: VolVar) => VIEW_LABEL[n] ?? e.vars[SOURCE[n]]?.label ?? n
+/** Heights to release wind particles at: the standard levels, at the model's average heights. */
+const PARTICLE_HPA = [850, 700, 500, 300, 250]
 
 function MapPane({ data, view, clock, opacity, smooth, particles, particleColor, sync, terrain, sat, fronts, reports, fires, vol = null }: {
   data: Briefing; view: View | null; clock: Clock; opacity: number; smooth: boolean
@@ -278,7 +290,9 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
       container: el.current!, style: STYLE_URL, transformRequest: withKey, attributionControl: { compact: true },
       bounds: [[d.lon_min, d.lat_min], [d.lon_max, d.lat_max]],
       fitBoundsOptions: { padding: 8 },
-      dragRotate: false, pitchWithRotate: false, touchPitch: false, maxZoom: 11,
+      // flat until the 3D view: rotation and tilt are switched on there (pitchWithRotate is fixed when
+      // the map is made, so it's on here and does nothing while dragRotate is off)
+      dragRotate: false, pitchWithRotate: true, touchPitch: false, maxZoom: 11, maxPitch: 85,
     })
     m.touchZoomRotate.disableRotation()
     m.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right")
@@ -477,13 +491,21 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
 
   // ---- 3D: the volume over the map, tilting the camera in and out
   const volOn = !!vol
+  const compass = React.useRef<maplibregl.NavigationControl | null>(null)
   React.useEffect(() => {
     ready.current?.then((m) => {
       if (volOn) {
-        m.setMaxPitch(80)
-        m.dragRotate.enable(); m.touchPitch.enable(); m.touchZoomRotate.enableRotation()
+        // free tilt and turn: right-drag (or Ctrl-drag) on a mouse, two fingers on a touch screen,
+        // and a compass that shows the tilt (click to face north, drag to tilt and turn)
+        m.dragRotate.enable(); m.touchPitch.enable(); m.touchZoomRotate.enableRotation(); m.keyboard.enable()
+        if (!compass.current) {
+          compass.current = new maplibregl.NavigationControl({ showZoom: false, showCompass: true, visualizePitch: true })
+          m.addControl(compass.current, "top-right")
+        }
         m.easeTo({ pitch: 60, bearing: -18, zoom: Math.max(m.getZoom() - 0.2, 3), duration: 900 })
-      } else if (m.getPitch() > 0 || m.getBearing() !== 0) {
+      } else {
+        if (compass.current) { m.removeControl(compass.current); compass.current = null }
+        if (!(m.getPitch() > 0 || m.getBearing() !== 0)) return
         m.dragRotate.disable(); m.touchPitch.disable(); m.touchZoomRotate.disableRotation()
         const d = data.domain
         m.easeTo({ pitch: 0, bearing: 0, duration: 700 })
@@ -500,8 +522,10 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
       box.innerHTML = pts.map((p) => `<span style="position:absolute;left:${p.x.toFixed(1)}px;top:${p.y.toFixed(1)}px;transform:translate(${p.side === "left" ? "calc(-100% - 6px)" : "6px"},-50%)" class="whitespace-nowrap rounded-[3px] bg-background/75 px-1 text-[10.5px] leading-tight tabular-nums text-foreground">${p.label}</span>`).join("")
     }
     if (!vol?.data) { L.setDraw(null); return }
-    const v = vol.entry.vars[vol.name]
-    L.setDraw({ grid: vol.entry, data: vol.data, steps: vol.entry.times.length, lut: lutFor(vol.name, v), key: volKey, lit: ["cloud", "water", "ice", "rh"].includes(vol.name) }, vol.entry.levels)
+    const v = volVarOf(vol.entry, vol.name)!
+    const isos = (ISOS[vol.name] ?? []).map((x) => ({ at: frac(x.at, v), rgba: [...hexRgb(x.color).map((c) => c / 255), x.alpha] as [number, number, number, number] }))
+    L.setDraw({ grid: vol.entry, data: vol.data, steps: vol.entry.times.length, lut: lutFor(vol.name, v), key: volKey,
+      lit: ["cloud", "water", "ice", "rh"].includes(vol.name), isos, heightLut: vol.name === "frz" ? heightLut(vol.entry.topKm) : undefined }, vol.entry.levels)
     const ms = msOf(vol.entry.times)
     const update = () => {
       const pos = posOf(ms, clock.time ?? ms[0])
@@ -512,6 +536,14 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
     return clock.subscribe(update)
   }, [volKey, vol?.data])
   React.useEffect(() => { layers.current!.volume.setExaggeration(vol?.exaggeration ?? 25) }, [vol?.exaggeration])
+  React.useEffect(() => { layers.current!.volume.setHeightRange(vol?.range[0] ?? 0, vol?.range[1] ?? 99) }, [vol?.range[0], vol?.range[1], vol?.data])
+  React.useEffect(() => {
+    const e = vol?.entry, w = vol?.wind
+    layers.current!.volume.setWind(e && w && vol?.data ? {
+      u: w.u, v: w.v, range: [e.vars.u.min, e.vars.u.max],
+      heightsKm: PARTICLE_HPA.map((p) => e.levels.find((l) => l.hPa === p)?.km).filter((k): k is number => k != null && k < e.topKm),
+    } : null)
+  }, [vol?.wind, vol?.data ? vol.entry.model : null])
 
   // Satellite imagery under the data: the GOES frame nearest the clock (within 20 minutes), over
   // the hourly global mosaic (within 75 minutes) that fills in north of the GOES layer's edge. One
@@ -613,7 +645,7 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
       <div ref={axisEl} className={`pointer-events-none absolute inset-0 overflow-hidden ${vol?.data ? "" : "hidden"}`} aria-hidden />
       <div className="pointer-events-none absolute top-2 left-2 max-w-[70%] rounded-md bg-card/95 px-2.5 py-1.5 text-xs shadow-sm ring-1 ring-border">
         <div className="font-medium">{view?.title}</div>
-        {vol && <div className="text-muted-foreground">3D: {vol.entry.model} {vol.entry.vars[vol.name]?.label.toLowerCase()}, {vol.entry.run} run{vol.data ? "" : " (loading…)"}</div>}
+        {vol && <div className="text-muted-foreground">3D: {vol.entry.model} {volLabel(vol.entry, vol.name).toLowerCase()}{vol.wind ? " and wind" : ""}, {vol.entry.run} run{vol.data ? "" : " (loading…)"}</div>}
         {sub && <div className="text-muted-foreground">{sub}</div>}
         {satLabel && <div className="text-muted-foreground">{satLabel}</div>}
         {frontLabel && <div className="text-muted-foreground">{frontLabel}</div>}
@@ -688,38 +720,56 @@ function FrontLegend() {
 const VOL_NOTES: Record<VolVar, string> = {
   cloud: "Cloud cover through the depth of the atmosphere: the thicker the cloud, the more solid it looks.",
   rh: "Relative humidity: moist air (above about 60%) shows, saturated air most; dry air is a faint brown haze.",
-  temp: "Temperature as a faint wash, with a bright shell where the air is at freezing (32°F): the freezing level, and where it dips to the ground.",
-  wind: "Wind speed: winds over about 60 mph show, most solid in the jet stream's core.",
+  temp: "Temperature as surfaces at set values (isotherms): each one is where the air is at that temperature, warmer below it and colder above. The freezing surface is the most solid.",
+  wind: "Wind speed as surfaces at set speeds (isotachs), nested like the layers of an onion around the fastest air; the jet stream's core also glows faintly.",
   water: "Liquid water in the air: cloud droplets plus rain, in grams per kilogram of air.",
   ice: "Frozen water in the air: cloud ice, snow and graupel, in grams per kilogram of air.",
+  frz: "The freezing level as a surface, coloured by its height in 1,000 ft bands: below it the air is above freezing, above it below. Snow usually reaches about 1,000 ft below it; where it meets the ground, it's freezing at the surface. More than one layer means a warm layer aloft (freezing rain or sleet risk).",
 }
-/** The 3D field's colours over its useful range (paler where it's nearly see-through), and how to read the box. */
-function VolumeLegend({ entry, name, exaggeration }: { entry: VolumeEntry; name: VolVar; exaggeration: number }) {
-  const v = entry.vars[name]
+/** How to read the 3D field: shell swatches for temperature and wind, a height scale for the freezing
+ *  level, otherwise the colours over the useful range (paler where nearly see-through); then the box. */
+function VolumeLegend({ entry, name, exaggeration, particles }: { entry: VolumeEntry; name: VolVar; exaggeration: number; particles: boolean }) {
+  const v = volVarOf(entry, name)!
   const { show, ticks } = legendStops(name, v)
   const N = 48
+  const isos = name === "frz" ? null : ISOS[name]
   const cells = Array.from({ length: N }, (_, i) => {
     const x = show[0] + ((i + 0.5) / N) * (show[1] - show[0])
+    if (name === "frz") { const [r, g, b] = frzColor(x); return `rgb(${r},${g},${b})` }
     const [r, g, b, e] = transfer(name, x)
     return `rgba(${r | 0},${g | 0},${b | 0},${Math.min(1, 0.25 + e / 1.2).toFixed(2)})`
   })
-  const fmt = (x: number) => (Math.abs(x) < 1 && x !== 0 ? x.toFixed(2) : String(x))
+  const fmt = (x: number) => (Math.abs(x) < 1 && x !== 0 ? x.toFixed(2) : name === "frz" ? x.toLocaleString("en-US") : String(x))
   const steps = entry.times.length
   const hours = steps > 1 ? Math.round((Date.parse(entry.times[1]) - Date.parse(entry.times[0])) / 3600e3) : 3
+  const pk = PARTICLE_HPA.map((p) => entry.levels.find((l) => l.hPa === p)).filter((l): l is { hPa: number; km: number } => !!l)
   return (
     <div className="space-y-1.5">
-      <div className="max-w-xl">
-        <div className="flex h-3 overflow-hidden rounded-[3px] ring-1 ring-border" style={{ background: "repeating-conic-gradient(#d8dce2 0 25%, #fff 0 50%) 0 0 / 8px 8px" }}>
-          {cells.map((c, i) => <span key={i} className="h-full flex-1" style={{ background: c }} />)}
+      {isos ? (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs">
+          {isos.map((x) => (
+            <span key={x.at} className="flex items-center gap-1.5">
+              <span className="h-3 w-5 rounded-[3px] ring-1 ring-black/10" style={{ background: x.color, opacity: Math.min(1, 0.35 + x.alpha) }} aria-hidden />
+              {x.label}
+            </span>
+          ))}
         </div>
-        <div className="relative mt-0.5 h-4 text-[11px] text-muted-foreground tabular-nums">
-          {ticks.map((t) => <span key={t} className="absolute -translate-x-1/2" style={{ left: `${(100 * (t - show[0])) / (show[1] - show[0])}%` }}>{fmt(t)}</span>)}
-          <span className="absolute right-0 translate-x-full pl-2">{v.units}</span>
+      ) : (
+        <div className="max-w-xl">
+          <div className="flex h-3 overflow-hidden rounded-[3px] ring-1 ring-border" style={{ background: "repeating-conic-gradient(#d8dce2 0 25%, #fff 0 50%) 0 0 / 8px 8px" }}>
+            {cells.map((c, i) => <span key={i} className="h-full flex-1" style={{ background: c }} />)}
+          </div>
+          <div className="relative mt-0.5 h-4 text-[11px] text-muted-foreground tabular-nums">
+            {ticks.map((t) => <span key={t} className="absolute -translate-x-1/2" style={{ left: `${(100 * (t - show[0])) / (show[1] - show[0])}%` }}>{fmt(t)}</span>)}
+            <span className="absolute right-0 translate-x-full pl-2">{name === "frz" ? "ft" : v.units}</span>
+          </div>
         </div>
-      </div>
+      )}
       <p className="text-xs text-muted-foreground">
-        {VOL_NOTES[name]} {v.note ?? ""} {entry.model} on pressure levels, 0 – {entry.topKm} km, heights stretched ×{exaggeration}: kilometres up one edge of the box, the
-        model's average pressure-level heights up the other. Steps every {hours} hours through {timeLabel(entry.times[steps - 1])}, blended in between. Right-drag (two fingers on a phone) to tilt and turn.
+        {VOL_NOTES[name]} {name === "frz" ? "" : v.note ?? ""}
+        {particles && pk.length > 0 && <> Particles trace the wind at {pk.map((l) => `${l.hPa} mb`).join(", ")} (about {pk.map((l) => l.km.toFixed(1)).join(", ")} km), coloured by speed like the map's wind.</>}
+        {" "}{entry.model} on pressure levels, 0 – {entry.topKm} km, heights stretched ×{exaggeration}: kilometres up one edge of the box, the
+        model's average pressure-level heights up the other. Steps every {hours} hours through {timeLabel(entry.times[steps - 1])}, blended in between. Right-drag (or Ctrl-drag) to tilt and turn, two fingers on a phone; drag the compass to tilt, click it to face north.
       </p>
     </div>
   )
@@ -1520,6 +1570,7 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
   const [volVar, setVolVar] = React.useState<VolVar>("cloud")
   const [volModel, setVolModel] = React.useState<string | null>(null)
   const [exag, setExag] = React.useState(25)
+  const [zRange, setZRange] = React.useState<[number, number] | null>(null)     // null: the full height
   const vols = useVolumes(threeD)
 
   React.useEffect(() => { if (!active) setPlaying(false) }, [active])
@@ -1655,20 +1706,34 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
   const volOn = threeD && mode === "hourly"
   const volEntry = !volOn || !vols?.length ? undefined
     : vols.find((v) => v.model === volModel) ?? vols.find((v) => v.model === hA) ?? vols.find((v) => v.model === "GFS") ?? vols[0]
-  const volName: VolVar | undefined = volEntry ? (volEntry.vars[volVar] ? volVar : VOL_ORDER.find((v) => volEntry.vars[v])) : undefined
-  const volPath = volEntry && volName ? volEntry.vars[volName].path : null
+  const volName: VolVar | undefined = volEntry ? (volVarOf(volEntry, volVar) ? volVar : VOL_ORDER.find((v) => volVarOf(volEntry, v))) : undefined
+  const volPath = volEntry && volName ? volVarOf(volEntry, volName)!.path : null
   const [volData, setVolData] = React.useState<{ path: string; data: Uint8Array } | null>(null)
   const [volError, setVolError] = React.useState(false)
   React.useEffect(() => {
     if (!volEntry || !volName) return
     let live = true
     setVolError(false)
-    loadVolume(volEntry.vars[volName]).then((d) => { if (live) setVolData({ path: volEntry.vars[volName].path, data: d }) })
+    loadVolume(volVarOf(volEntry, volName)!).then((d) => { if (live) setVolData({ path: volVarOf(volEntry, volName)!.path, data: d }) })
       .catch(() => { if (live) setVolError(true) })
     return () => { live = false }
   }, [volPath])
+  // wind particles at each height (u and v load the first time they're asked for)
+  // on by default with the wind speed view, off with the others (until switched)
+  const [volWindPick, setVolWindOn] = React.useState<boolean | null>(null)
+  const volWindOn = volWindPick ?? volVar === "wind"
+  const hasUV = !!(volEntry?.vars.u && volEntry?.vars.v)
+  const [volWind, setVolWind] = React.useState<{ model: string; u: Uint8Array; v: Uint8Array } | null>(null)
+  React.useEffect(() => {
+    if (!volEntry || !hasUV || !volWindOn || volWind?.model === volEntry.model) return
+    let live = true
+    Promise.all([loadVolume(volEntry.vars.u), loadVolume(volEntry.vars.v)])
+      .then(([u, v]) => { if (live) setVolWind({ model: volEntry.model, u, v }) }).catch(() => {})
+    return () => { live = false }
+  }, [volEntry?.model, hasUV, volWindOn])
+  const paneWind = volWindOn && volEntry && volWind?.model === volEntry.model ? { u: volWind.u, v: volWind.v } : null
   const paneVol: PaneVolume | null = volEntry && volName
-    ? { entry: volEntry, name: volName, data: volData?.path === volPath ? volData.data : null, exaggeration: exag } : null
+    ? { entry: volEntry, name: volName, data: volData?.path === volPath ? volData.data : null, exaggeration: exag, wind: paneWind, range: zRange ?? [0, volEntry.topKm] } : null
   const showB = compare && !volOn && (mode === "hourly" || perModel)
   const viewB = !showB ? null : mode === "totals"
     ? variable === "ar" ? (data.arCoast ? arView(data.arCoast, pickOther(other), winLabel(d)) : null)
@@ -1759,7 +1824,7 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
                   <Select value={volName} onValueChange={(v) => setVolVar(v as VolVar)}>
                     <SelectTrigger className="w-full sm:w-[170px]" aria-label="3D field"><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      {VOL_ORDER.filter((v) => volEntry.vars[v]).map((v) => <SelectItem key={v} value={v}>{volEntry.vars[v].label}</SelectItem>)}
+                      {VOL_ORDER.filter((v) => volVarOf(volEntry, v)).map((v) => <SelectItem key={v} value={v}>{volLabel(volEntry, v)}</SelectItem>)}
                     </SelectContent>
                   </Select>
                   {vols!.length > 1 && (
@@ -1768,9 +1833,18 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
                       <SelectContent>{vols!.map((v) => <SelectItem key={v.model} value={v.model}>{v.model}</SelectItem>)}</SelectContent>
                     </Select>
                   )}
+                  {hasUV && <Toggle id="vol-wind" label="Wind particles" checked={volWindOn} onChange={setVolWindOn} />}
                   <div className="flex items-center gap-2.5 text-sm max-sm:w-full">
                     <Label className="font-normal whitespace-nowrap">Height ×{exag}</Label>
                     <Slider className="w-[120px] max-sm:flex-1" value={[exag]} min={5} max={60} step={5} onValueChange={([v]) => setExag(v)} aria-label="Vertical stretch" />
+                  </div>
+                  <div className="flex items-center gap-2.5 text-sm max-sm:w-full">
+                    <Label className="min-w-[96px] font-normal whitespace-nowrap tabular-nums">
+                      {(() => { const [lo, hi] = zRange ?? [0, volEntry.topKm]; return lo === 0 && hi === volEntry.topKm ? `All heights` : `${lo} – ${hi} km` })()}
+                    </Label>
+                    <Slider className="w-[150px] max-sm:flex-1" value={zRange ?? [0, volEntry.topKm]} min={0} max={volEntry.topKm} step={0.5} minStepsBetweenThumbs={1}
+                      onValueChange={(v) => setZRange(v[0] === 0 && v[1] === volEntry.topKm ? null : [v[0], v[1]])}
+                      getAriaValueText={(v) => `${v} km`} aria-label="Heights shown" />
                   </div>
                 </div>
               )}
@@ -1833,7 +1907,7 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
           <div className="space-y-2">
             {volOn && vols && !vols.length && <p className="text-xs text-muted-foreground">This briefing has no 3D data (it was built before the 3D view, or the models' pressure levels couldn't be read).</p>}
             {volOn && volError && <p className="text-xs text-muted-foreground">The 3D data could not be loaded.</p>}
-            {paneVol && <VolumeLegend entry={paneVol.entry} name={paneVol.name} exaggeration={exag} />}
+            {paneVol && <VolumeLegend entry={paneVol.entry} name={paneVol.name} exaggeration={exag} particles={!!paneVol.wind} />}
             {layer === "radar" && <RadarLegend withRefc={!!entriesA.refc} />}
             {smooth && layer === "radar" && !entriesA.refc && <p className="text-xs text-muted-foreground">Precipitation type is a category, so it isn't smoothed.</p>}
             {smooth && layer === "radar" && entriesA.refc && entriesA.ptype && <p className="text-xs text-muted-foreground">Reflectivity is smoothed; precipitation type keeps each model cell's category.</p>}
