@@ -238,7 +238,13 @@ grids to object storage such as Cloudflare R2; only the publish step changes.
 ## The 3D view
 
 The interactive map's **3D** switch (under "Through time") tilts the map and draws a model's
-forecast through the depth of the atmosphere over it, following the time slider. `volume.py`
+forecast through the depth of the atmosphere over it, following the time slider. The volumes
+come from their own workflow (`.github/workflows/volume.yml`), which starts when a briefing run
+succeeds, so the edition never waits on these downloads: it builds them for the published
+edition's cycle (`python -m briefing.volume --cycle …`) and adds them to gh-pages with
+`scripts/publish_volume.sh`, which pushes only if gh-pages hasn't moved meanwhile and stops if a
+newer edition is already out. Until then the page keeps the previous volumes (labelled with their
+model run); `assemble_site.sh` carries them over. `volume.py`
 reads GFS and ECMWF IFS on pressure levels (1000 – 200 hPa) every 3 hours for the first 48
 (config `volume` on each model), resamples each column onto a fixed height grid (0 – 12 km every
 500 m) with the levels' geopotential heights, and packs each variable into one byte per point:

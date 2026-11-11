@@ -1,5 +1,9 @@
 """3-D fields through the depth of the atmosphere, for the interactive map's 3D view.
 
+This runs on its own (`python -m briefing.volume`), in a workflow that starts once the briefing
+is published, so the edition never waits on these downloads; the page keeps the previous volumes
+until the new ones land.
+
 GFS and ECMWF IFS publish their forecasts on pressure levels. For each model with `volume` in
 its config, every `step` hours over the first `hours` of the briefing, this reads the levels from
 1000 to 200 hPa (one byte-ranged request per forecast hour, as for IVT) and builds:
@@ -21,7 +25,9 @@ span orders of magnitude), one gzip file per model and variable holding every ti
 """
 from __future__ import annotations
 
+import argparse
 import gzip
+import json
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta, timezone
@@ -224,7 +230,7 @@ def export(models, out_dir: Path):
 
 # ---------------------------------------------------------------- demo
 
-def demo(spec, run, dom, family, hours=48, step=3, seed=0):
+def demo_volume(spec, run, dom, family, hours=48, step=3, seed=0):
     """A synthetic Pacific storm moving onshore: a comma cloud with a warm conveyor of liquid water,
     ice aloft, a jet near 9 km and a freezing level falling behind the front."""
     rng = np.random.default_rng(seed)
@@ -260,3 +266,76 @@ def demo(spec, run, dom, family, hours=48, step=3, seed=0):
            600: 4210, 550: 4870, 500: 5570, 450: 6330, 400: 7180, 350: 8110, 300: 9160, 250: 10360, 200: 11780}
     return {"hours": hrs, "lat": lat, "lon": lon, "family": family, "levels": {p: float(std[p]) for p in levs},
             "vars": {k: np.stack(out[k]) for k in keep}}
+
+
+# ---------------------------------------------------------------- standalone run
+
+def latest_run(spec, start, hours):
+    """The newest cycle at or before `start` whose step `hours` past the start is readable."""
+    from .grib import _readable
+    for back in range(0, 30):
+        run = start - timedelta(hours=back)
+        if run.hour not in spec.get("cycles", [0, 12]):
+            continue
+        last = back + hours
+        last -= last % 3
+        try:
+            if _readable(spec, run, min(last, spec["max_hours"])):
+                return run, back
+        except Exception as e:
+            log.info("%s %s: not usable (%s)", spec["label"], run.strftime("%HZ"), e)
+    return None, None
+
+
+def build(cfg, out: Path, demo=False):
+    """Fetch (or synthesise) every configured model's volume and write data/volume.json."""
+    from .grib import day0
+    start = day0(cfg)
+    models = []
+    for i, spec in enumerate(s for s in cfg["grib_models"] if s.get("volume") and s.get("enabled", True)):
+        opts = spec["volume"] if isinstance(spec["volume"], dict) else {}
+        if demo:
+            run = start - timedelta(hours=6)
+            models.append({"id": spec["id"], "label": spec["label"], "run": run,
+                           "volume": demo_volume(spec, run, cfg["domain"], spec["family"], seed=i)})
+            continue
+        run, lead0 = latest_run(spec, start, opts.get("hours", 48))
+        if run is None:
+            log.warning("%s: no run with pressure levels out to %d h", spec["label"], opts.get("hours", 48))
+            continue
+        try:
+            vol = fetch(spec, run, lead0, cfg["domain"], **opts)
+        except Exception as e:
+            log.warning("%s: 3D volume failed (%s)", spec["label"], e)
+            vol = None
+        if vol:
+            models.append({"id": spec["id"], "label": spec["label"], "run": run, "volume": vol})
+    manifest = export(models, out / "volume")
+    (out / "volume.json").write_text(json.dumps({"cycle": start.strftime("%Y-%m-%dT%HZ"), "volumes": manifest}), encoding="utf-8")
+    return manifest
+
+
+def main():
+    import os
+
+    import yaml
+    ap = argparse.ArgumentParser(description="Pressure-level volumes for the map's 3D view")
+    ap.add_argument("--config", default=str(Path(__file__).resolve().parent.parent / "config.yaml"))
+    ap.add_argument("--out", default="web/public/data")
+    ap.add_argument("--demo", action="store_true")
+    ap.add_argument("--cycle", help="the edition's model cycle, e.g. 2026-11-07T18Z")
+    a = ap.parse_args()
+    if a.cycle:
+        os.environ["BRIEFING_CYCLE"] = a.cycle
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+    logging.getLogger("herbie").setLevel(logging.WARNING)
+    cfg = yaml.safe_load(open(a.config))
+    out = Path(a.out)
+    out.mkdir(parents=True, exist_ok=True)
+    got = build(cfg, out, demo=a.demo)
+    if not got:
+        raise SystemExit("no volumes written")
+
+
+if __name__ == "__main__":
+    main()

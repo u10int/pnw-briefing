@@ -1,0 +1,97 @@
+name: 3D volumes
+
+# The interactive map's 3D view: GFS and ECMWF IFS on pressure levels (briefing/volume.py). These
+# are a couple of thousand extra downloads, so they run here, after the briefing is published,
+# rather than holding up the edition. Until they land, the page keeps the previous volumes.
+
+on:
+  workflow_run:
+    workflows: ["Daily forecast briefing"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      demo:
+        description: "Synthetic volumes (layout test, no downloads)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+# a newer edition's volumes supersede an older run still going
+concurrency:
+  group: volume
+  cancel-in-progress: true
+
+jobs:
+  build:
+    # after a successful briefing run (a page-only rebuild keeps the published volumes as they are)
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    outputs:
+      cycle: ${{ steps.edition.outputs.cycle }}
+      skip: ${{ steps.edition.outputs.skip }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Which edition is published
+        id: edition
+        run: |
+          git fetch -q --depth=1 origin gh-pages
+          git show FETCH_HEAD:data/briefing.json > published.json
+          read -r CYCLE DEMO < <(python3 -c "
+          import json; m = json.load(open('published.json')).get('meta') or {}
+          print((m.get('cycle') or '').replace(':00Z', 'Z'), 'demo' if m.get('demo') else 'real')")
+          echo "cycle=$CYCLE" >> "$GITHUB_OUTPUT"
+          echo "demo=$DEMO" >> "$GITHUB_OUTPUT"
+          # a page-only rebuild republishes the same edition; its volumes are already there
+          if [ "${{ github.event_name }}" = "workflow_run" ] && git show FETCH_HEAD:data/volume.json 2>/dev/null \
+               | python3 -c "import json,sys; sys.exit(0 if json.load(sys.stdin).get('cycle') == '$CYCLE' else 1)"; then
+            echo "the $CYCLE volumes are already published"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "building volumes for the $CYCLE edition ($DEMO)"
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: mamba-org/setup-micromamba@v2
+        if: steps.edition.outputs.skip != 'true'
+        with:
+          environment-file: environment.yml
+          cache-environment: true
+
+      - name: Fetch pressure levels and write the volumes
+        if: steps.edition.outputs.skip != 'true'
+        shell: micromamba-shell {0}
+        env: { PYTHONUNBUFFERED: "1" }
+        run: |
+          DEMO=""
+          if [ "${{ inputs.demo }}" = "true" ] || [ "${{ steps.edition.outputs.demo }}" = "demo" ]; then DEMO="--demo"; fi
+          python -m briefing.volume --out vol --cycle "${{ steps.edition.outputs.cycle }}" $DEMO
+
+      - uses: actions/upload-artifact@v4
+        if: steps.edition.outputs.skip != 'true'
+        with:
+          name: volumes
+          path: vol
+          retention-days: 1
+
+  publish:
+    needs: build
+    if: needs.build.outputs.skip != 'true'
+    runs-on: ubuntu-latest
+    # publish_volume.sh pushes only if gh-pages hasn't moved since it read it, so a briefing
+    # publishing at the same moment is never overwritten (and the briefing never waits on this)
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: volumes
+          path: vol
+      - name: Add the volumes to the published site
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          scripts/publish_volume.sh vol "${{ needs.build.outputs.cycle }}" \
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"

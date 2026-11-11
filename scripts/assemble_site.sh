@@ -13,6 +13,8 @@
 #   the workflow's gate checks so each cycle runs once, and which the same cycle's edition the
 #   next day compares against. Edition files older than KEEP_EDITION_DAYS go.
 # - Prunes: archive pages older than 60 days; GeoTIFFs in archive pages older than 14 days.
+# - Keeps the published 3D volumes (data/volume*) when the build has none: the volume workflow
+#   adds them after the briefing is out (scripts/publish_volume.sh).
 # - Rebuilds archive/index.html.
 #
 # Publishing ./site as a single fresh commit (see publish_site.sh) keeps gh-pages history from
@@ -38,9 +40,21 @@ else
   echo "no gh-pages branch yet; starting fresh"
 fi
 
-# 2. latest page at the root: remove everything except the archive, then copy today's build
+# 2. latest page at the root: remove everything except the archive, then copy today's build.
+#    The 3D volumes come from their own workflow after the briefing is out, so the previous ones
+#    stay until it replaces them (the page labels them with their model run).
+KEEPV=$(mktemp -d)
+if [ ! -e "$BUILD/data/volume.json" ] && [ -e "$SITE/data/volume.json" ]; then
+  cp -r "$SITE/data/volume.json" "$KEEPV/"
+  [ -d "$SITE/data/volume" ] && cp -r "$SITE/data/volume" "$KEEPV/"
+fi
 find "$SITE" -mindepth 1 -maxdepth 1 ! -name archive -exec rm -rf {} +
 cp -r "$BUILD/." "$SITE/"
+if [ -e "$KEEPV/volume.json" ]; then
+  mkdir -p "$SITE/data" && cp -r "$KEEPV/." "$SITE/data/"
+  echo "kept the previous 3D volumes until the volume workflow replaces them"
+fi
+rm -rf "$KEEPV"
 
 # 3. the day's archive copy, without hourly fields or 3D volumes: the 12Z edition, or the first of the day
 if [[ "$CYCLE" == *T12Z ]] || [ ! -e "$SITE/archive/$DATE/data/briefing.json" ]; then

@@ -71,7 +71,18 @@ def test_fetch_reads_levels_and_writes_manifest(tmp_path):
 
 
 def test_demo_has_gfs_only_fields():
-    g = volume.demo({}, None, {"lat_min": 43, "lat_max": 51, "lon_min": -128.3, "lon_max": -118.5}, "ncep")
-    e = volume.demo({}, None, {"lat_min": 43, "lat_max": 51, "lon_min": -128.3, "lon_max": -118.5}, "ecmwf")
+    g = volume.demo_volume({}, None, {"lat_min": 43, "lat_max": 51, "lon_min": -128.3, "lon_max": -118.5}, "ncep")
+    e = volume.demo_volume({}, None, {"lat_min": 43, "lat_max": 51, "lon_min": -128.3, "lon_max": -118.5}, "ecmwf")
     assert {"water", "ice"} <= set(g["vars"]) and "water" not in e["vars"]
     assert g["vars"]["temp"].shape == (16, 25, 33, 40)
+
+
+def test_build_demo_writes_manifest(tmp_path, monkeypatch):
+    monkeypatch.setenv("BRIEFING_CYCLE", "2026-11-11T12Z")
+    cfg = {"domain": {"lat_min": 43, "lat_max": 44, "lon_min": -124, "lon_max": -123},
+           "grib_models": [{"id": "gfs", "label": "GFS", "family": "ncep", "volume": {"hours": 48, "step": 3}},
+                           {"id": "nbm", "label": "NBM", "family": "ncep"}]}
+    man = volume.build(cfg, tmp_path, demo=True)
+    js = __import__("json").loads((tmp_path / "volume.json").read_text())
+    assert [m["model"] for m in man] == ["GFS"] and js["cycle"] == "2026-11-11T12Z" and len(js["volumes"]) == 1
+    assert (tmp_path / "volume" / "gfs_cloud.bin.gz").exists()

@@ -16,7 +16,7 @@ from zoneinfo import ZoneInfo
 import numpy as np
 import yaml
 
-from . import (alerts, analysis, avalanche, change, climo, coast, cogs, context, convective, eccc_alerts, extremes, fields, fronts, impacts, landslide, volume,
+from . import (alerts, analysis, avalanche, change, climo, coast, cogs, context, convective, eccc_alerts, extremes, fields, fronts, impacts, landslide,
                maps, nbmprob, normals, observed, obsreports, odds, outlooks, report, rivers, snowpack, summary, tempdep, timing, trends, urma, verify, wildfire)
 from .grib import day0, day12, first_day_hours
 
@@ -65,11 +65,6 @@ def collect(cfg: dict, out: Path, demo: bool = False, products: bool = True) -> 
         from . import demo as src
         grib_models, grib_ens = src.grib(cfg), src.ensembles(cfg)
         sup, sup_ens = src.supplement(cfg), []
-        # synthetic 3D volumes for the models configured with them
-        for i, m in enumerate(grib_models):
-            sp = next((x for x in cfg["grib_models"] if x["id"] == m["id"]), {})
-            if sp.get("volume") and m.get("run"):
-                m["volume"] = volume.demo(sp, m["run"], cfg["domain"], sp["family"], seed=i)
     else:
         from . import grib, points
         grib_models, grib_ens = grib.fetch_all(cfg)
@@ -155,9 +150,6 @@ def collect(cfg: dict, out: Path, demo: bool = False, products: bool = True) -> 
         if products and grib_models else []
     if products:
         (out / "fields.json").write_text(json.dumps(clean({"fields": field_manifest})), encoding="utf-8")
-        # pressure-level volumes for the map's 3D view
-        vol_manifest = safe("3D volumes", lambda: volume.export(grib_models, out / "volume"), []) if grib_models else []
-        (out / "volume.json").write_text(json.dumps(clean({"volumes": vol_manifest})), encoding="utf-8")
     cog_manifest = safe("GeoTIFF export", lambda: cogs.export(grib_models, cfg, out / "cogs", norm_grid), []) \
         if products and grib_models else []
     if products:
