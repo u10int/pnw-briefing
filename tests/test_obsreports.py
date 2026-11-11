@@ -7,12 +7,12 @@ DAYS = [date(2026, 11, 6), date(2026, 11, 7), date(2026, 11, 8)]
 
 
 def test_asos_units_and_trace():
-    js = {"data": [{"date": "2026-11-06", "precip": 0.25, "max_gust": 26.0, "max_gust_localts": "2026-11-06T10:00", "snow": 0},
+    js = {"data": [{"date": "2026-11-06", "precip": 0.25, "max_gust": 26.0, "max_gust_localts": "2026-11-06T10:00", "snow": 0, "max_tmpf": 54.4, "min_tmpf": 41.0},
                    {"date": "2026-11-07", "precip": 0.0001, "max_gust": 41, "max_gust_localts": None, "snow": None},
                    {"date": "2026-11-09", "precip": None, "max_gust": None}]}
     with mock.patch.object(obsreports, "http_json", return_value=js):
         out = obsreports.asos("SEA", "WA_ASOS", DAYS)
-    assert out["2026-11-06"] == {"precip": 0.25, "gust": 30, "gustTime": "2026-11-06T10:00", "snow": 0.0}
+    assert out["2026-11-06"] == {"precip": 0.25, "gust": 30, "gustTime": "2026-11-06T10:00", "snow": 0.0, "tmax": 54, "tmin": 41}
     assert out["2026-11-07"]["precip"] == 0.001 and out["2026-11-07"]["gust"] == 47
     assert "2026-11-09" not in out
 
@@ -23,10 +23,14 @@ def test_snotel_daily_changes():
         {"stationElement": {"elementCode": "PREC"}, "values": vals([("2026-11-05 23:00", 10.0), ("2026-11-06 12:00", 10.6), ("2026-11-06 23:00", 11.0),
                                                                      ("2026-11-07 23:00", 10.9), ("2026-11-08 06:00", 11.3)])},
         {"stationElement": {"elementCode": "SNWD"}, "values": vals([("2026-11-05 23:00", 4), ("2026-11-06 08:00", 9), ("2026-11-06 23:00", 7),
-                                                                     ("2026-11-07 23:00", 6), ("2026-11-08 06:00", 8)])}]}]
+                                                                     ("2026-11-07 23:00", 6), ("2026-11-08 06:00", 8)])},
+        # 6 Nov: a full day of hourly readings; 7 Nov: only a few (no high or low); 8 Nov (the last day, so far): two
+        {"stationElement": {"elementCode": "TOBS"}, "values": vals([(f"2026-11-06 {h:02d}:00", 28 + h / 2) for h in range(24)]
+                                                                    + [("2026-11-07 01:00", 30.0), ("2026-11-08 01:00", 25.4), ("2026-11-08 05:00", 22.6)])}]}]
     with mock.patch.object(obsreports, "http_json", return_value=js):
         out = obsreports.snotel(["791:WA:SNTL"], DAYS)["791:WA:SNTL"]
-    assert out["2026-11-06"] == {"precip": 1.0, "snow": 5, "depth": 7}
+    assert out["2026-11-06"] == {"precip": 1.0, "snow": 5, "depth": 7, "tmax": 40, "tmin": 28}
+    assert out["2026-11-07"]["tmax"] is None and (out["2026-11-08"]["tmax"], out["2026-11-08"]["tmin"]) == (25, 23)
     assert out["2026-11-07"]["precip"] == 0 and out["2026-11-07"]["snow"] == 0
     assert out["2026-11-08"]["precip"] == 0.4 and out["2026-11-08"]["snow"] == 2
 
@@ -87,3 +91,47 @@ def test_fetch_drops_reports_older_than_report_hours():
          mock.patch.object(obsreports, "_station_names", return_value={}):
         out = obsreports.fetch(cfg, now=now)
     assert [r["time"] for r in out["reports"]] == ["2026-11-09T10:00:00Z"] and out["reportHours"] == 24
+
+
+PQR_HIGHS = """
+Public Information Statement
+National Weather Service Portland OR
+858 PM PDT Sun Aug 24 2025
+
+...HIGH TEMPERATURE REPORTS...
+
+Location                     Temp      Time/Date       Provider
+
+...Oregon...
+
+...Benton County...
+Monroe                        97 F     0440 PM 08/24   CWOP
+Corvallis Airport             95 F     0456 PM 08/24   AWOS
+"""
+SEW_LOWS = """
+Public Information Statement
+National Weather Service Seattle WA
+628 PM PST Tue Feb 11 2025
+
+...LOW TEMPERATURE REPORTS...
+
+Location                     Temp      Time/Date       Lat/Lon
+Baldi Mt                       5 F     0258 PM 02/11   47.22N/121.84W
+Snoqualmie Pass               -2 F     0700 AM 02/11   47.42N/121.43W
+"""
+
+
+def test_parse_pns_temperatures():
+    hi = obsreports.parse_pns(PQR_HIGHS, "PQR")
+    assert [(r["kind"], r["place"], r["mag"], r["unit"], r["source"], r["lat"]) for r in hi] == [
+        ("high", "Monroe", 97, "F", "CWOP", None), ("high", "Corvallis Airport", 95, "F", "AWOS", None)]
+    assert hi[0]["county"] == "Benton County" and hi[0]["time"] == "2025-08-24T23:40:00+00:00"
+    lo = obsreports.parse_pns(SEW_LOWS, "SEW")
+    assert [(r["kind"], r["mag"], r["lat"], r["lon"]) for r in lo] == [("low", 5, 47.22, -121.84), ("low", -2, 47.42, -121.43)]
+
+
+def test_merge_places_temperature_rows_without_coordinates_by_name():
+    pts = [{"name": "Corvallis", "lat": 44.56, "lon": -123.26}, {"name": "Snoqualmie Pass", "lat": 47.42, "lon": -121.41}]
+    out = obsreports.merge_reports([], obsreports.parse_pns(PQR_HIGHS, "PQR") + obsreports.parse_pns(SEW_LOWS, "SEW"), pts)
+    near = {r["place"]: r["near"] for r in out}
+    assert near == {"Monroe": None, "Corvallis Airport": "Corvallis", "Baldi Mt": None, "Snoqualmie Pass": "Snoqualmie Pass"}

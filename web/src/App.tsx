@@ -380,7 +380,7 @@ export default function App() {
 
           <TabsContent value="temp">
             <Section title="Temperature" first
-              description="Daily highs and lows against normal for each location, the warmest and coldest each model gets, and how the models' highs and lows have verified lately."
+              description="Daily highs and lows against normal for each location, the warmest and coldest each model gets, what the stations have measured lately, and how the models' highs and lows have verified."
               action={<MapLink req={{ mode: "hourly", layer: "t2m" }} label="Temperature on the map" />}>
               <Groups tab="temp" groups={[
                 { id: "forecast", title: GROUP_TITLES.forecast, show: true, children: <>
@@ -391,6 +391,7 @@ export default function App() {
                     tabs={[...pickExtremes(data, "short", "the next 48 hours", ["tmax", "tmin"], " (48 h)"),
                            ...pickExtremes(data, "long", "each model's full range", ["tmax", "tmin"], ` (to day ${meta.days})`)]} />
                 </> },
+                { id: "observed", title: GROUP_TITLES.observed, show: data.obsReports, children: <ObsReportsCard data={data} v="temp" /> },
                 { id: "verify", title: GROUP_TITLES.verify, show: data.tempVerification, children: <TempVerificationCard data={data} /> },
               ]} />
             </Section>

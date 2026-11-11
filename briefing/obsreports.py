@@ -1,14 +1,15 @@
 """What has actually been observed at each forecast location over the last few days, and the
 reports NWS offices have put out.
 
-- Stations (config `obs_reports.stations`): per local calendar day, precipitation, peak gust and
-  new snow at the station that stands for each location.
+- Stations (config `obs_reports.stations`): per local calendar day, precipitation, peak gust, new
+  snow and the high and low temperature at the station that stands for each location.
   - ASOS (lowland and coast): the Iowa Environmental Mesonet's daily summaries of the airport
     observations (precipitation in inches, a trace stored as 0.0001; gusts in knots).
   - Environment Canada climate stations (B.C.): daily totals from MSC GeoMet, usually a day behind.
   - SNOTEL (the passes): hourly precipitation and snow depth from NRCS; a day's precipitation is
     the rise in the accumulated gauge, its new snow the rise in depth over the previous day's last
-    reading (to the whole inch, since depth sensors wobble).
+    reading (to the whole inch, since depth sensors wobble), its high and low the extremes of the
+    hourly air temperature.
 - NWS local storm reports (IEM's archive, by office): rain and snow totals, wind gusts, wind damage,
   flooding and ice, from spotters, mesonets and officials, each tied to the nearest forecast location.
 - Reports are kept for `report_hours` (48) after the time of the event, whether or not the office
@@ -16,7 +17,9 @@ reports NWS offices have put out.
 - NWS Public Information Statement summaries (Seattle and Portland, via IEM's text archive): after
   an event the offices list the highest wind reports, snowfall or rainfall totals from dozens of
   sites, grouped by county or zone, each with an amount, time and position. Every row becomes a
-  report; a single storm report repeated in a summary is kept once.
+  report; a single storm report repeated in a summary is kept once. High and low temperature
+  summaries become `high` and `low` reports. Portland's list a provider in place of a position;
+  those rows have no coordinates and are tied to a location only when the place names it.
 """
 from __future__ import annotations
 
@@ -67,10 +70,12 @@ def asos(sid, network, days):
         if r.get("date") not in want:
             continue
         p, g, sn = _num(r.get("precip")), _num(r.get("max_gust")), _num(r.get("snow"))
+        hi, lo = _num(r.get("max_tmpf")), _num(r.get("min_tmpf"))
         out[r["date"]] = {"precip": None if p is None else (0.001 if 0 < p < 0.001 else round(p, 2)),   # 0.001 = trace
                           "gust": None if g is None else round(g * KT_TO_MPH),
                           "gustTime": r.get("max_gust_localts") or None,
-                          "snow": None if sn is None else round(sn, 1)}
+                          "snow": None if sn is None else round(sn, 1),
+                          "tmax": None if hi is None else round(hi), "tmin": None if lo is None else round(lo)}
     return out
 
 
@@ -85,14 +90,17 @@ def eccc(cid, days):
         if d not in want:
             continue
         p, g, sn = _num(a.get("TOTAL_PRECIPITATION")), _num(a.get("SPEED_MAX_GUST")), _num(a.get("TOTAL_SNOW"))
+        hi, lo = _num(a.get("MAX_TEMPERATURE")), _num(a.get("MIN_TEMPERATURE"))
+        f = lambda c: None if c is None else round(c * 9 / 5 + 32)
         out[d] = {"precip": None if p is None else round(p / 25.4, 2), "gust": None if g is None else round(g / 1.609),
+                  "tmax": f(hi), "tmin": f(lo),
                   "snow": None if sn is None else round(sn / 2.54, 1), "name": a.get("STATION_NAME")}
     return out
 
 
 def snotel(triplets, days):
-    """{triplet: {date: {precip, snow, depth}}} from hourly SNOTEL readings (local standard time)."""
-    js = http_json(AWDB, {"stationTriplets": ",".join(triplets), "elements": "PREC,SNWD", "duration": "HOURLY",
+    """{triplet: {date: {precip, snow, depth, tmax, tmin}}} from hourly SNOTEL readings (local standard time)."""
+    js = http_json(AWDB, {"stationTriplets": ",".join(triplets), "elements": "PREC,SNWD,TOBS", "duration": "HOURLY",
                           "beginDate": f"{(days[0] - timedelta(days=1)).isoformat()} 00:00",
                           "endDate": f"{(days[-1] + timedelta(days=1)).isoformat()} 00:00", "returnFlags": "false"})
     out = {}
@@ -102,7 +110,7 @@ def snotel(triplets, days):
             el = d.get("stationElement", {}).get("elementCode")
             ser[el] = [(v["date"], v["value"]) for v in d.get("values", []) if v.get("value") is not None]
         by = {}
-        for el in ("PREC", "SNWD"):
+        for el in ("PREC", "SNWD", "TOBS"):
             for t, v in ser.get(el, []):
                 by.setdefault(t[:10], {}).setdefault(el, []).append(v)
         rec = {}
@@ -111,7 +119,11 @@ def snotel(triplets, days):
             today, before = by.get(k, {}), by.get(prev, {})
             p = round(max(today["PREC"][-1] - before["PREC"][-1], 0), 2) if today.get("PREC") and before.get("PREC") else None
             sn = round(max(max(today["SNWD"]) - before["SNWD"][-1], 0)) if today.get("SNWD") and before.get("SNWD") else None
-            rec[k] = {"precip": p, "snow": sn, "depth": today["SNWD"][-1] if today.get("SNWD") else None}
+            t = today.get("TOBS") or []
+            # a day's high and low need most of its hours (today: whatever has come in so far)
+            ok = len(t) >= (1 if d == days[-1] else 18)
+            rec[k] = {"precip": p, "snow": sn, "depth": today["SNWD"][-1] if today.get("SNWD") else None,
+                      "tmax": round(max(t)) if ok else None, "tmin": round(min(t)) if ok else None}
         out[st["stationTriplet"]] = rec
     return out
 
@@ -181,11 +193,13 @@ def lsrs(cfg, wfos, start, end):
 
 # ------------------------------------------------------------------ PNS summaries
 
-PNS_KIND = (("WIND", "gust"), ("GUST", "gust"), ("SNOW", "snow"), ("ICE", "ice"), ("FREEZING", "ice"),
+PNS_KIND = (("HIGH TEMP", "high"), ("LOW TEMP", "low"), ("MAX TEMP", "high"), ("MIN TEMP", "low"), ("WIND", "gust"), ("GUST", "gust"), ("SNOW", "snow"), ("ICE", "ice"), ("FREEZING", "ice"),
             ("RAIN", "rain"), ("PRECIP", "rain"))
 # a report row: the location fills the first 29 columns, then amount, time/date, lat/lon[/elev]
-PNS_ROW = re.compile(r"^(?P<mag>T|\d+(?:\.\d+)?)\s*(?P<unit>MPH|KTS?|IN(?:CH(?:ES)?)?)\s+(?P<hm>\d{3,4}) (?P<ap>[AP]M) "
-                     r"(?P<mo>\d{1,2})/(?P<dd>\d{1,2})\s+(?P<lat>\d+(?:\.\d+)?)N/(?P<lon>\d+(?:\.\d+)?)W(?:/(?P<elev>-?\d+))?", re.I)
+# (temperature summaries: "97 F"; Portland's give a provider where Seattle's give the lat/lon)
+PNS_ROW = re.compile(r"^(?P<mag>T|-?\d+(?:\.\d+)?)\s*(?P<unit>MPH|KTS?|IN(?:CH(?:ES)?)?|F)\s+(?P<hm>\d{3,4}) (?P<ap>[AP]M) "
+                     r"(?P<mo>\d{1,2})/(?P<dd>\d{1,2})(?:\s+(?P<lat>\d+(?:\.\d+)?)N/(?P<lon>\d+(?:\.\d+)?)W(?:/(?P<elev>-?\d+))?.*|\s+(?P<prov>\S.*?))?\s*$", re.I)
+TEMP_KINDS = ("high", "low")
 HEAD = re.compile(r"^\.\.\.(.+?)\.\.\.\s*$")
 
 
@@ -232,12 +246,19 @@ def parse_pns(text, office):
         except ValueError:
             continue
         unit = m["unit"].upper()
+        if (unit == "F") != (kind in TEMP_KINDS):
+            continue
+        if m["lat"] is None and kind not in TEMP_KINDS:
+            continue
         mag = 0.001 if m["mag"].upper() == "T" else float(m["mag"])
         if unit.startswith("KT"):
             mag, unit = round(mag * KT_TO_MPH), "MPH"
-        out.append({"kind": kind, "type": {"gust": "Wind Gust", "snow": "Snowfall", "rain": "Rainfall", "ice": "Ice"}.get(kind, section), "time": t.astimezone(timezone.utc).isoformat(),
-                    "lat": float(m["lat"]), "lon": -float(m["lon"]), "mag": mag, "unit": "mph" if unit == "MPH" else "inch",
-                    "measured": None, "place": place, "county": area, "state": None, "source": None, "remark": None,
+        out.append({"kind": kind, "type": {"gust": "Wind Gust", "snow": "Snowfall", "rain": "Rainfall", "ice": "Ice",
+                                           "high": "High Temperature", "low": "Low Temperature"}.get(kind, section),
+                    "time": t.astimezone(timezone.utc).isoformat(),
+                    "lat": float(m["lat"]) if m["lat"] else None, "lon": -float(m["lon"]) if m["lon"] else None,
+                    "mag": mag, "unit": "mph" if unit == "MPH" else "F" if unit == "F" else "inch",
+                    "measured": None, "place": place, "county": area, "state": None, "source": (m["prov"] or "").strip() or None, "remark": None,
                     "elev_ft": int(m["elev"]) if m["elev"] else None,
                     "summary": {"office": office, "title": section, "issued": issued.astimezone(timezone.utc).isoformat()}})
     return out
@@ -259,7 +280,7 @@ def pns_reports(cfg, offices, start, end):
             continue
         for prod in r.text.split("\x01"):
             for x in parse_pns(prod, off):
-                if not (d["lon_min"] <= x["lon"] <= d["lon_max"] and d["lat_min"] <= x["lat"] <= d["lat_max"]):
+                if x["lat"] is not None and not (d["lon_min"] <= x["lon"] <= d["lon_max"] and d["lat_min"] <= x["lat"] <= d["lat_max"]):
                     continue
                 if x["summary"]["issued"] < start.isoformat():
                     continue
@@ -273,11 +294,18 @@ def merge_reports(lsr, pns, pts):
     """Storm reports and summary rows together, a storm report dropped where a summary repeats it
     (same kind and amount, within 3 km and 15 minutes); each tied to the nearest location."""
     def same(a, b):
+        if a["lat"] is None or b["lat"] is None:
+            return False
         return (a["kind"] == b["kind"] and a["mag"] is not None and b["mag"] is not None and abs(a["mag"] - b["mag"]) < 0.51
                 and _km(a["lat"], a["lon"], b["lat"], b["lon"]) <= 3
                 and abs(datetime.fromisoformat(a["time"].replace("Z", "+00:00")) - datetime.fromisoformat(b["time"])) <= timedelta(minutes=15))
     out = [r for r in lsr if not any(same(r, p) for p in pns)]
     for p in pns:
+        if p["lat"] is None:                        # no position: the location its place names, if any
+            name = (p["place"] or "").lower()
+            near = next((q["name"] for q in pts if re.match(rf"{re.escape(q['name'].lower())}\b", name)), None)
+            out.append({**p, "near": near})
+            continue
         km, near = min((_km(p["lat"], p["lon"], q["lat"], q["lon"]), q["name"]) for q in pts)
         out.append({**p, "near": near if km <= NEAR_KM else None})
     out.sort(key=lambda x: x["time"] or "", reverse=True)
@@ -330,7 +358,7 @@ def fetch(cfg, demo=False, now=None):
         a = res(jobs.get((name, "asos")), f"{name} ASOS") or {}
         c = res(jobs.get((name, "eccc")), f"{name} climate station") or {}
         t = sn.get(s.get("snotel"), {})
-        rows = {"precip": [], "gust": [], "gustTime": [], "snow": []}
+        rows = {"precip": [], "gust": [], "gustTime": [], "snow": [], "tmax": [], "tmin": []}
         for d in days:
             k = d.isoformat()
             ad, cd, td = a.get(k, {}), c.get(k, {}), t.get(k, {})
@@ -339,6 +367,9 @@ def fetch(cfg, demo=False, now=None):
             rows["gust"].append(g.get("gust"))
             rows["gustTime"].append(g.get("gustTime"))
             rows["snow"].append(next((x.get("snow") for x in (td, cd, ad) if x.get("snow") is not None), None))
+            # highs and lows: the airport first (current to the hour), then the climate station, then SNOTEL
+            for v in ("tmax", "tmin"):
+                rows[v].append(next((x.get(v) for x in (ad, cd, td) if x.get(v) is not None), None))
         sources = []
         if s.get("asos"):
             sources.append(f"{(names.get(s['asos']) or s['asos']).title()} ({s['asos']})")
@@ -348,7 +379,7 @@ def fetch(cfg, demo=False, now=None):
         if s.get("snotel"):
             nm, el = sn_names.get(s["snotel"], (None, None))
             sources.append(f"{nm or s['snotel']} SNOTEL" + (f" ({int(el):,} ft)" if el else ""))
-        if any(v is not None for r in ("precip", "gust", "snow") for v in rows[r]):
+        if any(v is not None for r in ("precip", "gust", "snow", "tmax", "tmin") for v in rows[r]):
             points[name] = {**rows, "stations": sources}
     reports = merge_reports(res(lsr_job, "local storm reports") or [], res(pns_job, "NWS report summaries") or [], cfg["points"])
     cutoff = now - timedelta(hours=hours)

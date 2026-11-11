@@ -588,14 +588,14 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
 
 // ------------------------------------------------------------------ legends
 
-const NWS_REPORT_COLORS: Record<ObsReport["kind"], string> = { gust: "#2a6fdb", damage: "#1b1f24", rain: "#1e9e4a", snow: "#7b4fc9", ice: "#d147a3", flood: "#0b7a75" }
-const NWS_REPORT_NAMES: Record<ObsReport["kind"], string> = { gust: "Wind gust", damage: "Wind damage", rain: "Rain", snow: "Snow", ice: "Ice", flood: "Flooding" }
+const NWS_REPORT_COLORS: Record<ObsReport["kind"], string> = { gust: "#2a6fdb", damage: "#1b1f24", rain: "#1e9e4a", snow: "#7b4fc9", ice: "#d147a3", flood: "#0b7a75", high: "#d9480f", low: "#1c7ed6" }
+const NWS_REPORT_NAMES: Record<ObsReport["kind"], string> = { gust: "Wind gust", damage: "Wind damage", rain: "Rain", snow: "Snow", ice: "Ice", flood: "Flooding", high: "High temperature", low: "Low temperature" }
 
 function reportGeoJSON(rs: ObsReport[]): GeoJSON.FeatureCollection {
   return {
     type: "FeatureCollection",
     features: rs.map((r) => ({
-      type: "Feature" as const, geometry: { type: "Point" as const, coordinates: [r.lon, r.lat] },
+      type: "Feature" as const, geometry: { type: "Point" as const, coordinates: [r.lon!, r.lat!] },
       properties: { kind: r.kind, label: r.mag == null ? "" : r.unit === "mph" ? String(Math.round(r.mag)) : r.mag < 0.005 ? "T" : `${+r.mag.toFixed(2)}″` },
     })),
   }
@@ -1388,7 +1388,8 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
   const [showFronts, setShowFronts] = useStoredFlag("pnw-briefing.map.fronts", false)
   const frontsOn = showFronts && data.fronts?.frames.length ? data.fronts : null
   const [showReports, setShowReports] = useStoredFlag("pnw-briefing.map.nwsReports", false)
-  const live = React.useMemo(() => liveReports(data.obsReports), [data.obsReports])
+  // storm reports with a position (temperature summaries stay in the Temperature tab's table)
+  const live = React.useMemo(() => liveReports(data.obsReports).filter((r) => r.lat != null && r.lon != null && r.kind !== "high" && r.kind !== "low"), [data.obsReports])
   const reportsOn = showReports && live.length ? live : null
   const [showFires, setShowFires] = useStoredFlag("pnw-briefing.map.fires", false)
   const hasFires = !!(data.wildfire?.incidents?.length || data.wildfire?.perimeters?.features.length)
