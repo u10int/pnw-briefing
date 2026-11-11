@@ -202,7 +202,7 @@ function PeakLine({ pts, unit, thr, children }: { pts: { name?: string; peak: nu
   const value = top != null && unit ? short(top, unit) : null
   if (value == null && !children) return null
   return (
-    <div className="mt-0.5 flex items-center gap-1.5 text-xs leading-4 text-muted-foreground tabular-nums">
+    <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-xs leading-4 text-muted-foreground tabular-nums">
       {top != null && thr != null && unit && <Gauge v={top} thr={thr} unit={unit} where={pts[0]?.name} />}
       {value}{children}
     </div>
