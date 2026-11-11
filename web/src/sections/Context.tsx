@@ -1117,7 +1117,11 @@ export function SnowpackCard({ data }: { data: Briefing }) {
         </TooltipTrigger>
         <TooltipContent>Snow water {swe == null ? "–" : `${inch(swe)}″`} against a median {median == null ? "–" : `${inch(median)}″`} for the date{pct != null ? ` (${pct}%)` : ""}</TooltipContent>
       </Tooltip>
-      <span className="text-right tabular-nums" style={pctCell(pct)}>{pct == null ? "–" : `${pct}%`}</span>
+      {/* percent of median in a coloured cell with the 3 px corners of the briefing's other value cells */}
+      <span className="flex justify-end">
+        {pct == null ? <span className="text-muted-foreground">–</span>
+          : <span className="min-w-12 rounded-[3px] px-1.5 py-1 text-center text-xs font-medium tabular-nums" style={pctCell(pct)}>{pct}%</span>}
+      </span>
       {hasHist ? (
         <Tooltip>
           <TooltipTrigger asChild><span tabIndex={0} className="block outline-none"><DepthLine h={hist} max={depthMax} /></span></TooltipTrigger>
