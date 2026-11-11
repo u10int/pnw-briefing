@@ -87,3 +87,12 @@ def test_build_demo_writes_manifest(tmp_path, monkeypatch):
     js = __import__("json").loads((tmp_path / "volume.json").read_text())
     assert [m["model"] for m in man] == ["GFS"] and js["cycle"] == "2026-11-11T12Z" and len(js["volumes"]) == 1
     assert (tmp_path / "volume" / "gfs_cloud.bin.gz").exists()
+
+
+def test_fetch_says_why_steps_fail(caplog):
+    spec = {"label": "ECMWF IFS", "family": "ecmwf", "max_hours": 240}
+    H = mock.Mock()
+    H.xarray.side_effect = KeyError("isobaricInhPa")
+    with mock.patch("briefing.grib._H", return_value=H), mock.patch("briefing.grib._retry", side_effect=lambda f, *a, **k: f(*a, **k)):
+        assert volume.fetch(spec, datetime(2026, 11, 11, 12), 6, DOM, hours=6, step=3) is None
+    assert "3 of 3 steps unreadable (f006: KeyError" in caplog.text
