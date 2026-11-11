@@ -201,8 +201,14 @@ export interface Alert {
   id: string; event: string; severity: string | null; certainty: string | null; urgency: string | null
   headline: string | null; onset: string | null; ends: string | null; sender: string | null
   areaDesc: string | null; points: string[]; url: string | null
+  /** Environment Canada alerts: the source, the alert's kind (warning, watch, advisory, statement)
+   *  and its colour-coded risk (yellow, orange, red), shown in place of the NWS hazard colour. */
+  source?: "eccc"; type?: string | null; colour?: string | null; issued?: string | null; status?: string | null
 }
 /** `pages`: each location's weather.gov hazards page (forecast zone, county, fire weather zone). */
+/** Environment Canada's alerts for the B.C. locations: `points` holds each location's [lon, lat] and
+ *  `bbox` the box the alerts were requested for, so the page can repeat the request live. */
+export interface EcccAlerts { fetched: string; bbox: number[]; points: Record<string, [number, number]>; items: Alert[]; ok: boolean; demo?: boolean }
 export interface Alerts { fetched: string; areas: string[]; zones: Record<string, string[]>; pages?: Record<string, string>; items: Alert[]; ok: boolean; demo?: boolean }
 
 /** Window extremes: highest/lowest 2 m temperature (°F), strongest sustained wind and gust (mph). */
@@ -293,6 +299,7 @@ export interface Briefing {
   regionShapes: Record<string, [number, number][]>
   normals: Normals | null
   alerts: Alerts | null
+  ecccAlerts?: EcccAlerts | null
   change: Change | null
   trends?: { windows: TrendWindow[] }                  // the trends table above the tabs
   arCoast?: ArCoast | null                              // the coastal AR outlook (map layer); absent before it was added

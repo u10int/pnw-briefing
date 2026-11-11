@@ -4,8 +4,9 @@ import { ExternalLink, RefreshCw, ShieldCheck } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { contrastTextColor } from "@/lib/contrast"
 import { alertColor } from "@/lib/nwsColors"
-import type { Alert, Alerts, Briefing } from "@/types"
+import type { Alert, Alerts, Briefing, EcccAlerts } from "@/types"
 import { DayHead } from "@/components/DayHead"
 
 const zoneId = (u: string) => u.replace(/\/$/, "").split("/").pop()!
@@ -25,6 +26,62 @@ const alertUrl = (snap: Alerts | null | undefined, points: string[], ids: string
   for (const p of points) { const u = locationPage(snap, p); if (u) return u }
   const zone = ids.find((z) => /^[A-Z]{2}Z\d{3}$/.test(z))
   return zone ? `https://forecast.weather.gov/showsigwx.php?warnzone=${zone}` : null
+}
+
+/** Environment Canada's colour-coded risk levels, as on weather.gc.ca. */
+const RISK: Record<string, string> = { yellow: "#ffe11a", orange: "#ff8c1a", red: "#e3262b" }
+const RISK_WORD: Record<string, string> = { yellow: "its lowest risk level", orange: "its middle risk level", red: "its highest risk level" }
+/** An alert's colour: Environment Canada's risk colour for its alerts, else the NWS hazard colour. */
+function colorOf(a: Alert) {
+  if (a.source === "eccc") { const bg = RISK[a.colour ?? ""] ?? "#e8e8e8"; return { bg, fg: contrastTextColor(bg) } }
+  return alertColor(a.event)
+}
+const rankOf = (a: Alert) => { const e = (a.type ?? a.event).toLowerCase(); return /warning/.test(e) ? 0 : /watch/.test(e) ? 1 : /advisory/.test(e) ? 2 : 3 }
+const byRank = (a: Alert, b: Alert) => rankOf(a) - rankOf(b) || (a.onset ?? "").localeCompare(b.onset ?? "")
+
+// ------------------------------------------------ Environment Canada, live (as briefing/eccc_alerts.py)
+type Ring = number[][]
+const inRing = (x: number, y: number, r: Ring) => {
+  let inside = false
+  for (let i = 0, j = r.length - 1; i < r.length; j = i++) {
+    const [xi, yi] = r[i], [xj, yj] = r[j]
+    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside
+  }
+  return inside
+}
+function contains(g: { type: string; coordinates: unknown } | null, x: number, y: number) {
+  if (!g) return false
+  const polys = (g.type === "Polygon" ? [g.coordinates] : g.type === "MultiPolygon" ? g.coordinates : []) as Ring[][]
+  return polys.some((rs) => rs.length && inRing(x, y, rs[0]) && !rs.slice(1).some((h) => inRing(x, y, h)))
+}
+const titleCase = (s: string) => s.replace(/\b\w/g, (c) => c.toUpperCase())
+/** Environment Canada's features (one per alert per forecast region) as alert records for the
+ *  locations, an alert's regions joined into one. */
+function ecccItems(features: { properties?: Record<string, string | null>; geometry: { type: string; coordinates: unknown } | null }[], snap: EcccAlerts): Alert[] {
+  const names = Object.keys(snap.points)
+  const groups = new Map<string, Alert & { areas: string[] }>()
+  for (const f of features) {
+    const a = f.properties ?? {}
+    if (/^(ended|cancelled)$/i.test(a.status_en ?? "")) continue
+    const hit = names.filter((n) => contains(f.geometry, ...snap.points[n]))
+    if (!hit.length) continue
+    const key = [a.alert_code, a.risk_colour_en, a.validity_datetime, a.event_end_datetime].join("|")
+    let g = groups.get(key)
+    if (!g) {
+      g = { id: `eccc-${key}`, event: titleCase(a.alert_name_en ?? "Alert"), type: a.alert_type, colour: (a.risk_colour_en ?? "").toLowerCase() || null,
+        severity: a.impact_en, certainty: a.confidence_en, urgency: null, headline: (a.alert_text_en ?? "").trim().split("\n")[0] || null,
+        onset: a.validity_datetime ?? a.publication_datetime, ends: a.event_end_datetime ?? a.expiration_datetime, issued: a.publication_datetime,
+        status: a.status_en, sender: "Environment Canada", areaDesc: null, points: [], source: "eccc", areas: [], url: null }
+      groups.set(key, g)
+    }
+    if (a.feature_name_en && !g.areas.includes(a.feature_name_en)) g.areas.push(a.feature_name_en)
+    for (const n of hit) if (!g.points.includes(n)) g.points.push(n)
+  }
+  return [...groups.values()].map(({ areas, ...g }) => {
+    const points = names.filter((n) => g.points.includes(n))
+    const [lon, lat] = snap.points[points[0]]      // its page on weather.gc.ca shows the alert in full
+    return { ...g, areaDesc: areas.join("; "), points, url: `https://weather.gc.ca/en/location/index.html?coords=${lat.toFixed(3)},${lon.toFixed(3)}` }
+  })
 }
 
 const PT = "America/Los_Angeles"
@@ -51,7 +108,7 @@ export function AlertBadge({ event }: { event: string }) {
 
 /** Each alert as a bar on a shared Pacific-time axis: whole days from today (or the earliest
  *  onset) to the last end, at most 14 days, with day lines and a "now" marker. */
-function AlertTimeline({ items, snap }: { items: Alert[]; snap: Alerts }) {
+function AlertTimeline({ items }: { items: Alert[] }) {
   const now = Date.now()
   // the track's width decides how much text fits in a day and in a bar
   const ref = React.useRef<HTMLDivElement>(null)
@@ -97,7 +154,7 @@ function AlertTimeline({ items, snap }: { items: Alert[]; snap: Alerts }) {
         </div>
       </div>
       {span.map(({ a, s, e }) => {
-        const c = alertColor(a.event)
+        const c = colorOf(a)
         const l = pct(s), r = e != null ? pct(e) : 100, w = Math.max(r - l, 0.8)
         const cut = e == null || e > t1
         const sameDay = e != null && midnight(s) === midnight(e)
@@ -112,13 +169,13 @@ function AlertTimeline({ items, snap }: { items: Alert[]; snap: Alerts }) {
                 <span className="size-2.5 shrink-0 rounded-full ring-1 ring-black/15" style={{ background: c.bg }} aria-hidden />
                 <span className="text-sm leading-tight font-medium">{a.event}</span>
                 {a.url && (
-                  <a href={a.url} target="_blank" rel="noopener" className="text-muted-foreground hover:text-foreground" aria-label={`Open ${a.event} on weather.gov`}>
+                  <a href={a.url} target="_blank" rel="noopener" className="text-muted-foreground hover:text-foreground" aria-label={`Open ${a.event} on ${a.source === "eccc" ? "weather.gc.ca" : "weather.gov"}`}>
                     <ExternalLink className="size-3.5" />
                   </a>
                 )}
               </div>
               <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
-                {a.points.join(", ")}
+                {a.points.join(", ")}{a.source === "eccc" && <> · Environment Canada{a.colour ? `, ${a.colour}` : ""}</>}
               </p>
               <p className="mt-0.5 text-xs font-medium tabular-nums sm:hidden">{label}</p>
             </div>
@@ -136,7 +193,8 @@ function AlertTimeline({ items, snap }: { items: Alert[]; snap: Alerts }) {
                 <TooltipContent className="max-w-xs space-y-1">
                   <p className="font-semibold">{a.event}</p>
                   <p>{e == null ? `From ${full(s)}, no end time given` : `${full(s)} to ${full(e)} Pacific`}</p>
-                  {a.sender && <p>Issued by {a.sender}</p>}
+                  {a.source === "eccc" && a.colour && <p>{titleCase(a.colour)} {(a.type ?? "alert").toLowerCase()}: Environment Canada's {RISK_WORD[a.colour] ?? "risk level"}{a.severity ? `; impact ${a.severity.toLowerCase()}` : ""}{a.certainty ? `, confidence ${a.certainty.toLowerCase()}` : ""}</p>}
+                  {a.sender && <p>Issued by {a.sender}{a.source === "eccc" && a.areaDesc ? ` for ${a.areaDesc}` : ""}</p>}
                   <p>Covers {a.points.join(", ")}</p>
                   {a.headline && <p className="opacity-80">{a.headline}</p>}
                 </TooltipContent>
@@ -145,23 +203,27 @@ function AlertTimeline({ items, snap }: { items: Alert[]; snap: Alerts }) {
           </div>
         )
       })}
-      {snap && <span className="sr-only">Times are Pacific.</span>}
+      <span className="sr-only">Times are Pacific.</span>
     </div>
   )
 }
 
 /**
- * Active NWS alerts for the forecast locations. The build-time snapshot renders first; the page
- * then repeats the same request against api.weather.gov so the list is current when you read it.
+ * Active alerts for the forecast locations: NWS for Washington and Oregon, Environment Canada for
+ * the B.C. locations. The build-time snapshots render first; the page then repeats the same
+ * requests (api.weather.gov, api.weather.gc.ca) so the list is current when you read it.
  */
 export function NwsAlerts({ data }: { data: Briefing }) {
   const snap = data.alerts
+  const ec = data.ecccAlerts ?? null
   // briefings built before the hazards-page links carry dead alerts.weather.gov URLs: re-point those
   const fixed = React.useMemo(() => (snap?.items ?? []).map((a) => (a.url?.includes("alerts.weather.gov")
     ? { ...a, url: alertUrl(snap, a.points, []) } : a)), [snap])
-  const [items, setItems] = React.useState<Alert[]>(fixed)
+  const [nws, setNws] = React.useState<Alert[]>(fixed)
+  const [eccc, setEccc] = React.useState<Alert[]>(ec?.items ?? [])
   const [state, setState] = React.useState<{ live: boolean; at: string | null; error: string | null }>(
-    { live: false, at: snap?.fetched ?? null, error: null })
+    { live: false, at: snap?.fetched ?? ec?.fetched ?? null, error: null })
+  const [ecLive, setEcLive] = React.useState(false)
 
   React.useEffect(() => {
     const zones = snap?.zones ?? {}
@@ -182,28 +244,43 @@ export function NwsAlerts({ data }: { data: Briefing }) {
             headline: p.headline, onset: p.onset ?? p.effective, ends: p.ends ?? p.expires, sender: p.senderName,
             areaDesc: p.areaDesc, points: pts, url: alertUrl(snap, pts, [...affected]) })
         }
-        const rank = (e: string) => (/warning/i.test(e) ? 0 : /watch/i.test(e) ? 1 : /advisory/i.test(e) ? 2 : 3)
-        out.sort((a, b) => rank(a.event) - rank(b.event) || (a.onset ?? "").localeCompare(b.onset ?? ""))
-        setItems(out)
+        setNws(out)
         setState({ live: true, at: new Date().toISOString(), error: null })
       })
-      .catch((e) => { if (e.name !== "AbortError") setState((s) => ({ ...s, error: String(e.message ?? e) })) })
+      .catch((e) => { if (e.name !== "AbortError") setState((s) => ({ ...s, error: `NWS: ${String(e.message ?? e)}` })) })
     return () => ctl.abort()
   }, [snap])
 
-  if (!snap) return null
+  React.useEffect(() => {
+    if (!ec || ec.demo || !Object.keys(ec.points).length) return
+    const ctl = new AbortController()
+    fetch(`https://api.weather.gc.ca/collections/weather-alerts/items?f=json&lang=en&limit=1000&bbox=${ec.bbox.join(",")}`, { signal: ctl.signal })
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`Environment Canada returned ${r.status}`))))
+      .then((js) => { setEccc(ecccItems(js.features ?? [], ec)); setEcLive(true) })
+      .catch((e) => { if (e.name !== "AbortError") setState((s) => ({ ...s, error: [s.error, `Environment Canada: ${String(e.message ?? e)}`].filter(Boolean).join("; ") })) })
+    return () => ctl.abort()
+  }, [ec])
+
+  if (!snap && !ec) return null
+  const items = [...nws, ...eccc].sort(byRank)
+  const demo = !!(snap?.demo || ec?.demo)
+  const live = (!snap || state.live) && (!ec || ecLive)
   const stamp = (
     <span>
-      {snap.demo ? "Demo alerts" : state.live ? "Live" : "As of the briefing"}
+      {demo ? "Demo alerts" : live ? "Live" : "As of the briefing"}
+      {!live && !demo && (state.live || ecLive) ? ` (${state.live ? "NWS" : "Environment Canada"} live)` : ""}
       {state.at && `, ${new Date(state.at).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/Los_Angeles" })}`}
     </span>
   )
+  const who = ec ? "NWS or Environment Canada" : "NWS"
+  const down = [snap && !snap.ok && !state.live ? "NWS" : null, ec && !ec.ok && !ecLive ? "Environment Canada" : null].filter(Boolean) as string[]
+  const anyEccc = items.some((a) => a.source === "eccc")
   // nothing in effect: one line rather than a card
-  if (!items.length && (snap.ok || state.live)) {
+  if (!items.length && !down.length) {
     return (
       <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 rounded-xl border bg-card px-4 py-3 text-sm shadow-xs">
         <ShieldCheck className="size-4 shrink-0 text-muted-foreground" />
-        <span>No active NWS watches, warnings or advisories for the forecast locations.</span>
+        <span>No active {who} watches, warnings or advisories for the forecast locations.</span>
         <span className="ml-auto flex items-center gap-1.5 text-xs text-muted-foreground"><RefreshCw className="size-3" aria-hidden />{stamp}</span>
       </div>
     )
@@ -211,24 +288,29 @@ export function NwsAlerts({ data }: { data: Briefing }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>NWS watches, warnings and advisories</CardTitle>
+        <CardTitle>{ec ? "Watches, warnings and advisories" : "NWS watches, warnings and advisories"}</CardTitle>
         <CardDescription>
-          Official alerts covering the forecast locations, alongside the automated flags below. Times are Pacific; hover a bar for the details and issuing office.
+          Official alerts covering the forecast locations{ec ? ": the NWS for Washington and Oregon, Environment Canada for the B.C. locations" : ""}, alongside the automated flags below. Times are Pacific; hover a bar for the details and who issued it.
         </CardDescription>
         <CardAction className="flex items-center gap-1.5 text-xs text-muted-foreground">
           <RefreshCw className="size-3" aria-hidden />
           {stamp}
         </CardAction>
       </CardHeader>
-      <CardContent>
-        {!snap.ok && !state.live ? (
-          <p className="text-sm text-muted-foreground">The NWS alert service didn't answer when this briefing was built. Check weather.gov directly.</p>
-        ) : items.length ? (
-          <AlertTimeline items={items} snap={snap} />
-        ) : (
-          <p className="text-sm text-muted-foreground">No active NWS alerts for the forecast locations.</p>
+      <CardContent className="space-y-2">
+        {down.length > 0 && <p className="text-sm text-muted-foreground">{down.join(" and ")}'s alert service didn't answer when this briefing was built. Check {down.map((d) => (d === "NWS" ? "weather.gov" : "weather.gc.ca")).join(" and ")} directly.</p>}
+        {items.length ? (
+          <AlertTimeline items={items} />
+        ) : !down.length ? (
+          <p className="text-sm text-muted-foreground">No active {who} alerts for the forecast locations.</p>
+        ) : null}
+        {anyEccc && (
+          <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+            <span>Environment Canada alerts are coloured by its risk level:</span>
+            {Object.entries(RISK).map(([k, c]) => <span key={k} className="flex items-center gap-1.5"><span className="size-2.5 rounded-full ring-1 ring-black/15" style={{ background: c }} aria-hidden />{k}</span>)}
+          </p>
         )}
-        {state.error && <p className="mt-2 text-xs text-muted-foreground">Live refresh failed ({state.error}); showing the list from when the briefing was built.</p>}
+        {state.error && <p className="text-xs text-muted-foreground">Live refresh failed ({state.error}); showing the list from when the briefing was built.</p>}
       </CardContent>
     </Card>
   )

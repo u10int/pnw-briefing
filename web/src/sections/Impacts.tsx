@@ -127,6 +127,8 @@ const AREA_FALLBACK: Record<string, [string, string]> = {
   "Government Camp": ["Northern OR Cascades", "OR Cascades"],
   "Vancouver BC": ["Lower Mainland BC", "Southwest BC"],
   "Whistler BC": ["Sea to Sky BC", "Southwest BC"],
+  "Nanaimo": ["East Vancouver Island", "Vancouver Island"],
+  "Tofino": ["West Vancouver Island", "Vancouver Island"],
 }
 
 /** Where a period hit, said briefly: the location when there's one; otherwise the area when they

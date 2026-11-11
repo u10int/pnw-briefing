@@ -70,7 +70,8 @@ below are described in that order of content, not page order.
   overlapping dates first and then within a day, so a move isn't reported as dropped plus new.
   Region totals now and in yesterday's briefing, compared over the *same dates* (today's 14-day
   window overlaps yesterday's for 13 days), sit in the Precip tab.
-- **NWS alerts.** Active watches, warnings and advisories for the forecast locations, beside the
+- **Alerts.** Active NWS watches, warnings and advisories for the U.S. locations and Environment
+  Canada's for the B.C. ones (coloured by its yellow, orange and red risk levels), beside the
   automated flags. The list is captured at build time and refreshed live in the browser.
 - **Impacts.** Heavy rain (24 h and 72 h), snow, hard freeze, possible icy precipitation, strong
   gusts and heat. Each shows *Likely* or *Possible* confidence, the share of models agreeing,
@@ -245,7 +246,10 @@ grids to object storage such as Cloudflare R2; only the publish step changes.
 - **Alerts.** Each location is resolved once to its NWS forecast zone, county and fire-weather
   zone (`api.weather.gov/points`). One `alerts/active?area=WA,OR` request is then matched by
   zone. NWS asks for an identifying User-Agent; it defaults to your GitHub repository name, or
-  set `nws_user_agent` in the config.
+  set `nws_user_agent` in the config. Locations marked `country: CA` skip the NWS lookup and take
+  Environment Canada's alerts instead: one request to MSC GeoMet
+  (`api.weather.gc.ca/collections/weather-alerts/items`, a box around those locations), matched
+  to each location by the alert regions' polygons, with an alert's regions joined into one row.
 - **Yesterday.** The workflow reads the current `data/briefing.json` from the `gh-pages` branch
   before building, and passes it to `--previous`. The first run has nothing to compare with, so
   the "What changed since yesterday" card says so until the second day.
@@ -369,6 +373,7 @@ briefing/cogs.py            Cloud-Optimized GeoTIFF export
 briefing/normals.py         PRISM normals, daily interpolation, percent of normal
 briefing/tempdep.py         departure of daily highs and lows from normal (table and maps)
 briefing/alerts.py          NWS zones and active alerts
+briefing/eccc_alerts.py     Environment Canada alerts for the B.C. locations
 briefing/change.py          comparison with the previous briefing over the same days
 briefing/standalone.py      single-file briefing with everything embedded
 briefing/main.py            writes briefing.json + maps

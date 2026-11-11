@@ -56,6 +56,8 @@ def resolve_zones(points, ua):
     """Each location's NWS zones (for matching alerts) and its hazards page (for linking them)."""
     zones, pages = {}, {}
     for p in points:
+        if p.get("country") == "CA":            # outside NWS's area (Environment Canada's alerts cover these)
+            continue
         try:
             pr = _get(f"{API}/points/{p['lat']:.4f},{p['lon']:.4f}", ua)["properties"]
             ids = {k: _zone_id(pr[k]) for k in ("forecastZone", "county", "fireWeatherZone") if pr.get(k)}
@@ -123,8 +125,9 @@ def fetch(cfg, demo: bool = False):
 
 def _demo(cfg, areas):
     now = datetime.now(timezone.utc)
-    coast = [p["name"] for p in cfg["points"] if p["kind"] == "coast"]
-    passes = [p["name"] for p in cfg["points"] if p["kind"] == "pass"]
+    us = [p for p in cfg["points"] if p.get("country") != "CA"]
+    coast = [p["name"] for p in us if p["kind"] == "coast"]
+    passes = [p["name"] for p in us if p["kind"] == "pass"]
     iso = lambda h: (now.replace(minute=0, second=0, microsecond=0) + __import__("datetime").timedelta(hours=h)).isoformat()
     return {"fetched": now, "areas": areas, "zones": {}, "ok": True, "demo": True, "items": [
         {"id": "demo-1", "event": "Flood Watch", "severity": "Severe", "certainty": "Possible", "urgency": "Future",
