@@ -42,12 +42,12 @@ fi
 find "$SITE" -mindepth 1 -maxdepth 1 ! -name archive -exec rm -rf {} +
 cp -r "$BUILD/." "$SITE/"
 
-# 3. the day's archive copy, without hourly fields: the 12Z edition, or the first of the day
+# 3. the day's archive copy, without hourly fields or 3D volumes: the 12Z edition, or the first of the day
 if [[ "$CYCLE" == *T12Z ]] || [ ! -e "$SITE/archive/$DATE/data/briefing.json" ]; then
   mkdir -p "$SITE/archive/$DATE"
   rm -rf "${SITE:?}/archive/$DATE/"*
   cp -r "$BUILD/." "$SITE/archive/$DATE/"
-  rm -rf "$SITE/archive/$DATE/data/fields" "$SITE/archive/$DATE/data/fields.json"
+  rm -rf "$SITE/archive/$DATE/data/fields" "$SITE/archive/$DATE/data/fields.json" "$SITE/archive/$DATE/data/volume" "$SITE/archive/$DATE/data/volume.json"
   echo "archived as $DATE"
 fi
 
@@ -73,7 +73,7 @@ for i in "${!DAYS[@]}"; do
   d="${DAYS[$i]}"
   if (( i >= KEEP_DAYS )); then rm -rf "$d"; continue; fi
   # older archive pages never keep hourly fields; GeoTIFFs only for the most recent days
-  rm -rf "$d/data/fields" "$d/data/fields.json"
+  rm -rf "$d/data/fields" "$d/data/fields.json" "$d/data/volume" "$d/data/volume.json"
   if (( i >= KEEP_GRID_DAYS )); then rm -rf "$d/data/cogs"; fi
 done
 

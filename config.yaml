@@ -162,10 +162,12 @@ grib_models:
      cycles: [0, 6, 12, 18], max_hours: 384, range_days: 14, sample_hours: 6,
      extremes: {step: 3, temp: maxmin},                       # 6-h (3-h after day 5) max/min
      ivt: true,                                               # water vapour transport (AR scale)
+     volume: {hours: 48, step: 3},                            # pressure levels for the map's 3D view
      fields: {stepped: [wind, mslp, frz, ptype, rh]}}
   - {id: ifs, label: ECMWF IFS, tier: global, family: ecmwf, herbie: {model: ifs, product: oper},
      cycles: [0, 12], max_hours: 240, range_days: 14, sample_hours: 6,
      extremes: {steps: [[144, 3], [360, 6]], temp: maxmin},  # mx2t3/mn2t3, then mx2t6/mn2t6
+     volume: {hours: 48, step: 3},
      fields: {stepped: [wind, mslp, ptype, rh]}}
   - {id: aifs, label: ECMWF AIFS, tier: global, family: ecmwf, herbie: {model: aifs, product: oper},
      cycles: [0, 12], max_hours: 360, range_days: 14, sample_hours: 6, gust: false,

@@ -785,6 +785,14 @@ def fetch_model(spec, cfg, start, points):
                 ivt = fetch_ivt(spec, run, lead0, targets[-1], dom)
             except Exception as e:
                 log.warning("%s: IVT skipped (%s)", spec["label"], report.short(e))
+        # pressure levels for the map's 3D view (optional)
+        vol = None
+        if spec.get("volume"):
+            from . import volume
+            try:
+                vol = volume.fetch(spec, run, lead0, dom, **(spec["volume"] if isinstance(spec["volume"], dict) else {}))
+            except Exception as e:
+                log.warning("%s: 3D volume skipped (%s)", spec["label"], report.short(e))
         model_fields.update(acc_fields)     # added after the extremes, which read only t2m, gust and wind
         daily_s = (np.diff(np.stack([[c[i, j] for i, j in idx] for c in snow]), axis=0).T
                    if snow is not None else np.full_like(daily_p, np.nan))
@@ -834,7 +842,7 @@ def fetch_model(spec, cfg, start, points):
                 "run": run, "lead0": lead0, "range_days": ndays, "targets": targets, "dates": dates, "data": data,
                 "hourly": hourly,
                 "lat": lat, "lon": lon, "precip_mm": cum, "snow_in": snow, "snow_method": snow_method,
-                "fields": model_fields, "ext_series": ext_series, "ivt": ivt}
+                "fields": model_fields, "ext_series": ext_series, "ivt": ivt, "volume": vol}
     except Exception as e:
         log.exception("%s: GRIB fetch failed", spec["label"])
         report.fail(spec["label"], report.short(e))
