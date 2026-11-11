@@ -248,6 +248,8 @@ type Status = { kind: "loading" | "ready" | "error" | "empty"; note?: string }
 /** The 3D view's volume for a pane: one model's variable, all its time steps. */
 export interface PaneVolume {
   entry: VolumeEntry; name: VolVar; data: Uint8Array | null; exaggeration: number
+  /** The heights drawn (km above sea level). */
+  range: [number, number]
   /** u and v for the wind particles, when they're on */
   wind: { u: Uint8Array; v: Uint8Array } | null
 }
@@ -534,6 +536,7 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
     return clock.subscribe(update)
   }, [volKey, vol?.data])
   React.useEffect(() => { layers.current!.volume.setExaggeration(vol?.exaggeration ?? 25) }, [vol?.exaggeration])
+  React.useEffect(() => { layers.current!.volume.setHeightRange(vol?.range[0] ?? 0, vol?.range[1] ?? 99) }, [vol?.range[0], vol?.range[1], vol?.data])
   React.useEffect(() => {
     const e = vol?.entry, w = vol?.wind
     layers.current!.volume.setWind(e && w && vol?.data ? {
@@ -1567,6 +1570,7 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
   const [volVar, setVolVar] = React.useState<VolVar>("cloud")
   const [volModel, setVolModel] = React.useState<string | null>(null)
   const [exag, setExag] = React.useState(25)
+  const [zRange, setZRange] = React.useState<[number, number] | null>(null)     // null: the full height
   const vols = useVolumes(threeD)
 
   React.useEffect(() => { if (!active) setPlaying(false) }, [active])
@@ -1729,7 +1733,7 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
   }, [volEntry?.model, hasUV, volWindOn])
   const paneWind = volWindOn && volEntry && volWind?.model === volEntry.model ? { u: volWind.u, v: volWind.v } : null
   const paneVol: PaneVolume | null = volEntry && volName
-    ? { entry: volEntry, name: volName, data: volData?.path === volPath ? volData.data : null, exaggeration: exag, wind: paneWind } : null
+    ? { entry: volEntry, name: volName, data: volData?.path === volPath ? volData.data : null, exaggeration: exag, wind: paneWind, range: zRange ?? [0, volEntry.topKm] } : null
   const showB = compare && !volOn && (mode === "hourly" || perModel)
   const viewB = !showB ? null : mode === "totals"
     ? variable === "ar" ? (data.arCoast ? arView(data.arCoast, pickOther(other), winLabel(d)) : null)
@@ -1833,6 +1837,14 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
                   <div className="flex items-center gap-2.5 text-sm max-sm:w-full">
                     <Label className="font-normal whitespace-nowrap">Height ×{exag}</Label>
                     <Slider className="w-[120px] max-sm:flex-1" value={[exag]} min={5} max={60} step={5} onValueChange={([v]) => setExag(v)} aria-label="Vertical stretch" />
+                  </div>
+                  <div className="flex items-center gap-2.5 text-sm max-sm:w-full">
+                    <Label className="min-w-[96px] font-normal whitespace-nowrap tabular-nums">
+                      {(() => { const [lo, hi] = zRange ?? [0, volEntry.topKm]; return lo === 0 && hi === volEntry.topKm ? `All heights` : `${lo} – ${hi} km` })()}
+                    </Label>
+                    <Slider className="w-[150px] max-sm:flex-1" value={zRange ?? [0, volEntry.topKm]} min={0} max={volEntry.topKm} step={0.5} minStepsBetweenThumbs={1}
+                      onValueChange={(v) => setZRange(v[0] === 0 && v[1] === volEntry.topKm ? null : [v[0], v[1]])}
+                      getAriaValueText={(v) => `${v} km`} aria-label="Heights shown" />
                   </div>
                 </div>
               )}

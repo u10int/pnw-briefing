@@ -95,6 +95,7 @@ uniform vec2 uMercY;            // box north and south edges, Web Mercator y
 uniform vec2 uLat;              // data rows' first and last latitude
 uniform vec3 uSize;             // nx, ny, nz
 uniform int uSteps;
+uniform vec2 uZr;               // the heights drawn, as fractions of the box's height
 uniform bool uLit;              // shade by what lies above (clouds and the like); else flat colour
 // surfaces where the field crosses set values (isotherms, isotachs, the freezing level), lit by
 // the field's gradient; coloured by height (uHeight) when uIsoByHeight
@@ -134,7 +135,7 @@ void main() {
   vec4 n = uInv * vec4(ndc, -1.0, 1.0), f = uInv * vec4(ndc, 1.0, 1.0);
   vec3 ro = n.xyz / n.w, rd = f.xyz / f.w - ro;
   vec3 inv = 1.0 / rd;
-  vec3 t0 = (vec3(0.0) - ro) * inv, t1 = (vec3(1.0) - ro) * inv;
+  vec3 t0 = (vec3(0.0, 0.0, uZr.x) - ro) * inv, t1 = (vec3(1.0, 1.0, uZr.y) - ro) * inv;
   vec3 tlo = min(t0, t1), thi = max(t0, t1);
   float tn = max(max(tlo.x, tlo.y), max(tlo.z, 0.0));
   float tf = min(min(thi.x, thi.y), thi.z);
@@ -269,6 +270,7 @@ export class VolumeLayer implements CustomLayerInterface {
   private i1 = 0
   private t = 0
   private exaggeration = 25
+  private zr: [number, number] = [0, 1]
   private opacity = 1
   private moving = false
   private dataChanged = false
@@ -418,6 +420,7 @@ export class VolumeLayer implements CustomLayerInterface {
     let o = 0
     for (let i = 0; i < n; i++) {
       const b = i * TRAIL * 3
+      if (P[b + 2] < this.zr[0] - 1e-6 || P[b + 2] > this.zr[1] + 1e-6) continue   // a layer outside the heights shown
       if (this.age[i] > this.life[i]) this.spawn(i)
       this.age[i] += dtf
       const x = P[b], y = P[b + 1], z = P[b + 2]
@@ -452,6 +455,14 @@ export class VolumeLayer implements CustomLayerInterface {
     this.map?.triggerRepaint()                               // keep them moving
   }
 
+  /** Draw only between these heights (km); the full box by default. */
+  setHeightRange(loKm: number, hiKm: number) {
+    const top = this.draw?.grid.topKm ?? 12
+    const zr: [number, number] = [Math.max(0, loKm / top), Math.min(1, hiKm / top)]
+    if (zr[0] === this.zr[0] && zr[1] === this.zr[1]) return
+    this.zr = zr
+    this.map?.triggerRepaint()
+  }
   setExaggeration(x: number) {
     this.exaggeration = x
     this.map?.triggerRepaint()
@@ -505,7 +516,7 @@ export class VolumeLayer implements CustomLayerInterface {
     const W = gl.drawingBufferWidth, H = gl.drawingBufferHeight
     const scale = this.moving ? 0.5 : 1
     const fw = Math.max(1, Math.round(W * scale)), fh = Math.max(1, Math.round(H * scale))
-    const key = [Array.from(mvp, (x) => x.toPrecision(9)).join(","), fw, fh, this.i0, this.i1, this.t.toFixed(4), this.exaggeration, this.opacity, d.key].join("|")
+    const key = [Array.from(mvp, (x) => x.toPrecision(9)).join(","), fw, fh, this.i0, this.i1, this.t.toFixed(4), this.exaggeration, this.opacity, this.zr.join(","), d.key].join("|")
     if (fw !== this.fboSize[0] || fh !== this.fboSize[1]) {
       gl.bindTexture(gl.TEXTURE_2D, this.fboTex!)
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, fw, fh, 0, gl.RGBA, gl.UNSIGNED_BYTE, null)
@@ -549,6 +560,13 @@ export class VolumeLayer implements CustomLayerInterface {
       gl.uniform4f(this.lineProg.u("uColor"), 0.55, 0.6, 0.68, 0.55)
       gl.bindVertexArray(this.lineVao)
       gl.drawArrays(gl.LINES, 0, EDGES.length / 3)
+      if (this.zr[0] > 0 || this.zr[1] < 1) {
+        // the slab being drawn, outlined a little stronger inside the full box
+        const slab = mul(mvp, new Float64Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, this.zr[1] - this.zr[0], 0, 0, 0, this.zr[0], 1]))
+        gl.uniformMatrix4fv(this.lineProg.u("uMVP"), false, Float32Array.from(slab))
+        gl.uniform4f(this.lineProg.u("uColor"), 0.35, 0.4, 0.5, 0.8)
+        gl.drawArrays(gl.LINES, 0, EDGES.length / 3)
+      }
     }
     gl.bindVertexArray(null)
     gl.activeTexture(gl.TEXTURE0)
@@ -580,6 +598,7 @@ export class VolumeLayer implements CustomLayerInterface {
     gl.uniform2f(p.u("uLat"), g.lat[0], g.lat[1])
     gl.uniform3f(p.u("uSize"), g.nx, g.ny, g.nz)
     gl.uniform1i(p.u("uSteps"), this.moving ? 96 : 192)
+    gl.uniform2f(p.u("uZr"), this.zr[0], this.zr[1])
     gl.uniform1i(p.u("uLit"), d.lit ? 1 : 0)
     const isos = d.isos ?? []
     gl.uniform1i(p.u("uIsoN"), isos.length)
