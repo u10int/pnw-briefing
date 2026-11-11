@@ -14,6 +14,8 @@ from datetime import date
 
 import numpy as np
 
+from . import impacts
+
 
 def full_dates(doc) -> set:
     """The dates a briefing covers whole: all but the first when it started after that day's 12Z
@@ -59,7 +61,7 @@ def compare(now: dict, prev: dict | None, windows: list[dict]):
     points = [p for p in now["points"] if p["name"] in prev_names]
     regions = [r for r in now["regions"] if any(p.get("region") == r["id"] for p in points)]
     if not points:
-        return {"prevIssued": prev.get("meta", {}).get("issued"), "windows": [], "events": _events(now, prev)}
+        return {"prevIssued": prev.get("meta", {}).get("issued"), "windows": [], "events": _with_kind(_events(now, prev))}
     out_w = []
     for w in windows:
         both = full_dates(now) & full_dates(prev)        # like for like: whole days in both
@@ -80,7 +82,7 @@ def compare(now: dict, prev: dict | None, windows: list[dict]):
                        for m in a["models"] if m in b["models"]},
         })
 
-    return {"prevIssued": prev.get("meta", {}).get("issued"), "windows": out_w, "events": _events(now, prev)}
+    return {"prevIssued": prev.get("meta", {}).get("issued"), "windows": out_w, "events": _with_kind(_events(now, prev))}
 
 
 MAX_GAP = 1   # days between yesterday's event and today's for a move to count as the same event
@@ -141,3 +143,92 @@ def _events(now, prev):
                                        "level": None, "prevLevel": p["level"], "prevStart": p["start"], "prevEnd": p["end"],
                                        "shifted": False, "agreement": p.get("agreement"), "where": _where(p), "unit": p.get("unit")})
     return changes
+
+
+# ------------------------------------------------------------------ impacts since the last edition
+
+KINDS = ("new", "upgraded", "downgraded", "dropped", "same")
+# _with_kind, used above, is defined below
+
+
+def _like_for_like(now, prev):
+    """Both briefings' models cut down to what both can speak to: the models in both, each kept
+    only on the dates and fields where both editions have a value, and only on dates both cover
+    in full. Returns (dates, now models, prev models) in the shape impacts.detect takes."""
+    both = sorted(full_dates(now) & full_dates(prev))
+    if not both:
+        return [], [], []
+    pm = {m["label"]: m for m in prev.get("models", [])}
+    ni = {str(d)[:10]: i for i, d in enumerate(now["dates"])}
+    pi = {str(d)[:10]: i for i, d in enumerate(prev["dates"])}
+    a, b = [], []
+    for m in now.get("models", []):
+        q = pm.get(m["label"])
+        if not q:
+            continue
+        da, db = {}, {}
+        for name, fields in m["data"].items():
+            other = q["data"].get(name)
+            if not other:
+                continue
+            da[name], db[name] = {}, {}
+            for v, xs in fields.items():
+                ys = other.get(v)
+                if ys is None:
+                    continue
+                pick = lambda arr, idx, d: arr[idx[d]] if idx[d] < len(arr) else None
+                xa = [pick(xs, ni, d) for d in both]
+                xb = [pick(ys, pi, d) for d in both]
+                keep = [x is not None and y is not None for x, y in zip(xa, xb)]
+                da[name][v] = [x if k else None for x, k in zip(xa, keep)]
+                db[name][v] = [y if k else None for y, k in zip(xb, keep)]
+        a.append({"label": m["label"], "dates": both, "data": da})
+        b.append({"label": m["label"], "dates": both, "data": db})
+    return both, a, b
+
+
+def _with_kind(changes):
+    for k in KINDS:
+        for r in changes[k]:
+            r["kind"] = "moved" if k == "same" and r.get("shifted") else k
+    return changes
+
+
+def events_since(now, prev, cfg):
+    """How the impact events moved since an earlier edition, judged like for like: both editions'
+    events rebuilt from the models they share, on the dates both cover in full, so a model that
+    runs only at some cycles, or a first day only partly covered, doesn't read as a change.
+
+    Each change is then attached to the event the page shows (built from every model): its dates
+    and level are the page's, and `kind` says what happened. A shown event with no like-for-like
+    counterpart can't be compared and is left out (the page shows no tag for it): an event only on
+    a day one edition covers in part, or one only models missing from the other edition flag."""
+    if not prev or not prev.get("models") or not now.get("models"):
+        return None
+    dates, a, b = _like_for_like(now, prev)
+    if not a:
+        return None
+    pts = {p["name"] for p in now["points"]} & {p["name"] for p in prev.get("points", [])}
+    c = {**cfg, "points": [p for p in cfg["points"] if p["name"] in pts], "days": len(dates)}
+    ev_a = impacts.events(*impacts.detect(a, c), c)
+    ev_b = impacts.events(*impacts.detect(b, c), c)
+    clean = lambda evs: [{**e, "points": [{"name": n, "frac": f, "peak": pk} for n, f, pk in e["points"]]} for e in evs]
+    raw = _events({"dates": dates, "events": clean(ev_a)}, {"dates": dates, "events": clean(ev_b)})
+
+    def overlap(x, y):
+        lo, hi = max(x["start"], y["start"]), min(x["end"], y["end"])
+        return (_d(hi) - _d(lo)).days + 1 if lo <= hi else 0
+
+    out = {k: [] for k in KINDS}
+    like = [(k, r) for k in ("new", "upgraded", "downgraded", "same") for r in raw[k]]
+    for e in now.get("events", []):
+        cand = [(overlap(e, r), k, r) for k, r in like if r["hazard"] == e["hazard"] and overlap(e, r)]
+        if not cand:
+            continue
+        _, k, r = max(cand, key=lambda x: x[0])
+        out[k].append({"hazard": e["hazard"], "label": e["label"], "start": e["start"], "end": e["end"], "level": e["level"],
+                       "prevLevel": r.get("prevLevel"), "prevStart": r.get("prevStart"), "prevEnd": r.get("prevEnd"),
+                       "shifted": bool(r.get("shifted")), "agreement": e.get("agreement"), "where": _where(e), "unit": e.get("unit")})
+    out["dropped"] = raw["dropped"]
+    return _with_kind(out)
+

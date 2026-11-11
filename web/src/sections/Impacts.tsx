@@ -26,7 +26,7 @@ const LEVEL: Record<Level, { word: string; bar: string; text: string; tint: stri
   possible: { word: "Possible", bar: "var(--possible-bar)", text: "#3b2400", tint: "var(--possible)", pale: "var(--possible-bg)" },
 }
 type Fill = "bold" | "same" | "moved" | "down"
-/** Hue is confidence; the fill is what changed since yesterday: solid for new or upgraded (or
+/** Hue is confidence; the fill is what changed since the briefing compared with: solid for new or upgraded (or
  *  with no earlier briefing), the pale fill for unchanged, fainter still for moved, light
  *  stripes for downgraded. Dropped periods are a dashed gray outline. */
 function fillStyle(lv: (typeof LEVEL)[Level], f: Fill): React.CSSProperties {
@@ -62,10 +62,24 @@ const worst = (e: { unit: string; points: { name: string; peak: number }[] }) =>
   [...e.points].sort((a, b) => (e.unit === "°F" ? a.peak - b.peak : b.peak - a.peak))
 
 type Status = { tag: string; tone: "new" | "up" | "down" | "moved" | "same"; detail: string; prev?: [string, string] }
-/** How a current event compares with yesterday's briefing. */
-function statusOf(e: ImpactEvent, ch: EventChange | undefined, hasPrev: boolean): Status | null {
+/** What the events are compared with: "the 06Z update" or "yesterday's briefing", for the text. */
+export function eventsBase(c: Briefing["change"]) {
+  const t = c?.eventsSince ?? c?.prevIssued
+  if (c?.eventsBasis !== "edition" || !t) return { since: "yesterday's briefing", then: "yesterday", edition: false, issued: t ?? null }
+  // the edition is named for its model cycle ("2026-11-11T06:00Z")
+  const hz = c.eventsCycle?.slice(11, 13)
+  return { since: hz ? `the ${hz}Z update` : "the last update", then: hz ? `at ${hz}Z` : "then", edition: true, issued: t }
+}
+
+/** How a current event compares with the earlier briefing it's measured against. */
+function statusOf(e: ImpactEvent, ch: EventChange | undefined, hasPrev: boolean, base = eventsBase(null)): Status | null {
   if (!hasPrev) return null
-  if (!ch) return { tag: "New", tone: "new", detail: "New since yesterday's briefing." }
+  // compared like for like with the last edition, an event without a record couldn't be compared
+  // (it's on a day one edition covers only in part); against yesterday it's new
+  if (!ch) return base.edition
+    ? { tag: "", tone: "same", detail: `Not compared with ${base.since}: it falls on days that edition doesn't fully cover, or only models missing from it flag it.` }
+    : { tag: "New", tone: "new", detail: `New since ${base.since}.` }
+  if (ch.kind === "new") return { tag: "New", tone: "new", detail: `New since ${base.since}.` }
   const was = ch.prevLevel ? LEVEL[ch.prevLevel].word.toLowerCase() : "flagged"
   let mv: string | null = null
   if (ch.shifted && ch.prevStart && ch.prevEnd) {
@@ -74,13 +88,15 @@ function statusOf(e: ImpactEvent, ch: EventChange | undefined, hasPrev: boolean)
       : de === 0 ? `starts ${nDays(ds)} ${ds > 0 ? "later" : "earlier"}` : de - ds > 0 ? "longer" : "shorter"
   }
   const prev = ch.shifted && ch.prevStart && ch.prevEnd ? ([ch.prevStart, ch.prevEnd] as [string, string]) : undefined
-  const moved = mv ? ` Dates moved ${mv} (yesterday ${dateRange(ch.prevStart!, ch.prevEnd!)}).` : ""
-  if (ch.prevLevel && ch.prevLevel !== e.level)
-    return e.level === "likely"
+  const moved = mv ? ` Dates moved ${mv} (${base.then} ${dateRange(ch.prevStart!, ch.prevEnd!)}).` : ""
+  const up = ch.kind ? ch.kind === "upgraded" : !!ch.prevLevel && ch.prevLevel !== e.level && e.level === "likely"
+  const down = ch.kind ? ch.kind === "downgraded" : !!ch.prevLevel && ch.prevLevel !== e.level && e.level !== "likely"
+  if (up || down)
+    return up
       ? { tag: "Upgraded", tone: "up", detail: `Upgraded from ${was}.${moved}`, prev }
       : { tag: "Downgraded", tone: "down", detail: `Downgraded from ${was}.${moved}`, prev }
-  if (mv) return { tag: "Moved", tone: "moved", detail: `Same confidence as yesterday.${moved}`, prev }
-  return { tag: "", tone: "same", detail: "Unchanged since yesterday." }
+  if (mv) return { tag: "Moved", tone: "moved", detail: `Same confidence as ${base.then}.${moved}`, prev }
+  return { tag: "", tone: "same", detail: `Unchanged since ${base.since}.` }
 }
 const TAG: Record<Status["tone"], string> = {
   new: "bg-foreground text-background", up: "border border-[var(--likely-bar)] text-[var(--likely)]",
@@ -220,6 +236,7 @@ export function ImpactBoard({ data }: { data: Briefing }) {
   const minAg = data.meta.minAgreement
   const ch = data.change
   const hasPrev = !!ch
+  const base = eventsBase(ch)
   const changes = ch ? [...ch.events.new, ...ch.events.upgraded, ...ch.events.downgraded, ...ch.events.same] : []
   const dropped = ch?.events.dropped ?? []
   const col = (iso: string) => Math.max(0, Math.min(nd, dayN(iso) - dayN(dates[0])))
@@ -246,9 +263,9 @@ export function ImpactBoard({ data }: { data: Briefing }) {
   }
 
   const counts: [number, string][] = hasPrev ? [
-    [data.events.filter((e) => statusOf(e, matchChange(e, changes), true)?.tone === "new").length, "new"],
+    [data.events.filter((e) => statusOf(e, matchChange(e, changes), true, base)?.tone === "new").length, "new"],
     [ch!.events.upgraded.length, "upgraded"], [ch!.events.downgraded.length, "downgraded"],
-    [changes.filter((c) => c.shifted && c.prevLevel === c.level).length, "moved"], [dropped.length, "dropped"],
+    [changes.filter((c) => (c.kind ? c.kind === "moved" : c.shifted && c.prevLevel === c.level)).length, "moved"], [dropped.length, "dropped"],
   ] : []
 
   const grid = "grid grid-cols-[130px_1fr] sm:grid-cols-[minmax(160px,230px)_1fr] items-center gap-x-4"
@@ -264,7 +281,7 @@ export function ImpactBoard({ data }: { data: Briefing }) {
       <CardContent className="space-y-4">
         {hasPrev && (
           <p className="text-sm text-muted-foreground">
-            Since the briefing issued {ch!.prevIssued ? issuedLabel(ch!.prevIssued) : "yesterday"}:{" "}
+            {base.edition ? <>Since {base.since}, issued {issuedLabel(base.issued!)}</> : <>Since the briefing issued {base.issued ? issuedLabel(base.issued) : "yesterday"}</>}:{" "}
             {counts.some(([n]) => n) ? counts.filter(([n]) => n > 0).map(([n, w], i) => (
               <span key={w}>{i > 0 && " · "}<span className="font-semibold text-foreground tabular-nums">{n}</span> {w}</span>
             )) : "no changes"}
@@ -335,7 +352,7 @@ export function ImpactBoard({ data }: { data: Briefing }) {
                 {/* one lane per period */}
                 {g.evs.map((e, i) => {
                   const c = matchChange(e, changes)
-                  const st = statusOf(e, c, hasPrev)
+                  const st = statusOf(e, c, hasPrev, base)
                   const lv = LEVEL[e.level]
                   const pts = worst(e)
                   const b = span(e.start, e.end)
@@ -373,7 +390,7 @@ export function ImpactBoard({ data }: { data: Briefing }) {
                   )
                 })}
 
-                {/* dropped since yesterday */}
+                {/* dropped since the comparison briefing */}
                 {g.drops.map((e, i) => {
                   const b = span(e.start, e.end)
                   const was = e.prevLevel ? LEVEL[e.prevLevel].word : "Flagged"
@@ -397,7 +414,7 @@ export function ImpactBoard({ data }: { data: Briefing }) {
                           </TooltipTrigger>
                           <TooltipContent className="max-w-xs">
                             <p className="font-semibold">{e.label} · {dateRange(e.start, e.end)}</p>
-                            <p>Dropped: yesterday's briefing had it as {was.toLowerCase()}; today fewer than {pct(minAg)} of models reach the threshold.</p>
+                            <p>Dropped: {base.since} had it as {was.toLowerCase()}; now fewer than {pct(minAg)} of models reach the threshold.</p>
                           </TooltipContent>
                         </Tooltip>
                       </div>
@@ -426,7 +443,7 @@ export function ImpactBoard({ data }: { data: Briefing }) {
             <span className="flex h-3 items-end gap-px border-b border-muted-foreground/50">{[0.3, 0.7, 1, 0.5].map((h, i) => <span key={i} className="w-1 rounded-t-[1px]" style={{ height: `${h * 100}%`, background: redCell(h).background }} />)}</span>
             Share of models over the threshold each day; dashed line at {pct(minAg)}
           </span>
-          {hasPrev && <span className="flex items-center gap-1.5"><span className="h-3 w-5 rounded-[3px] border border-dashed border-muted-foreground/60" />Yesterday's dates, or dropped</span>}
+          {hasPrev && <span className="flex items-center gap-1.5"><span className="h-3 w-5 rounded-[3px] border border-dashed border-muted-foreground/60" />{base.edition ? "Earlier dates, or dropped" : "Yesterday's dates, or dropped"}</span>}
           <span>Where: the area hit and its worst value; hover for each location</span>
           <span>Click a bar to see it on the map</span>
         </div>

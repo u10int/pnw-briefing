@@ -362,7 +362,7 @@ export function HazardStrip({ data, onOpen }: { data: Briefing; onOpen: (tab: Ha
                     <span className="text-[2rem] leading-none font-semibold tracking-tight tabular-nums">{v.value}</span>
                     {v.unit && <span className="text-sm font-medium text-muted-foreground">{v.unit}</span>}
                     {v.change && Math.abs(v.change.c.delta) >= FLAT[v.change.k] && (
-                      <span className="ml-auto self-center" title={`Since the last update, over the ${v.change.days} days both cover: ${fmtU(v.change.c.prev, v.change.k)} → ${fmtU(v.change.c.now, v.change.k)}`}>
+                      <span className="ml-auto self-center" title={`Since this time yesterday, over the ${v.change.days} days both cover: ${fmtU(v.change.c.prev, v.change.k)} → ${fmtU(v.change.c.now, v.change.k)}`}>
                         <Chg c={v.change.c} k={v.change.k} />
                       </span>
                     )}

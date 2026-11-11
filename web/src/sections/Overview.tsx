@@ -33,11 +33,11 @@ function Overview({ data }: { data: Briefing }) {
   )
 }
 
-/** The headline and lead on the left; what changed since the last update and what's been
+/** The headline and lead on the left; what changed since earlier briefings and what's been
  *  observed beside them on wide screens (below on narrow ones). */
 function Hero({ data, children }: { data: Briefing; children: React.ReactNode }) {
   // the panel only when there's an earlier briefing to compare with or station observations
-  const hasSide = !!data.change?.prevIssued || !!data.obsReports
+  const hasSide = !!(data.change?.prevIssued || data.change?.eventsSince) || !!data.obsReports
   const side = [<ChangedSince key="c" data={data} />, <ObservedHighlights key="o" data={data} />]
   return (
     // the left column stretches to the panel's height with the strip at its foot, so the two

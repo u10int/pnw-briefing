@@ -136,6 +136,16 @@ jobs:
             fi
           fi
           ls -la previous.json 2>/dev/null || echo "no earlier briefing yet"
+          # the latest edition before this one, whatever its cycle, for the impacts' changes
+          # (compared like for like in change.events_since)
+          rm -f last_edition.json
+          LASTE=$(git ls-tree --name-only origin/gh-pages archive/editions/ 2>/dev/null | sed 's#^archive/editions/##; s#\.json$##' \
+                  | grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}Z$' | awk -v t="$CYCLE" '$0 < t' | sort | tail -1)
+          if [ -n "$LASTE" ] && git show "origin/gh-pages:archive/editions/$LASTE.json" > last_edition.json 2>/dev/null; then
+            echo "impacts compared with the $LASTE edition"
+          else
+            rm -f last_edition.json
+          fi
           # one briefing per earlier day (the daily archive keeps each day's 12Z edition): the
           # trends table's run-to-run sparklines, the model verification and the analysed
           # temperatures already fetched
@@ -167,6 +177,7 @@ jobs:
           echo "CYCLE=${{ needs.gate.outputs.cycle }}" >> "$GITHUB_ENV"
           export PYTHONUNBUFFERED=1
           PREV=""; [ -s previous.json ] && PREV="--previous previous.json"
+          [ -s last_edition.json ] && PREV="$PREV --previous-edition last_edition.json"
           python -m briefing.main --out web/public/data $PREV --history history --cycle "$CYCLE" ${{ inputs.demo && '--demo' || '' }}
 
       - name: Reuse the published briefing data (page-only rebuild)
