@@ -9,7 +9,8 @@ its config, every `step` hours over the first `hours` of the briefing, this read
 1000 to 200 hPa (one byte-ranged request per forecast hour, as for IVT) and builds:
 
 - temp:  temperature (°F)
-- wind:  wind speed (mph)
+- wind:  wind speed (mph); u, v: its eastward and northward components (m/s), for the page's
+         wind particles at each height
 - rh:    relative humidity (%)
 - cloud: cloud fraction (%): GFS's own (TCDC on pressure levels); ECMWF publishes none on levels,
          so it's estimated from relative humidity (Sundqvist: cloud forms above 80%)
@@ -51,6 +52,8 @@ VARS = {
     "rh":    {"min": 0, "max": 100, "scale": "linear", "units": "%", "label": "Humidity"},
     "temp":  {"min": -80, "max": 90, "scale": "linear", "units": "°F", "label": "Temperature"},
     "wind":  {"min": 0, "max": 200, "scale": "linear", "units": "mph", "label": "Wind speed"},
+    "u":     {"min": -100, "max": 100, "scale": "linear", "units": "m/s", "label": "Wind, eastward"},
+    "v":     {"min": -100, "max": 100, "scale": "linear", "units": "m/s", "label": "Wind, northward"},
     "water": {"min": 0, "max": 2.0, "scale": "sqrt", "units": "g/kg", "label": "Liquid water"},
     "ice":   {"min": 0, "max": 2.0, "scale": "sqrt", "units": "g/kg", "label": "Ice and snow"},
 }
@@ -107,6 +110,7 @@ def derive(got, family):
         out["temp"] = (got["t"] - 273.15) * 9 / 5 + 32
     if "u" in got and "v" in got:
         out["wind"] = np.hypot(got["u"], got["v"]) * 2.23694
+        out["u"], out["v"] = got["u"], got["v"]
     if "r" in got:
         out["rh"] = np.clip(got["r"], 0, 100)
     if "tcc" in got:
@@ -242,7 +246,7 @@ def demo_volume(spec, run, dom, family, hours=48, step=3, seed=0):
     smooth = rng.normal(0, 1, (len(lat), len(lon)))
     for _ in range(4):
         smooth = (smooth + np.roll(smooth, 1, 0) + np.roll(smooth, -1, 0) + np.roll(smooth, 1, 1) + np.roll(smooth, -1, 1)) / 5
-    out = {k: [] for k in ("temp", "wind", "rh", "cloud", "water", "ice")}
+    out = {k: [] for k in ("temp", "wind", "rh", "cloud", "water", "ice", "u", "v")}
     for h in hrs:
         cx = dom["lon_min"] + 1.0 + (h / hours) * 7.5               # the front moves east
         band = np.exp(-(((X - cx) - 0.6 * (Y - 47)) / 1.4) ** 2)     # a tilted frontal band
@@ -258,9 +262,12 @@ def demo_volume(spec, run, dom, family, hours=48, step=3, seed=0):
         cloud = cloud_from_rh(rh)
         water = np.where(temp > 18, 1.4 * band[None] * np.exp(-((z - 2) / 1.6) ** 2) * (rh / 100) ** 6, 0)
         ice = np.where(temp < 32, 0.9 * np.maximum(band, comma)[None] * np.exp(-((z - 6.5) / 2.2) ** 2) * (rh / 100) ** 4, 0)
-        for k, v in (("temp", temp), ("wind", wind), ("rh", rh), ("cloud", cloud), ("water", water), ("ice", ice)):
+        # mostly from the south-west, backing to the west with height
+        ang = np.radians(35 + 25 * np.clip(z / 9, 0, 1)) + 0.25 * band[None]
+        u, v = wind / 2.23694 * np.cos(ang), wind / 2.23694 * np.sin(ang)
+        for k, v in (("temp", temp), ("wind", wind), ("rh", rh), ("cloud", cloud), ("water", water), ("ice", ice), ("u", u), ("v", v)):
             out[k].append(np.asarray(v, dtype="float32"))
-    keep = ("temp", "wind", "rh", "cloud", "water", "ice") if family == "ncep" else ("temp", "wind", "rh", "cloud")
+    keep = ("temp", "wind", "u", "v", "rh", "cloud") + (("water", "ice") if family == "ncep" else ())
     levs = LEVELS[family]
     std = {1000: 110, 975: 320, 950: 540, 925: 760, 900: 990, 850: 1460, 800: 1950, 750: 2470, 700: 3010, 650: 3590,
            600: 4210, 550: 4870, 500: 5570, 450: 6330, 400: 7180, 350: 8110, 300: 9160, 250: 10360, 200: 11780}

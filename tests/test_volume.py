@@ -57,7 +57,8 @@ def test_fetch_reads_levels_and_writes_manifest(tmp_path):
     H.xarray.return_value = [_ds([1000, 850, 700, 500])]
     with mock.patch("briefing.grib._H", return_value=H):
         vol = volume.fetch(spec, datetime(2026, 11, 11, 0), 12, DOM, hours=6, step=3)
-    assert vol["hours"] == [12, 15, 18] and sorted(vol["vars"]) == ["cloud", "rh", "temp", "wind"]
+    assert vol["hours"] == [12, 15, 18] and sorted(vol["vars"]) == ["cloud", "rh", "temp", "u", "v", "wind"]
+    assert np.allclose(vol["vars"]["u"], 10) and np.allclose(vol["vars"]["v"], 0)
     assert vol["vars"]["temp"].shape == (3, len(volume.HEIGHTS_M), 3, 3)
     assert list(vol["lat"]) == [47.0, 47.25, 47.5] and list(vol["lon"]) == [-123.0, -122.75, -122.5]
     m = {"id": "ifs", "label": "ECMWF IFS", "run": datetime(2026, 11, 11, 0), "volume": vol}

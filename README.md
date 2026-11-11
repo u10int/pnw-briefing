@@ -251,12 +251,19 @@ reads GFS and ECMWF IFS on pressure levels (1000 – 200 hPa) every 3 hours for 
 `data/volume/<model>_<var>.bin.gz` with a manifest in `data/volume.json` (about 1 – 2 MB per
 edition). Variables: clouds (GFS cloud cover; estimated from humidity for ECMWF), liquid water
 (cloud water plus rain) and ice and snow (cloud ice, snow and graupel), both GFS only, relative
-humidity, temperature (with the freezing level as a bright shell) and wind speed.
+humidity, temperature and wind speed, both drawn as lit surfaces at set values (isotherms at 50,
+32, 0 and −40°F; isotachs at 50, 80, 110 and 140 mph), and the freezing level on its own as a
+solid surface coloured by height in the 2D map's 1,000 ft bands. u and v (m/s) drive animated wind
+particles at 850, 700, 500, 300 and 250 hPa (the model's average heights), on by default with the
+wind view and switchable with any field.
 
 On the page, `lib/gl/volume-layer.ts` is a MapLibre custom layer (WebGL2): each pixel casts a
 ray through the box, samples the 3D textures of the two time steps either side of the clock,
 looks up colour and extinction in a per-variable transfer table and composites front to back;
-clouds, water, ice and humidity are shaded by what lies above them. The result is cached in an
+clouds, water, ice and humidity are shaded by what lies above them. Surfaces are found where the
+field crosses a value between two samples (so they stay crisp at any step size) and lit by the
+field's gradient. The wind particles are advected on the CPU from the same grids (trilinear,
+blended in time) and drawn as fading trails each frame over the cached volume image. The result is cached in an
 offscreen image and only redrawn when the view, time or data change. Archive copies drop the
 volumes, like the hourly fields.
 
