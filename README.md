@@ -235,6 +235,31 @@ GeoTIFFs for the last 14 of them, and hourly fields for the latest only. That ke
 GitHub Pages' 1 GB limit. To keep hourly fields in the archive or add many more layers, move the
 grids to object storage such as Cloudflare R2; only the publish step changes.
 
+## The 3D view
+
+The interactive map's **3D** switch (under "Through time") tilts the map and draws a model's
+forecast through the depth of the atmosphere over it, following the time slider. The volumes
+come from their own workflow (`.github/workflows/volume.yml`), which starts when a briefing run
+succeeds, so the edition never waits on these downloads: it builds them for the published
+edition's cycle (`python -m briefing.volume --cycle …`) and adds them to gh-pages with
+`scripts/publish_volume.sh`, which pushes only if gh-pages hasn't moved meanwhile and stops if a
+newer edition is already out. Until then the page keeps the previous volumes (labelled with their
+model run); `assemble_site.sh` carries them over. `volume.py`
+reads GFS and ECMWF IFS on pressure levels (1000 – 200 hPa) every 3 hours for the first 48
+(config `volume` on each model), resamples each column onto a fixed height grid (0 – 12 km every
+500 m) with the levels' geopotential heights, and packs each variable into one byte per point:
+`data/volume/<model>_<var>.bin.gz` with a manifest in `data/volume.json` (about 1 – 2 MB per
+edition). Variables: clouds (GFS cloud cover; estimated from humidity for ECMWF), liquid water
+(cloud water plus rain) and ice and snow (cloud ice, snow and graupel), both GFS only, relative
+humidity, temperature (with the freezing level as a bright shell) and wind speed.
+
+On the page, `lib/gl/volume-layer.ts` is a MapLibre custom layer (WebGL2): each pixel casts a
+ray through the box, samples the 3D textures of the two time steps either side of the clock,
+looks up colour and extinction in a per-variable transfer table and composites front to back;
+clouds, water, ice and humidity are shaded by what lies above them. The result is cached in an
+offscreen image and only redrawn when the view, time or data change. Archive copies drop the
+volumes, like the hourly fields.
+
 ## Normals, alerts and yesterday's briefing
 
 - **Normals.** PRISM 1991–2020 monthly precipitation normals at 4 km, spread into daily values
