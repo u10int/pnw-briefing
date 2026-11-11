@@ -3,6 +3,7 @@ import { CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts"
 
 import { Badge } from "@/components/ui/badge"
 import { dayOf, Takeaway } from "@/components/Takeaway"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { type ChartConfig, ChartContainer, ChartLegend, ChartLegendContent, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
@@ -239,9 +240,83 @@ export function WaveForecastCard({ data }: { data: Briefing }) {
 // ------------------------------------------------------------------ tides
 
 /** The flag on a high tide close to flooding: within a foot, or over. */
-function TideFlag({ m }: { m: N }) {
-  if (m == null || m > 1) return null
-  return <Badge variant={m <= 0 ? "likely" : "possible"} className="mt-0.5 px-1.5 py-0 text-[10px]">{m <= 0 ? `${Math.abs(m).toFixed(1)} ft over` : `${m.toFixed(1)} ft below`}</Badge>
+/** One row per gauge: each high tide as a dot at its height relative to the gauge's minor flood
+ *  level (shared scale, so gauges compare), the surge drawn as a stem above it, the flood level as a
+ *  dashed line with the flood zone tinted above. Gauges with no flood level sit on their own scale. */
+function TideChart({ ts, days }: { ts: TideGauge[]; days: string[] }) {
+  const t0 = Date.parse(`${days[0]}T00:00:00Z`), span = days.length * 864e5
+  const x = (t: string) => (100 * (Date.parse(`${t.slice(0, 16)}:00Z`) - t0)) / span
+  const rel = (g: TideGauge) => g.highs.filter((h) => x(h.time) >= 0 && x(h.time) <= 100).map((h) => ({ h, top: h.height + Math.max(0, g.surge ?? 0) - (g.flood ?? 0), base: h.height - (g.flood ?? 0) }))
+  const withFlood = ts.filter((g) => g.flood != null)
+  const all = withFlood.flatMap((g) => rel(g))
+  const lo = Math.max(-6, Math.min(-2, ...all.map((p) => p.base)) - 0.3), hi = Math.max(0.8, ...all.map((p) => p.top + 0.3))
+  const H = 40
+  const y = (v: number, a = lo, b = hi) => H - (H * (Math.min(b, Math.max(a, v)) - a)) / (b - a)
+  return (
+    <div className="space-y-2">
+      <div className="grid gap-x-3 sm:grid-cols-[minmax(120px,190px)_minmax(0,1fr)]">
+        <div className="max-sm:hidden" />
+        <div className="grid text-center text-[11px] font-medium leading-tight" style={{ gridTemplateColumns: `repeat(${days.length}, 1fr)` }}>
+          {days.map((d) => <div key={d}><span className="max-sm:hidden"><DayHead day={d} /></span><span className="sm:hidden">{new Date(`${d}T20:00:00Z`).toLocaleDateString("en-US", { weekday: "short", timeZone: "America/Los_Angeles" })}</span></div>)}
+        </div>
+      </div>
+      {groupBy(ts).map(([a, xs]) => (
+        <div key={a} className="space-y-1">
+          <p className="pt-1 text-xs font-medium text-muted-foreground">{a}</p>
+          {xs.map((g: TideGauge) => {
+            const pts = rel(g)
+            const own = g.flood == null
+            const oa = own ? Math.min(...pts.map((p) => p.base)) - 0.3 : lo, ob = own ? Math.max(...pts.map((p) => p.top)) + 0.3 : hi
+            const yy = (v: number) => y(v, oa, ob)
+            return (
+              <div key={g.id} className="grid items-center gap-x-3 gap-y-1 sm:grid-cols-[minmax(120px,190px)_minmax(0,1fr)]">
+                <div className="min-w-0 text-[12.5px] leading-tight">
+                  <span className="truncate max-sm:mr-2 sm:block">{g.name}</span>
+                  <span className="text-[11px] text-muted-foreground sm:block">
+                    {own ? "no flood level" : `flood ${g.flood!.toFixed(1)} ft`}{g.surge != null && Math.abs(g.surge) >= 0.05 && ` · running ${g.surge > 0 ? "+" : "−"}${Math.abs(g.surge).toFixed(1)}`}
+                  </span>
+                </div>
+                <div className="relative rounded-[3px] bg-muted/40" style={{ height: H }}>
+                  {/* day lines, the flood zone and line */}
+                  <div className="pointer-events-none absolute inset-0 grid" style={{ gridTemplateColumns: `repeat(${days.length}, 1fr)` }} aria-hidden>
+                    {days.map((d, k) => <div key={d} className={k ? "border-l border-border/70" : ""} />)}
+                  </div>
+                  {!own && <>
+                    <div className="pointer-events-none absolute inset-x-0 top-0 bg-[color-mix(in_srgb,var(--destructive)_9%,transparent)]" style={{ height: y(0) }} aria-hidden />
+                    <div className="pointer-events-none absolute inset-x-0 border-t border-dashed border-[var(--destructive)]/70" style={{ top: y(0) }} aria-hidden />
+                  </>}
+                  {pts.map(({ h, top, base }) => {
+                    const near = h.margin != null && h.margin <= 1
+                    return (
+                      <Tooltip key={h.time}>
+                        <TooltipTrigger asChild>
+                          <button type="button" className="group absolute -translate-x-1/2 outline-none" style={{ left: `${x(h.time)}%`, top: yy(top) - 4, height: yy(base) - yy(top) + 8 }}>
+                            {top > base + 0.02 && <span className="absolute left-1/2 w-[2px] -translate-x-1/2 rounded bg-foreground/35" style={{ top: 4, height: yy(base) - yy(top) }} />}
+                            <span className={`absolute left-1/2 size-[7px] -translate-x-1/2 rounded-full ${near ? "bg-foreground ring-2 ring-card" : "bg-foreground/70"}`} style={{ top: yy(base) - yy(top) + 0.5 }} />
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent className="space-y-0.5">
+                          <p className="font-semibold">{g.name} · {wall(h.time)}</p>
+                          <p>High tide {h.height.toFixed(1)} ft{g.surge != null && Math.abs(g.surge) >= 0.05 ? `, ${(h.height + (g.surge ?? 0)).toFixed(1)} ft with today's ${g.surge > 0 ? "+" : "−"}${Math.abs(g.surge).toFixed(1)} ft running` : ""}</p>
+                          {h.margin != null && <p>{h.margin <= 0 ? `${Math.abs(h.margin).toFixed(1)} ft over` : `${h.margin.toFixed(1)} ft below`} minor flooding ({g.flood!.toFixed(1)} ft)</p>}
+                        </TooltipContent>
+                      </Tooltip>
+                    )
+                  })}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      ))}
+      <p className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
+        <span className="inline-flex items-center gap-1.5"><span className="size-[7px] rounded-full bg-foreground/70" />high tide</span>
+        <span className="inline-flex items-center gap-1.5"><span className="h-3 w-[2px] rounded bg-foreground/35" />with today's surge</span>
+        <span className="inline-flex items-center gap-1.5"><span className="w-4 border-t border-dashed border-[var(--destructive)]/70" />minor flood level, shared across gauges ({Math.abs(lo).toFixed(0)} ft below to {hi.toFixed(1)} ft above)</span>
+        <span className="inline-flex items-center gap-1.5"><span className="size-[7px] rounded-full bg-foreground ring-2 ring-muted" />within a foot</span>
+      </p>
+    </div>
+  )
 }
 
 export function TidesCard({ data }: { data: Briefing }) {
@@ -262,49 +337,13 @@ export function TidesCard({ data }: { data: Briefing }) {
             <span key={g.id + h.time}>{i > 0 && "; "}{g.name} {wall(h.time)}, {h.margin! <= 0 ? `${Math.abs(h.margin!).toFixed(1)} ft over` : `${h.margin!.toFixed(1)} ft below`} minor flood</span>))}.</Takeaway>
         })()}
         <CardDescription>
-          Each day's highest high tide at each gauge (feet above mean lower low water, local time), against the gauge's minor flood level, with the water's current running above or below the tide prediction (a rough storm surge) added on. Tides within a foot of flooding are flagged.
+          Every high tide in the next week at each gauge, plotted against the gauge's minor flood level (the dashed line), with the water's current running above or below the tide prediction (a rough storm surge) added on top of each. Hover a tide for its time and height.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
-        <div className="overflow-x-auto">
-          <Table className="w-auto border-separate border-spacing-x-[2px] border-spacing-y-[2px] text-[12.5px]">
-            <TableHeader>
-              <TableRow className="hover:bg-transparent">
-                <TableHead className="sticky left-0 z-10 bg-card md:min-w-[230px]">Gauge</TableHead>
-                <TableHead className="px-2 text-right text-[11.5px] font-normal">Flood<span className="block">level</span></TableHead>
-                <TableHead className="px-2 text-right text-[11.5px] font-normal">Running<span className="block">vs tide</span></TableHead>
-                {days.map((d) => <TableHead key={d} className="h-auto w-[72px] px-1 pb-2 text-center align-bottom text-[11.5px]"><DayHead day={d} /></TableHead>)}
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {groupBy(ts).map(([a, xs]) => (
-                <React.Fragment key={a}>
-                  <SectionRow label={a} span={days.length + 3} />
-                  {xs.map((g: TideGauge) => (
-                    <TableRow key={g.id} className="border-0 hover:bg-transparent">
-                      <TableCell className="sticky left-0 z-10 max-w-[160px] bg-card py-1 pr-3 whitespace-normal md:max-w-none md:min-w-[230px] md:whitespace-nowrap">
-                        {g.name}
-                        {g.near && <button type="button" onClick={() => openLocation(g.near!)} className="block text-left text-[11px] text-muted-foreground hover:underline">near {g.near}</button>}
-                      </TableCell>
-                      <TableCell className="px-2 py-1 text-right tabular-nums text-muted-foreground">{g.flood == null ? "–" : g.flood.toFixed(1)}</TableCell>
-                      <TableCell className="px-2 py-1 text-right tabular-nums">{g.surge == null ? "–" : Math.abs(g.surge) < 0.05 ? "0.0" : `${g.surge > 0 ? "+" : "−"}${Math.abs(g.surge).toFixed(1)}`}</TableCell>
-                      {days.map((d) => {
-                        const h = top(g, d)
-                        return (
-                          <TableCell key={d} className="rounded-[3px] bg-muted/50 px-1 py-1 text-center tabular-nums">
-                            {h ? <><span className="font-semibold">{h.height.toFixed(1)}</span><span className="block text-[10px] leading-tight text-muted-foreground">{wall(h.time, false)}</span><TideFlag m={h.margin} /></> : "–"}
-                          </TableCell>
-                        )
-                      })}
-                    </TableRow>
-                  ))}
-                </React.Fragment>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
+        <TideChart ts={ts} days={days} />
         <p className="text-xs text-muted-foreground">
-          Flood levels are NOAA's minor (nuisance) flooding thresholds; a dash means the gauge has none. The surge is today's: storms can raise it well beyond that by the time a high tide arrives.
+          Flood levels are NOAA's minor (nuisance) flooding thresholds; gauges without one are drawn on their own scale. The surge is today's: storms can raise it well beyond that by the time a high tide arrives.
         </p>
       </CardContent>
     </Card>

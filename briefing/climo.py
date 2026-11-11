@@ -10,6 +10,9 @@ day in it has a report, and a year counts only if at least `min_share` of its wi
 current year is left out (its window isn't over).
 
 Histories don't change, so each station's daily record is cached for a month (cache_dir/climo).
+
+The same stations give the water year so far (`waterYear`): each day's observed precipitation since
+October 1 and the station's 1991 – 2020 daily normal (ACIS's `normal` option), fetched fresh each run.
 """
 from __future__ import annotations
 
@@ -57,6 +60,54 @@ def _fetch(sid, cache: Path | None):
         f.parent.mkdir(parents=True, exist_ok=True)
         f.write_text(json.dumps(out))
     return out
+
+
+def water_year_start(today: date) -> date:
+    return date(today.year if today.month >= 10 else today.year - 1, 10, 1)
+
+
+def _water_year(sid, start: date, end: date):
+    """[(date, observed or None, normal or None)] from start to end."""
+    r = requests.post(ACIS, json={"sid": sid, "sdate": start.isoformat(), "edate": end.isoformat(),
+                                   "elems": [{"name": "pcpn"}, {"name": "pcpn", "normal": "1"}]}, timeout=60)
+    r.raise_for_status()
+    js = r.json()
+    if "error" in js:
+        raise RuntimeError(js["error"])
+    return [(row[0], _value(row[1]), _value(row[2])) for row in js.get("data", [])]
+
+
+def water_year(stations: dict, names: list, today: date):
+    """{start, dates, points: {name: {obs: [...], normal: [...]}}}: each station's daily observed and
+    normal precipitation since October 1, through yesterday. A station whose last report is more than
+    a week old is left out (it has stopped reporting)."""
+    start = water_year_start(today)
+    end = today - timedelta(days=1)
+    if end < start:
+        return None
+    dates = [(start + timedelta(days=k)).isoformat() for k in range((end - start).days + 1)]
+
+    def one(name):
+        try:
+            return name, _water_year(stations[name], start, end)
+        except Exception as e:
+            log.info("water year at %s unavailable (%s)", name, e)
+            return name, None
+
+    with ThreadPoolExecutor(4) as ex:
+        got = list(ex.map(one, names))
+    out = {}
+    for name, rows in got:
+        if not rows:
+            continue
+        by = {d: (o, n) for d, o, n in rows}
+        obs = [by.get(d, (None, None))[0] for d in dates]
+        nrm = [by.get(d, (None, None))[1] for d in dates]
+        last = max((i for i, x in enumerate(obs) if x is not None), default=-1)
+        if last < len(dates) - 8 or all(x is None for x in nrm):
+            continue
+        out[name] = {"obs": [None if x is None else round(x, 2) for x in obs], "normal": [None if x is None else round(x, 3) for x in nrm]}
+    return {"start": start.isoformat(), "dates": dates, "points": out} if out else None
 
 
 def season_maxima(days: list[str], vals: list, center: date, before=30, after=45, min_share=0.8):
@@ -112,6 +163,11 @@ def fetch(cfg, center: date, demo=False):
 
     with ThreadPoolExecutor(4) as ex:
         got = list(ex.map(one, pts))
+    try:
+        wy = water_year(stations, pts, center)
+    except Exception as e:
+        log.warning("water year so far unavailable (%s)", e)
+        wy = None
     out = {}
     for name, js in got:
         if not js or not js["data"]:
@@ -125,10 +181,10 @@ def fetch(cfg, center: date, demo=False):
         m = js.get("meta") or {}
         out[name] = {"station": (m.get("name") or "").title(), "sid": stations[name], "elev_ft": m.get("elev"),
                      "years": years, "max": {str(n): [mx[y].get(n) for y in years] for n in SPANS}}
-    log.info("station histories: %d of %d locations", len(out), len(pts))
-    if not out:
+    log.info("station histories: %d of %d locations; water year: %d", len(out), len(pts), len((wy or {}).get("points", {})))
+    if not out and not wy:
         return None
-    return {"from": (center - timedelta(days=spec["before"])).isoformat()[5:], "to": (center + timedelta(days=spec["after"])).isoformat()[5:],
+    return {"waterYear": wy, "from": (center - timedelta(days=spec["before"])).isoformat()[5:], "to": (center + timedelta(days=spec["after"])).isoformat()[5:],
             "spans": list(SPANS), "points": out, "source": "ACIS (NOAA Regional Climate Centers) daily station records"}
 
 
@@ -142,5 +198,13 @@ def _demo(pts, stations, center, spec):
         out[name] = {"station": f"{name} (demo)", "sid": stations[name], "elev_ft": None, "years": years,
                      "max": {"1": one.tolist(), "3": np.round(one * rng.uniform(1.5, 2.0, len(years)), 2).tolist(),
                              "7": np.round(one * rng.uniform(2.3, 3.2, len(years)), 2).tolist()}}
-    return {"from": (center - timedelta(days=spec["before"])).isoformat()[5:], "to": (center + timedelta(days=spec["after"])).isoformat()[5:],
+    start = water_year_start(center)
+    dates = [(start + timedelta(days=k)).isoformat() for k in range((center - start).days)]
+    wy = {}
+    for k, name in enumerate(pts):
+        season = np.linspace(0.08, 0.35, len(dates)) * (0.6 + 0.25 * (k % 5))
+        wet = rng.random(len(dates)) < 0.45
+        wy[name] = {"obs": np.round(np.where(wet, rng.gamma(1.2, season * 1.9), 0), 2).tolist(), "normal": np.round(season, 3).tolist()}
+    return {"waterYear": {"start": start.isoformat(), "dates": dates, "points": wy} if dates else None,
+            "from": (center - timedelta(days=spec["before"])).isoformat()[5:], "to": (center + timedelta(days=spec["after"])).isoformat()[5:],
             "spans": list(SPANS), "points": out, "source": "ACIS daily station records (demo: synthetic)"}

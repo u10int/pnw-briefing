@@ -7,6 +7,7 @@ import { dateRange, dayShort, issuedLabel, peak, redCell } from "@/lib/format"
 import { type MapRequest, openOnMap } from "@/lib/maplink"
 import type { Briefing, EventChange, ImpactEvent } from "@/types"
 import { openLocation } from "@/lib/locationlink"
+import { watchGust } from "@/sections/Hazards"
 
 /** Rain first, then winter hazards, then wind and heat (the order of impacts.HAZARDS); anything else after, by first date. */
 const HAZARD_ORDER = ["heavy_rain_24h", "heavy_rain_72h", "snow_24h", "freezing_precip", "hard_freeze", "wind", "heat"]
@@ -156,15 +157,53 @@ function WhereLabel({ data, pts, unit, muted }: { data: Briefing; pts: { name: s
   )
 }
 
-/** The line under a period's place: its worst value, small and muted, then any change tag. */
-function PeakLine({ pts, unit, children }: { pts: { peak: number | null }[]; unit: string; children?: React.ReactNode }) {
+/** The impact threshold a period's worst location is held to: its rain or snow amount by kind of
+ *  place (from the odds), or the outage gust (leaf-on in leaf season). None for freezes and heat. */
+function thresholdOf(data: Briefing, e: { hazard?: string | null; start: string }, name?: string): number | null {
+  if (!name) return null
+  const p = data.points.find((x) => x.name === name)
+  const t = data.odds?.points[name]?.thresholds
+  switch (e.hazard) {
+    case "heavy_rain_24h": return t?.rain24 ?? null
+    case "heavy_rain_72h": return t?.rain72 ?? null
+    case "snow_24h": return t?.snow24 ?? null
+    case "wind": return p && data.windLevels ? watchGust(data.windLevels, p.kind, e.start) : null
+    default: return null
+  }
+}
+
+/** The worst value against its threshold: a short bar filled to the value with a tick at the
+ *  threshold, so how far past it a period goes reads at a glance. */
+function Gauge({ v, thr, unit }: { v: number; thr: number; unit: string }) {
+  const max = Math.max(v, thr) * 1.2
+  return (
+    <span className="relative inline-block h-1.5 w-12 shrink-0 rounded-full bg-border/80" aria-label={`${short(v, unit)} against a ${short(thr, unit)} threshold`}>
+      <span className="absolute inset-y-0 left-0 rounded-full bg-foreground/30" style={{ width: `${(100 * v) / max}%` }} />
+      <span className="absolute -inset-y-1 w-[2px] -translate-x-1/2 rounded bg-foreground" style={{ left: `${(100 * thr) / max}%` }} />
+    </span>
+  )
+}
+
+/** The line under a period's place: its worst value against the threshold, small and muted,
+ *  then any change tag. */
+function PeakLine({ pts, unit, thr, children }: { pts: { peak: number | null }[]; unit: string; thr?: number | null; children?: React.ReactNode }) {
   const top = pts[0]?.peak
   const value = top != null && unit ? short(top, unit) : null
   if (value == null && !children) return null
   return (
     <div className="mt-0.5 flex items-center gap-1.5 text-xs leading-4 text-muted-foreground tabular-nums">
+      {top != null && thr != null && unit && <Gauge v={top} thr={thr} unit={unit} />}
       {value}{children}
     </div>
+  )
+}
+
+/** One square per model, filled for each over the threshold: the agreement inside a period's bar. */
+function Squares({ k, n }: { k: number; n: number }) {
+  return (
+    <span className="flex shrink-0 gap-[2px]" aria-hidden>
+      {Array.from({ length: n }, (_, i) => <span key={i} className={`size-[7px] rounded-[1.5px] ${i < k ? "bg-current" : "bg-current opacity-30"}`} />)}
+    </span>
   )
 }
 
@@ -303,7 +342,7 @@ export function ImpactBoard({ data }: { data: Briefing }) {
                     <div key={i} className={grid}>
                       <div className={`flex min-w-0 flex-col justify-center self-stretch py-1 text-[13px] leading-tight ${pin}`}>
                         <WhereLabel data={data} pts={pts} unit={e.unit} />
-                        <PeakLine pts={pts} unit={e.unit}>{st && <Tag s={st} />}</PeakLine>
+                        <PeakLine pts={pts} unit={e.unit} thr={thresholdOf(data, e, pts[0]?.name)}>{st && <Tag s={st} />}</PeakLine>
                       </div>
                       <div className="relative min-h-8 self-stretch">
                         {dayLines}
@@ -316,7 +355,9 @@ export function ImpactBoard({ data }: { data: Briefing }) {
                               onClick={() => openOnMap(mapRequestFor(e))}
                               className="absolute top-1/2 h-7 -translate-y-1/2 flex cursor-pointer items-center overflow-hidden rounded-[4px] px-1.5 text-[11px] font-semibold whitespace-nowrap tabular-nums shadow-[inset_0_0_0_1px_rgb(0_0_0/0.08)] outline-offset-1 hover:brightness-105 focus-visible:outline-2 focus-visible:outline-ring"
                               style={{ left: b.left, width: b.width, ...fillStyle(lv, fillOf(st)) }}>
-                              {b.cells >= 2 ? label : b.cells >= 1 ? pct(e.agreement) : ""}
+                              {b.cells >= 2
+                                ? <span className="flex items-center gap-1.5"><Squares k={Math.round(e.agreement * e.n_models)} n={e.n_models} />{b.cells >= 3 && <span>{Math.round(e.agreement * e.n_models)} of {e.n_models}</span>}</span>
+                                : b.cells >= 1 ? pct(e.agreement) : ""}
                             </button>
                           </TooltipTrigger>
                           <TooltipContent className="max-w-xs space-y-1">
@@ -373,7 +414,8 @@ export function ImpactBoard({ data }: { data: Briefing }) {
 
         {/* key */}
         <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-muted-foreground">
-          <span>Red: likely (60%+ of models) · Amber: possible ({pct(minAg)}+)</span>
+          <span>Red: likely (60%+ of models) · Amber: possible ({pct(minAg)}+); squares in a bar are the models, filled for each over the threshold</span>
+          <span className="flex items-center gap-1.5"><Gauge v={50} thr={40} unit="" />Worst value against the location's threshold (the tick)</span>
           {hasPrev ? <>
             <span className="flex items-center gap-1.5"><Swatch fill="bold" />New or upgraded</span>
             <span className="flex items-center gap-1.5"><Swatch fill="same" />Unchanged</span>

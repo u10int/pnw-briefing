@@ -236,7 +236,9 @@ export interface PointOdds {
 /** Each location's station history: the wettest 1-, 3- and 7-day stretch in each past year over
  *  the same part of the year (from – to, MM-DD). */
 export interface ClimoPoint { station: string; sid: string; elev_ft: N; years: number[]; max: Record<string, N[]> }
-export interface Climo { from: string; to: string; spans: number[]; source: string; points: Record<string, ClimoPoint> }
+/** Each station's daily observed and normal precipitation since October 1, through yesterday. */
+export interface WaterYear { start: string; dates: string[]; points: Record<string, { obs: N[]; normal: N[] }> }
+export interface Climo { from: string; to: string; spans: number[]; source: string; points: Record<string, ClimoPoint>; waterYear?: WaterYear | null }
 /** NBM's own exceedance chances (percent) at fixed amounts: per variable, one row per threshold, one value per day. */
 export interface NbmOdds {
   run: string; dates: string[]; source: string
