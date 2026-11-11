@@ -262,7 +262,8 @@ def collect(cfg: dict, out: Path, demo: bool = False, products: bool = True) -> 
     return data
 
 
-def build(cfg: dict, out: Path, demo: bool = False, previous: Path | None = None, history: Path | None = None) -> Path:
+def build(cfg: dict, out: Path, demo: bool = False, previous: Path | None = None, history: Path | None = None,
+          previous_edition: Path | None = None) -> Path:
     out.mkdir(parents=True, exist_ok=True)
     if first_day_hours(day0(cfg)) < 24:
         # after a 18Z, 00Z or 06Z cycle the first window is the rest of today and tomorrow
@@ -299,6 +300,26 @@ def build(cfg: dict, out: Path, demo: bool = False, previous: Path | None = None
         log.info("no previous briefing to compare with")
     else:
         data["change"]["trends"] = clean(safe("window trends since yesterday", lambda: trends.compare(data, prev, analysis.windows(cfg))))
+    # impacts against the latest edition before this one (about 6 hours back), like for like, so a
+    # hazard that appears or firms up between cycles shows straight away; the forecast comparisons
+    # above stay against the same cycle yesterday
+    last = None
+    if demo:
+        last = prev
+    elif previous_edition and previous_edition.exists():
+        try:
+            last = json.loads(previous_edition.read_text())
+        except Exception as e:
+            log.warning("previous edition unreadable (%s)", e)
+    if last:
+        ev = safe("impacts since the last edition", lambda: change.events_since(data, last, cfg))
+        if ev is not None:
+            data["change"] = data.get("change") or {"prevIssued": None, "windows": []}
+            data["change"].update(clean({"events": ev, "eventsSince": last.get("meta", {}).get("issued"),
+                                         "eventsCycle": last.get("meta", {}).get("cycle"), "eventsBasis": "edition"}))
+    if data.get("change") and "eventsBasis" not in data["change"]:
+        data["change"]["eventsSince"] = data["change"].get("prevIssued")
+        data["change"]["eventsBasis"] = "yesterday"
     if earlier:
         data["trendHistory"] = clean(safe("trend history", lambda: trends.history(data, earlier, analysis.windows(cfg))))
         # how the models have been doing: earlier briefings' precipitation against MRMS
@@ -327,6 +348,7 @@ def main():
     ap.add_argument("--out", default="web/public/data")
     ap.add_argument("--demo", action="store_true")
     ap.add_argument("--previous", type=Path, help="yesterday's briefing.json, for the change view")
+    ap.add_argument("--previous-edition", type=Path, help="the latest edition before this one, for the impacts' changes")
     ap.add_argument("--history", type=Path, help="a folder of earlier days' briefing.json files, for the trend sparklines")
     ap.add_argument("--cycle", help="the edition's model cycle, e.g. 2026-11-07T18Z (default: the latest 00/06/12/18Z at least 3 h old)")
     a = ap.parse_args()
@@ -336,7 +358,7 @@ def main():
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     logging.getLogger("herbie").setLevel(logging.WARNING)
     cfg = yaml.safe_load(open(a.config))
-    build(cfg, Path(a.out), demo=a.demo, previous=a.previous, history=a.history)
+    build(cfg, Path(a.out), demo=a.demo, previous=a.previous, history=a.history, previous_edition=a.previous_edition)
 
 
 if __name__ == "__main__":

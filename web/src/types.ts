@@ -57,6 +57,8 @@ export interface EventChange {
   // added with the timeline; absent in briefings built before it
   hazard?: string; prevStart?: string | null; prevEnd?: string | null; shifted?: boolean
   agreement?: number | null; where?: { name: string; peak: number | null }[]; unit?: string | null
+  /** what happened, judged like for like (absent in briefings built before it) */
+  kind?: "new" | "upgraded" | "downgraded" | "dropped" | "same" | "moved"
 }
 export type TrendVar = "precip" | "snow" | "gust" | "tmax" | "tmin"
 export interface TrendStat { median: number; lo: number; hi: number; n: number }
@@ -180,6 +182,9 @@ export interface Change {
   windows: ChangeWindow[]
   trends?: { windows: TrendChange[] }                  // absent before the trends table was added
   events: { new: EventChange[]; upgraded: EventChange[]; downgraded: EventChange[]; dropped: EventChange[]; same: EventChange[] }
+  /** what the events are compared with: the latest edition before this one ("edition"), or the
+   *  same cycle yesterday ("yesterday"; also every briefing built before this was added) */
+  eventsBasis?: "edition" | "yesterday"; eventsSince?: string | null; eventsCycle?: string | null
 }
 
 export interface Normals {

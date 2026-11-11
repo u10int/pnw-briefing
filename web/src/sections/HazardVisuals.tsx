@@ -14,7 +14,7 @@ export interface Spark {
   threshold?: { value: number; label: string }
   unit?: string
 }
-/** `change`: how the figure moved since the last update (over the days both briefings cover). */
+/** `change`: how the figure moved since this time yesterday (over the days both briefings cover). */
 export interface Visual { value: string; unit?: string; caption: string; aside?: string; spark?: Spark; change?: { c: TrendChangeVar; k: TrendVar; days: number } }
 
 const PT = "America/Los_Angeles"
@@ -120,7 +120,7 @@ export function hazardVisuals(d: Briefing): Partial<Record<HazardTab, Visual>> {
       }
     }
   }
-  // since the last update: the same figure in yesterday's briefing, over the days both cover
+  // since this time yesterday: the same figure in yesterday's briefing, over the days both cover
   const ch = d.change
   if (ch) {
     const w7 = ch.windows.find((w) => w.days === 7)
