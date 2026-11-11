@@ -288,7 +288,9 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
       container: el.current!, style: STYLE_URL, transformRequest: withKey, attributionControl: { compact: true },
       bounds: [[d.lon_min, d.lat_min], [d.lon_max, d.lat_max]],
       fitBoundsOptions: { padding: 8 },
-      dragRotate: false, pitchWithRotate: false, touchPitch: false, maxZoom: 11,
+      // flat until the 3D view: rotation and tilt are switched on there (pitchWithRotate is fixed when
+      // the map is made, so it's on here and does nothing while dragRotate is off)
+      dragRotate: false, pitchWithRotate: true, touchPitch: false, maxZoom: 11, maxPitch: 85,
     })
     m.touchZoomRotate.disableRotation()
     m.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right")
@@ -487,13 +489,21 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
 
   // ---- 3D: the volume over the map, tilting the camera in and out
   const volOn = !!vol
+  const compass = React.useRef<maplibregl.NavigationControl | null>(null)
   React.useEffect(() => {
     ready.current?.then((m) => {
       if (volOn) {
-        m.setMaxPitch(80)
-        m.dragRotate.enable(); m.touchPitch.enable(); m.touchZoomRotate.enableRotation()
+        // free tilt and turn: right-drag (or Ctrl-drag) on a mouse, two fingers on a touch screen,
+        // and a compass that shows the tilt (click to face north, drag to tilt and turn)
+        m.dragRotate.enable(); m.touchPitch.enable(); m.touchZoomRotate.enableRotation(); m.keyboard.enable()
+        if (!compass.current) {
+          compass.current = new maplibregl.NavigationControl({ showZoom: false, showCompass: true, visualizePitch: true })
+          m.addControl(compass.current, "top-right")
+        }
         m.easeTo({ pitch: 60, bearing: -18, zoom: Math.max(m.getZoom() - 0.2, 3), duration: 900 })
-      } else if (m.getPitch() > 0 || m.getBearing() !== 0) {
+      } else {
+        if (compass.current) { m.removeControl(compass.current); compass.current = null }
+        if (!(m.getPitch() > 0 || m.getBearing() !== 0)) return
         m.dragRotate.disable(); m.touchPitch.disable(); m.touchZoomRotate.disableRotation()
         const d = data.domain
         m.easeTo({ pitch: 0, bearing: 0, duration: 700 })
@@ -756,7 +766,7 @@ function VolumeLegend({ entry, name, exaggeration, particles }: { entry: VolumeE
         {VOL_NOTES[name]} {name === "frz" ? "" : v.note ?? ""}
         {particles && pk.length > 0 && <> Particles trace the wind at {pk.map((l) => `${l.hPa} mb`).join(", ")} (about {pk.map((l) => l.km.toFixed(1)).join(", ")} km), coloured by speed like the map's wind.</>}
         {" "}{entry.model} on pressure levels, 0 – {entry.topKm} km, heights stretched ×{exaggeration}: kilometres up one edge of the box, the
-        model's average pressure-level heights up the other. Steps every {hours} hours through {timeLabel(entry.times[steps - 1])}, blended in between. Right-drag (two fingers on a phone) to tilt and turn.
+        model's average pressure-level heights up the other. Steps every {hours} hours through {timeLabel(entry.times[steps - 1])}, blended in between. Right-drag (or Ctrl-drag) to tilt and turn, two fingers on a phone; drag the compass to tilt, click it to face north.
       </p>
     </div>
   )
