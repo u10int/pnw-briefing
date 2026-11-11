@@ -174,36 +174,38 @@ function thresholdOf(data: Briefing, e: { hazard?: string | null; start: string 
 
 /** The worst value against its threshold: a short bar filled to the value with a tick at the
  *  threshold, so how far past it a period goes reads at a glance. */
-function Gauge({ v, thr, unit }: { v: number; thr: number; unit: string }) {
+function Gauge({ v, thr, unit, where }: { v: number; thr: number; unit: string; where?: string }) {
   const max = Math.max(v, thr) * 1.2
-  return (
+  const bar = (
     <span className="relative inline-block h-1.5 w-12 shrink-0 rounded-full bg-border/80" aria-label={`${short(v, unit)} against a ${short(thr, unit)} threshold`}>
       <span className="absolute inset-y-0 left-0 rounded-full bg-foreground/30" style={{ width: `${(100 * v) / max}%` }} />
       <span className="absolute -inset-y-1 w-[2px] -translate-x-1/2 rounded bg-foreground" style={{ left: `${(100 * thr) / max}%` }} />
     </span>
   )
+  if (!unit) return bar
+  const over = v - thr
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild><span tabIndex={0} className="inline-flex outline-none">{bar}</span></TooltipTrigger>
+      <TooltipContent className="max-w-xs space-y-1">
+        <p className="font-semibold">{short(v, unit)}{where ? ` at ${where}` : ""}, against its {short(thr, unit)} threshold</p>
+        <p>The bar fills to the period's worst value: the highest any model shows at its worst-hit location, on the day the most models agree. The tick is the amount that location is held to for this hazard (it varies by lowland, coast and pass). {over >= 0 ? `${short(over, unit)} past it.` : `${short(-over, unit)} short of it.`}</p>
+      </TooltipContent>
+    </Tooltip>
+  )
 }
 
 /** The line under a period's place: its worst value against the threshold, small and muted,
  *  then any change tag. */
-function PeakLine({ pts, unit, thr, children }: { pts: { peak: number | null }[]; unit: string; thr?: number | null; children?: React.ReactNode }) {
+function PeakLine({ pts, unit, thr, children }: { pts: { name?: string; peak: number | null }[]; unit: string; thr?: number | null; children?: React.ReactNode }) {
   const top = pts[0]?.peak
   const value = top != null && unit ? short(top, unit) : null
   if (value == null && !children) return null
   return (
     <div className="mt-0.5 flex items-center gap-1.5 text-xs leading-4 text-muted-foreground tabular-nums">
-      {top != null && thr != null && unit && <Gauge v={top} thr={thr} unit={unit} />}
+      {top != null && thr != null && unit && <Gauge v={top} thr={thr} unit={unit} where={pts[0]?.name} />}
       {value}{children}
     </div>
-  )
-}
-
-/** One square per model, filled for each over the threshold: the agreement inside a period's bar. */
-function Squares({ k, n }: { k: number; n: number }) {
-  return (
-    <span className="flex shrink-0 gap-[2px]" aria-hidden>
-      {Array.from({ length: n }, (_, i) => <span key={i} className={`size-[7px] rounded-[1.5px] ${i < k ? "bg-current" : "bg-current opacity-30"}`} />)}
-    </span>
   )
 }
 
@@ -355,9 +357,7 @@ export function ImpactBoard({ data }: { data: Briefing }) {
                               onClick={() => openOnMap(mapRequestFor(e))}
                               className="absolute top-1/2 h-7 -translate-y-1/2 flex cursor-pointer items-center overflow-hidden rounded-[4px] px-1.5 text-[11px] font-semibold whitespace-nowrap tabular-nums shadow-[inset_0_0_0_1px_rgb(0_0_0/0.08)] outline-offset-1 hover:brightness-105 focus-visible:outline-2 focus-visible:outline-ring"
                               style={{ left: b.left, width: b.width, ...fillStyle(lv, fillOf(st)) }}>
-                              {b.cells >= 2
-                                ? <span className="flex items-center gap-1.5"><Squares k={Math.round(e.agreement * e.n_models)} n={e.n_models} />{b.cells >= 3 && <span>{Math.round(e.agreement * e.n_models)} of {e.n_models}</span>}</span>
-                                : b.cells >= 1 ? pct(e.agreement) : ""}
+                              {b.cells >= 2 ? label : b.cells >= 1 ? pct(e.agreement) : ""}
                             </button>
                           </TooltipTrigger>
                           <TooltipContent className="max-w-xs space-y-1">
@@ -414,8 +414,8 @@ export function ImpactBoard({ data }: { data: Briefing }) {
 
         {/* key */}
         <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-muted-foreground">
-          <span>Red: likely (60%+ of models) · Amber: possible ({pct(minAg)}+); squares in a bar are the models, filled for each over the threshold</span>
-          <span className="flex items-center gap-1.5"><Gauge v={50} thr={40} unit="" />Worst value against the location's threshold (the tick)</span>
+          <span>Red: likely (60%+ of models) · Amber: possible ({pct(minAg)}+)</span>
+          <span className="flex items-center gap-1.5"><Gauge v={50} thr={40} unit="" />Under each place: the worst value (bar) against that location's impact threshold (tick); past the tick means over it. Hover for the numbers</span>
           {hasPrev ? <>
             <span className="flex items-center gap-1.5"><Swatch fill="bold" />New or upgraded</span>
             <span className="flex items-center gap-1.5"><Swatch fill="same" />Unchanged</span>

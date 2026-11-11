@@ -285,6 +285,13 @@ function TideChart({ ts, days }: { ts: TideGauge[]; days: string[] }) {
                     <div className="pointer-events-none absolute inset-x-0 top-0 bg-[color-mix(in_srgb,var(--destructive)_9%,transparent)]" style={{ height: y(0) }} aria-hidden />
                     <div className="pointer-events-none absolute inset-x-0 border-t border-dashed border-[var(--destructive)]/70" style={{ top: y(0) }} aria-hidden />
                   </>}
+                  {/* the highs in order, so the tide's rhythm (and its run toward the line) reads as a curve */}
+                  {pts.length > 1 && (
+                    <svg className="pointer-events-none absolute inset-0 h-full w-full overflow-visible" viewBox={`0 0 100 ${H}`} preserveAspectRatio="none" aria-hidden>
+                      <polyline points={pts.map(({ h, base }) => `${x(h.time).toFixed(2)},${yy(base).toFixed(1)}`).join(" ")}
+                        fill="none" stroke="currentColor" strokeWidth="1.25" vectorEffect="non-scaling-stroke" strokeLinejoin="round" className="text-foreground/35" />
+                    </svg>
+                  )}
                   {pts.map(({ h, top, base }) => {
                     const near = h.margin != null && h.margin <= 1
                     return (
