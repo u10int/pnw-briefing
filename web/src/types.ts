@@ -371,10 +371,13 @@ export interface Avalanche { center: string; url: string; zones: AvalancheZone[]
 export interface SnowStation {
   name: string; triplet: string; elev_ft: number | null; lat: number; lon: number; date: string
   swe: number; median: N; pct: N; change7: N; depth: N
+  hist?: SnowHist                                   // absent before the 30-day lines were added
 }
+/** The last 30 days, one value a day from start. */
+export interface SnowHist { start: string; swe: N[]; median: N[]; depth: N[] }
 export interface Snowpack {
   asOf: string | null; minMedian: number; source: string
-  areas: { name: string; stations: SnowStation[]; swe: N; median: N; pct: N; change7: N }[]
+  areas: { name: string; stations: SnowStation[]; swe: N; median: N; pct: N; change7: N; hist?: SnowHist }[]
 }
 export interface Discussion {
   office: string; name: string; issued: string | null; url: string

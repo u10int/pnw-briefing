@@ -1049,60 +1049,119 @@ export function AvalancheCard({ data }: { data: Briefing }) {
   )
 }
 
+/** Snow water against the median for the date: a bar filled to today's SWE with a tick at the
+ *  median, on a scale shared by the rows in view so areas compare. */
+function SweBar({ swe, median, max }: { swe: N; median: N; max: number }) {
+  if (swe == null) return <span className="text-muted-foreground">–</span>
+  return (
+    <span className="relative block h-2 w-full rounded-full bg-border/70">
+      <span className="absolute inset-y-0 left-0 rounded-full" style={{ width: `${Math.min(100, (100 * swe) / max)}%`, background: SNOW_HUE }} />
+      {median != null && median > 0 && <span className="absolute -inset-y-1 w-[2px] -translate-x-1/2 rounded bg-foreground" style={{ left: `${Math.min(100, (100 * median) / max)}%` }} />}
+    </span>
+  )
+}
+const SNOW_HUE = "#6553cf"
+
+/** Snow depth over the last 30 days, with the latest value dotted. */
+function DepthLine({ h, max }: { h?: { depth: N[] }; max: number }) {
+  const xs = (h?.depth ?? []).map((v, i) => [i, v] as const).filter((p): p is readonly [number, number] => p[1] != null)
+  if (xs.length < 2) return <span className="text-[11px] text-muted-foreground">–</span>
+  const n = h!.depth.length, W = 120, H = 22
+  const x = (i: number) => (W * i) / (n - 1), y = (v: number) => H - 2 - ((H - 4) * v) / Math.max(1, max)
+  const line = xs.map(([i, v], k) => `${k ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join("")
+  const area = `${line}L${x(xs[xs.length - 1][0]).toFixed(1)},${H}L${x(xs[0][0]).toFixed(1)},${H}Z`
+  const [li, lv] = xs[xs.length - 1]
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} className="h-[22px] w-full overflow-visible" preserveAspectRatio="none" aria-hidden>
+      <path d={area} fill={SNOW_HUE} opacity="0.12" />
+      <path d={line} fill="none" stroke={SNOW_HUE} strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
+      <circle cx={x(li)} cy={y(lv)} r="2.2" fill={SNOW_HUE} />
+    </svg>
+  )
+}
+
 export function SnowpackCard({ data }: { data: Briefing }) {
   const sp = data.snowpack
   const [open, setOpen] = React.useState<string | null>(null)
   if (!sp || !sp.areas.length) return null
-  const signed = (v: N) => (v == null ? "–" : `${v > 0 ? "+" : ""}${v.toFixed(1)}`)
+  const signed = (v: N) => (v == null ? "–" : `${v > 0 ? "+" : v < 0 ? "−" : "±"}${Math.abs(v).toFixed(1)}″`)
+  // one scale for every bar and every depth line, so areas and stations compare
+  const all = sp.areas.flatMap((a) => [a, ...a.stations] as { swe: N; median: N; hist?: { depth: N[] } }[])
+  const sweMax = Math.max(1, ...all.flatMap((x) => [x.swe ?? 0, x.median ?? 0])) * 1.1
+  const depthMax = Math.max(6, ...all.flatMap((x) => (x.hist?.depth ?? []).filter((v): v is number => v != null)))
+  const hasHist = all.some((x) => x.hist)
+  // the takeaway: the area furthest from its median, or the deepest if percentages are blank
+  const withPct = sp.areas.filter((a) => a.pct != null)
+  const takeaway = withPct.length
+    ? (() => { const lo = [...withPct].sort((a, b) => a.pct! - b.pct!)[0], hi = [...withPct].sort((a, b) => b.pct! - a.pct!)[0]
+        return <>{hi.name} {hi.pct}% of median{hi !== lo && <>; {lo.name} {lo.pct}%</>}.</> })()
+    : (() => { const top = [...sp.areas].sort((a, b) => (b.swe ?? 0) - (a.swe ?? 0))[0]
+        return top && top.swe != null ? <>Early season: {top.name} leads with {inch(top.swe)}″ of snow water{top.median != null ? ` (median ${inch(top.median)}″)` : ""}.</> : null })()
+  const cols = `grid-cols-[minmax(130px,1.2fr)_minmax(110px,2fr)_56px_minmax(80px,1fr)_52px]`
+  const Row = ({ name, sub, swe, median, pct, change7, hist, depth, onClick, opened, small }: {
+    name: React.ReactNode; sub?: string; swe: N; median: N; pct: N; change7: N; hist?: { depth: N[] }; depth?: N
+    onClick?: () => void; opened?: boolean; small?: boolean }) => (
+    <div className={`grid ${cols} items-center gap-x-3 py-1.5 ${small ? "text-xs" : "text-[13px]"} ${onClick ? "cursor-pointer hover:bg-muted/40" : ""}`}
+         onClick={onClick} role={onClick ? "button" : undefined} aria-expanded={onClick ? opened : undefined} tabIndex={onClick ? 0 : undefined}
+         onKeyDown={onClick ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick() } } : undefined}>
+      <div className={`min-w-0 ${small ? "pl-5" : ""}`}>
+        <span className={`block truncate ${small ? "" : "font-medium"}`}>{onClick && <span className="mr-1.5 inline-block w-3 text-muted-foreground">{opened ? "▾" : "▸"}</span>}{name}</span>
+        {sub && <span className="block truncate text-[11px] text-muted-foreground">{sub}</span>}
+      </div>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span tabIndex={0} className="flex items-center gap-2 outline-none">
+            <span className="w-10 shrink-0 text-right tabular-nums">{swe == null ? "–" : `${inch(swe)}″`}</span>
+            <SweBar swe={swe} median={median} max={sweMax} />
+          </span>
+        </TooltipTrigger>
+        <TooltipContent>Snow water {swe == null ? "–" : `${inch(swe)}″`} against a median {median == null ? "–" : `${inch(median)}″`} for the date{pct != null ? ` (${pct}%)` : ""}</TooltipContent>
+      </Tooltip>
+      <span className="text-right tabular-nums" style={pctCell(pct)}>{pct == null ? "–" : `${pct}%`}</span>
+      {hasHist ? (
+        <Tooltip>
+          <TooltipTrigger asChild><span tabIndex={0} className="block outline-none"><DepthLine h={hist} max={depthMax} /></span></TooltipTrigger>
+          <TooltipContent>Snow depth over the last 30 days{depth != null ? `; ${Math.round(depth)}″ now` : ""}</TooltipContent>
+        </Tooltip>
+      ) : <span className="text-right text-muted-foreground tabular-nums">{depth == null ? "" : `${Math.round(depth)}″`}</span>}
+      <span className="text-right tabular-nums">{signed(change7)}</span>
+    </div>
+  )
   return (
     <Card>
       <CardHeader>
         <CardTitle>Snowpack</CardTitle>
+        <Takeaway>{takeaway}</Takeaway>
         <CardDescription>
-          Snow water equivalent (SWE) at SNOTEL stations near each area{sp.asOf ? `, as of ${dateRange(sp.asOf, sp.asOf)}` : ""},
-          against each station's median for the date. Select an area to see its stations.
+          Snow water equivalent (SWE) at SNOTEL stations near each area{sp.asOf ? `, as of ${dateRange(sp.asOf, sp.asOf)}` : ""}:
+          the bar is today's SWE and the tick the station's median for the date, with snow depth over the last 30 days. Select an area to see its stations.
         </CardDescription>
       </CardHeader>
-      <CardContent>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Area</TableHead>
-              <TableHead className="text-right">Stations</TableHead>
-              <TableHead className="text-right">SWE (in)</TableHead>
-              <TableHead className="text-right">Median (in)</TableHead>
-              <TableHead className="text-right">% of median</TableHead>
-              <TableHead className="text-right">7-day change</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {sp.areas.flatMap((a) => [
-              <TableRow key={a.name} className="cursor-pointer" onClick={() => setOpen(open === a.name ? null : a.name)}
-                        aria-expanded={open === a.name}>
-                <TableCell className="font-medium">
-                  <span className="mr-1.5 inline-block w-3 text-muted-foreground">{open === a.name ? "▾" : "▸"}</span>{a.name}
-                </TableCell>
-                <TableCell className="text-right tabular-nums">{a.stations.length}</TableCell>
-                <TableCell className="text-right tabular-nums">{inch(a.swe)}</TableCell>
-                <TableCell className="text-right tabular-nums text-muted-foreground">{inch(a.median)}</TableCell>
-                <TableCell className="text-right tabular-nums" style={pctCell(a.pct)}>{a.pct == null ? "–" : a.pct}</TableCell>
-                <TableCell className="text-right tabular-nums">{signed(a.change7)}</TableCell>
-              </TableRow>,
-              ...(open === a.name ? a.stations.map((s) => (
-                <TableRow key={`${a.name}-${s.triplet}`} className="bg-muted/30 text-xs">
-                  <TableCell className="pl-9">{s.name}<span className="ml-1.5 text-muted-foreground">{s.elev_ft ? `${s.elev_ft.toLocaleString("en-US")} ft` : ""}</span></TableCell>
-                  <TableCell className="text-right text-muted-foreground tabular-nums">{s.depth == null ? "" : `${s.depth}″ deep`}</TableCell>
-                  <TableCell className="text-right tabular-nums">{inch(s.swe)}</TableCell>
-                  <TableCell className="text-right tabular-nums text-muted-foreground">{inch(s.median)}</TableCell>
-                  <TableCell className="text-right tabular-nums" style={pctCell(s.pct)}>{s.pct == null ? "–" : s.pct}</TableCell>
-                  <TableCell className="text-right tabular-nums">{signed(s.change7)}</TableCell>
-                </TableRow>
-              )) : []),
-            ])}
-          </TableBody>
-        </Table>
-        <p className="mt-3 text-xs text-muted-foreground">
-          {sp.source}. Area percent of median is total SWE over total median SWE, as NRCS builds basin indices; it's left
+      <CardContent className="space-y-3">
+        <div className="overflow-x-auto">
+          <div className="min-w-[560px]">
+            <div className={`grid ${cols} gap-x-3 border-b pb-1.5 text-xs text-muted-foreground`}>
+              <span>Area</span><span className="pl-12">Snow water vs median</span><span className="text-right">% of median</span>
+              <span>{hasHist ? "Depth, 30 days" : "Depth"}</span><span className="text-right">7 days</span>
+            </div>
+            {sp.areas.map((a) => (
+              <div key={a.name} className="border-b last:border-b-0">
+                <Row name={a.name} sub={`${a.stations.length} station${a.stations.length === 1 ? "" : "s"}`} swe={a.swe} median={a.median} pct={a.pct}
+                     change7={a.change7} hist={a.hist} onClick={() => setOpen(open === a.name ? null : a.name)} opened={open === a.name} />
+                {open === a.name && a.stations.map((s) => (
+                  <Row key={s.triplet} small name={s.name} sub={[s.elev_ft ? `${s.elev_ft.toLocaleString("en-US")} ft` : null, s.depth != null ? `${s.depth}″ deep` : null].filter(Boolean).join(" · ")}
+                       swe={s.swe} median={s.median} pct={s.pct} change7={s.change7} hist={s.hist} depth={s.depth} />
+                ))}
+              </div>
+            ))}
+          </div>
+        </div>
+        <p className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+          <span className="inline-flex items-center gap-1.5"><span className="relative inline-block h-2 w-10 rounded-full bg-border/70"><span className="absolute inset-y-0 left-0 w-6 rounded-full" style={{ background: SNOW_HUE }} /><span className="absolute -inset-y-1 left-8 w-[2px] rounded bg-foreground" /></span>SWE, with the median as the tick (one scale for all rows)</span>
+          {hasHist && <span>Depth lines share one scale, up to {Math.round(depthMax)}″</span>}
+        </p>
+        <p className="text-xs text-muted-foreground">
+          {sp.source}. Area values are averages across their stations; area percent of median is total SWE over total median SWE, as NRCS builds basin indices. It's left
           blank until the median reaches {sp.minMedian}″, since early-season medians near zero make percentages meaningless.
         </p>
       </CardContent>
