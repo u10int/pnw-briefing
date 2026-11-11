@@ -303,6 +303,16 @@ def _ens_grid(cfg, k, n, snow):
     return {"lat": lat, "lon": lon, "precip_in": pr, "snow_in": sn}
 
 
+def _snow_hist(rng, swe, med, today):
+    """30 days building to today's SWE in a few storm steps, with the median rising smoothly."""
+    n = 31
+    steps = np.sort(rng.random(4)) * n
+    frac = np.array([sum(k >= s for s in steps) / 4 for k in range(n)])
+    sw = np.round(swe * frac, 1)
+    return {"start": (today - timedelta(days=30)).isoformat(), "swe": sw.tolist(),
+            "median": np.round(med * np.linspace(0.35, 1, n), 1).tolist(), "depth": np.round(sw * 3.5).tolist()}
+
+
 def snowpack(cfg):
     """Synthetic early-season snowpack: a little SWE at the high stations, near the median."""
     rng = np.random.default_rng(21)
@@ -317,10 +327,12 @@ def snowpack(cfg):
             sts.append({"name": f"{a['name']} {['Lower', 'Mid', 'Upper'][k]}", "triplet": f"demo{k}", "elev_ft": int(elev),
                         "lat": a["lat"], "lon": a["lon"], "date": today.isoformat(), "swe": swe, "median": med,
                         "pct": round(100 * swe / med) if med >= 1 else None, "change7": round(rng.uniform(-0.3, 1.5), 1),
-                        "depth": round(swe * 3.5)})
+                        "depth": round(swe * 3.5),
+                        "hist": _snow_hist(rng, swe, med, today)})
         sts.sort(key=lambda x: -x["elev_ft"])
         tot, totm = sum(x["swe"] for x in sts), sum(x["median"] for x in sts)
-        areas.append({"name": a["name"], "stations": sts, "swe": round(tot / 3, 1), "median": round(totm / 3, 1),
+        from .snowpack import area_hist
+        areas.append({"name": a["name"], "stations": sts, "hist": area_hist([x["hist"] for x in sts], today - timedelta(days=30)), "swe": round(tot / 3, 1), "median": round(totm / 3, 1),
                       "pct": round(100 * tot / totm) if totm / 3 >= 1 else None,
                       "change7": round(sum(x["change7"] for x in sts) / 3, 1)})
     return {"asOf": today.isoformat(), "minMedian": 1.0, "areas": areas,

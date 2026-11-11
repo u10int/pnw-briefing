@@ -5,6 +5,10 @@ Stations are grouped into the areas listed under `snowpack` in config.yaml (all 
 within `radius_km` of each area's centre). An area's percent of median is total SWE over total
 median SWE across its stations, the way NRCS builds its basin indices. Early in the season the
 medians are tiny, so percentages are only shown once the median reaches `min_median_in`.
+
+Each station and area also carries the last 30 days (`hist`: SWE, its median and snow depth, one
+value a day from `start`), for the page's season-so-far lines; an area's day is the average of
+its stations that reported it.
 """
 from __future__ import annotations
 
@@ -17,6 +21,7 @@ import requests
 from . import report
 
 log = logging.getLogger(__name__)
+HIST_DAYS = 30
 AWDB = "https://wcc.sc.egov.usda.gov/awdbRestApi/services/v1"
 
 
@@ -57,6 +62,36 @@ def _series(js, element):
     return out
 
 
+def _hist(swe_vals, depth_vals, start: date):
+    """{start, swe, median, depth}: one value (or None) a day from start for HIST_DAYS + 1 days."""
+    n = HIST_DAYS + 1
+    out = {"start": start.isoformat(), "swe": [None] * n, "median": [None] * n, "depth": [None] * n}
+    for vals, keys in ((swe_vals, (("value", "swe"), ("median", "median"))), (depth_vals, (("value", "depth"),))):
+        for v in vals:
+            try:
+                i = (date.fromisoformat(v["date"][:10]) - start).days
+            except (KeyError, ValueError):
+                continue
+            if 0 <= i < n:
+                for src, dst in keys:
+                    if v.get(src) is not None:
+                        out[dst][i] = v[src]
+    return out
+
+
+def area_hist(hists, start: date):
+    """Each day's average across the stations that reported it."""
+    n = HIST_DAYS + 1
+    out = {"start": start.isoformat()}
+    for k in ("swe", "median", "depth"):
+        col = []
+        for i in range(n):
+            xs = [h[k][i] for h in hists if h and h[k][i] is not None]
+            col.append(round(sum(xs) / len(xs), 1) if xs else None)
+        out[k] = col
+    return out
+
+
 def fetch(cfg, demo: bool = False, today: date | None = None):
     spec = cfg.get("snowpack") or {}
     areas = spec.get("areas", [])
@@ -78,8 +113,9 @@ def fetch(cfg, demo: bool = False, today: date | None = None):
     if not trips:
         return None
     end = today or date.today()
+    start = end - timedelta(days=HIST_DAYS)
     js = _get("data", {"stationTriplets": ",".join(trips), "elements": "WTEQ,SNWD", "duration": "DAILY",
-                       "beginDate": (end - timedelta(days=9)).isoformat(), "endDate": end.isoformat(),
+                       "beginDate": (end - timedelta(days=HIST_DAYS)).isoformat(), "endDate": end.isoformat(),
                        "centralTendencyType": "MEDIAN", "returnFlags": "false"})
     swe, depth = _series(js, "WTEQ"), _series(js, "SNWD")
 
@@ -97,12 +133,13 @@ def fetch(cfg, demo: bool = False, today: date | None = None):
         week = before[-1] if before else None                      # the latest reading a week or more ago
         d = latest(depth.get(s["stationTriplet"], []))
         med = last.get("median")
+        hist = _hist(sv, depth.get(s["stationTriplet"], []), start)
         return {"name": s["name"], "triplet": s["stationTriplet"], "elev_ft": s.get("elevation"),
                 "lat": s["latitude"], "lon": s["longitude"], "date": last["date"],
                 "swe": last["value"], "median": med,
                 "pct": round(100 * last["value"] / med) if med and med >= min_median else None,
                 "change7": round(last["value"] - week["value"], 1) if week else None,
-                "depth": d["value"] if d and d["date"] == last["date"] else None}
+                "depth": d["value"] if d and d["date"] == last["date"] else None, "hist": hist}
 
     out_areas, as_of = [], None
     for a in areas:
@@ -112,7 +149,7 @@ def fetch(cfg, demo: bool = False, today: date | None = None):
         tot, totm = sum(x["swe"] for x in both), sum(x["median"] for x in both)
         n = len(both) or 1
         ch = [x["change7"] for x in sts if x["change7"] is not None]
-        out_areas.append({"name": a["name"], "stations": sts,
+        out_areas.append({"name": a["name"], "stations": sts, "hist": area_hist([x["hist"] for x in sts], start),
                           "swe": round(tot / n, 1) if both else None, "median": round(totm / n, 1) if both else None,
                           "pct": round(100 * tot / totm) if both and totm / n >= min_median else None,
                           "change7": round(sum(ch) / len(ch), 1) if ch else None})
