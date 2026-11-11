@@ -34,3 +34,22 @@ def test_missing_days_drop_a_year():
         vals[(date(2001, 10, 15) - d0).days + k] = None
     mx = climo.season_maxima(days, vals, date(2026, 11, 10))
     assert 2001 not in mx and 2000 in mx
+
+
+def test_water_year_start():
+    assert climo.water_year_start(date(2026, 11, 10)) == date(2026, 10, 1)
+    assert climo.water_year_start(date(2027, 3, 2)) == date(2026, 10, 1)
+    assert climo.water_year_start(date(2026, 10, 1)) == date(2026, 10, 1)
+
+
+def test_water_year_drops_silent_stations(monkeypatch):
+    def fake(sid, start, end):
+        n = (end - start).days + 1
+        rows = [((start + timedelta(days=k)).isoformat(), 0.1, 0.2) for k in range(n)]
+        if sid == "old":
+            rows = [(d, None if k > 5 else o, nn) for k, (d, o, nn) in enumerate(rows)]
+        return rows
+    monkeypatch.setattr(climo, "_water_year", fake)
+    wy = climo.water_year({"A": "new", "B": "old"}, ["A", "B"], date(2026, 11, 10))
+    assert wy["start"] == "2026-10-01" and len(wy["dates"]) == 40
+    assert list(wy["points"]) == ["A"] and wy["points"]["A"]["normal"][0] == 0.2

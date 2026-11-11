@@ -1,4 +1,5 @@
 import * as React from "react"
+import { CircleAlert, TriangleAlert } from "lucide-react"
 import { CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts"
 
 import { Badge } from "@/components/ui/badge"
@@ -239,9 +240,17 @@ export function WaveForecastCard({ data }: { data: Briefing }) {
 // ------------------------------------------------------------------ tides
 
 /** The flag on a high tide close to flooding: within a foot, or over. */
+/** How close a high tide comes to the gauge's minor flood level: a badge (with its icon) when it's
+ *  over the level or within a foot of it. */
 function TideFlag({ m }: { m: N }) {
   if (m == null || m > 1) return null
-  return <Badge variant={m <= 0 ? "likely" : "possible"} className="mt-0.5 px-1.5 py-0 text-[10px]">{m <= 0 ? `${Math.abs(m).toFixed(1)} ft over` : `${m.toFixed(1)} ft below`}</Badge>
+  const over = m <= 0
+  return (
+    <Badge variant={over ? "likely" : "possible"} className="mt-0.5 gap-0.5 px-1 py-0 text-[10px] [&>svg]:size-2.5">
+      {over ? <CircleAlert aria-hidden /> : <TriangleAlert aria-hidden />}
+      {over ? `${Math.abs(m).toFixed(1)} ft over` : `${m.toFixed(1)} ft below`}
+    </Badge>
+  )
 }
 
 export function TidesCard({ data }: { data: Briefing }) {
@@ -262,7 +271,7 @@ export function TidesCard({ data }: { data: Briefing }) {
             <span key={g.id + h.time}>{i > 0 && "; "}{g.name} {wall(h.time)}, {h.margin! <= 0 ? `${Math.abs(h.margin!).toFixed(1)} ft over` : `${h.margin!.toFixed(1)} ft below`} minor flood</span>))}.</Takeaway>
         })()}
         <CardDescription>
-          Each day's highest high tide at each gauge (feet above mean lower low water, local time), against the gauge's minor flood level, with the water's current running above or below the tide prediction (a rough storm surge) added on. Tides within a foot of flooding are flagged.
+          Each day's highest high tide at each gauge (feet above mean lower low water, local time), against the gauge's minor flood level, with the water's current running above or below the tide prediction (a rough storm surge) added on. Tides over the flood level are flagged in red, and those within a foot of it in amber.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">

@@ -17,6 +17,7 @@ import { extremeTabs, MapCard } from "@/sections/Maps"
 import { EditionNote, Headline, RunStatus } from "@/sections/Overview"
 import { RunTrendCard } from "@/sections/RunTrend"
 import { UnusualCard } from "@/sections/Unusual"
+import { WaterYearCard } from "@/sections/WaterYear"
 import { TrendsCard } from "@/sections/Trends"
 import { TempVerificationCard, VerificationCard } from "@/sections/Verify"
 import { ConvectiveCard } from "@/sections/Convective"
@@ -293,6 +294,7 @@ export default function App() {
                 { id: "observed", title: GROUP_TITLES.observed, show: data.obsReports || data.observed, children: <>
                   <ObsReportsCard data={data} v="precip" />
                   <ObservedCard data={data} />
+                  <WaterYearCard data={data} />
                 </> },
                 { id: "verify", title: GROUP_TITLES.verify, show: data.verification, children: <VerificationCard data={data} /> },
               ]} />
