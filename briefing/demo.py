@@ -515,7 +515,11 @@ def obs_reports(cfg):
         precip[-1] = round(precip[-1] / 3, 2)
         snow = [round(float(x)) for x in rng.gamma(1.2, 3, 4)] if s.get("snotel") else [None] * 4
         gust = [None] * 4 if s.get("snotel") else [int(x) for x in rng.integers(18, 55 if p["kind"] == "coast" else 42, 4)]
-        points[p["name"]] = {"precip": precip, "gust": gust,
+        base = {"pass": 34, "coast": 52}.get(p["kind"], 50)
+        tmax = [int(base + x) for x in rng.integers(-3, 5, 4)]
+        tmin = [int(t - x) for t, x in zip(tmax, rng.integers(6, 14, 4))]
+        tmax[-1] = None if rng.random() < 0.3 else tmax[-1] - 2          # today so far
+        points[p["name"]] = {"precip": precip, "gust": gust, "tmax": tmax, "tmin": tmin,
                              "gustTime": [f"{d.isoformat()}T{int(rng.integers(0, 23)):02d}:15:00" if g else None for d, g in zip(days, gust)],
                              "snow": snow, "stations": [f"{s.get('asos') or s.get('snotel')} (demo)"]}
     now = datetime.now(timezone.utc)
@@ -529,6 +533,12 @@ def obs_reports(cfg):
         {"kind": "rain", "type": "Heavy Rain", "time": (now - timedelta(hours=10)).isoformat(), "lat": 47.9, "lon": -124.35,
          "mag": 3.12, "unit": "inch", "measured": True, "place": "2 SW Forks", "county": "Clallam", "state": "WA", "source": "CoCoRaHS",
          "remark": "48 hour total.", "near": "Forks"},
+        {"kind": "low", "type": "Low Temperature", "time": (now - timedelta(hours=16)).isoformat(), "lat": 47.42, "lon": -121.43,
+         "mag": 24, "unit": "F", "measured": None, "place": "Snoqualmie Pass", "county": "King County", "state": None, "source": None,
+         "remark": None, "near": "Snoqualmie Pass", "summary": {"office": "SEW", "title": "Low Temperature Reports", "issued": (now - timedelta(hours=12)).isoformat()}},
+        {"kind": "low", "type": "Low Temperature", "time": (now - timedelta(hours=17)).isoformat(), "lat": None, "lon": None,
+         "mag": 31, "unit": "F", "measured": None, "place": "Corvallis Airport", "county": "Benton County", "state": None, "source": "AWOS",
+         "remark": None, "near": "Corvallis", "summary": {"office": "PQR", "title": "Low Temperature Reports", "issued": (now - timedelta(hours=12)).isoformat()}},
         {"kind": "damage", "type": "Non-Tstm Wnd Dmg", "time": (now - timedelta(hours=19)).isoformat(), "lat": 47.6, "lon": -122.3,
          "mag": None, "unit": None, "measured": False, "place": "Seattle", "county": "King", "state": "WA", "source": "Public",
          "remark": "Large tree down across power lines.", "near": "Seattle"},

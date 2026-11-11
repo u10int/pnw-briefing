@@ -137,8 +137,9 @@ export interface Coast {
 }
 
 export interface ObsReport {
-  kind: "rain" | "snow" | "ice" | "gust" | "damage" | "flood"; type: string; time: string | null
-  lat: number; lon: number; mag: number | null; unit: string | null; measured: boolean | null
+  kind: "rain" | "snow" | "ice" | "gust" | "damage" | "flood" | "high" | "low"; type: string; time: string | null
+  /** null for temperature summary rows that give a provider in place of a position (NWS Portland) */
+  lat: number | null; lon: number | null; mag: number | null; unit: string | null; measured: boolean | null
   place: string | null; county: string | null; state: string | null; source: string | null; remark: string | null
   near: string | null                                   // the forecast location within 30 km
   elev_ft?: number | null
@@ -149,7 +150,8 @@ export interface ObsReport {
  *  local storm reports. */
 export interface ObsReports {
   days: string[]; today: string; source: string
-  points: Record<string, { precip: N[]; gust: N[]; gustTime: (string | null)[]; snow: N[]; stations: string[] }>
+  /** tmax, tmin: each day's observed high and low (°F); absent before they were added */
+  points: Record<string, { precip: N[]; gust: N[]; gustTime: (string | null)[]; snow: N[]; tmax?: N[]; tmin?: N[]; stations: string[] }>
   reports: ObsReport[]
   reportHours?: number                                  // how long after the event a report is shown
 }
