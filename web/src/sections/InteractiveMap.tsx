@@ -4,7 +4,8 @@ import type { GeoJSONSource, MapMouseEvent, StyleSpecification } from "maplibre-
 import "maplibre-gl/dist/maplibre-gl.css"
 // MapLibre runs a web worker for vector/GeoJSON work; have Vite bundle it and tell MapLibre where it is.
 import { summarize } from "@/sections/Hazards"
-import { ChevronRight, Pause, Play, SlidersHorizontal } from "lucide-react"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { ChevronRight, CircleHelp, Pause, Play, SlidersHorizontal } from "lucide-react"
 import { Popover } from "radix-ui"
 
 import { Button } from "@/components/ui/button"
@@ -1630,11 +1631,42 @@ function ModelSelect({ options, value, onChange, label }: { options: { model: st
   )
 }
 
-function Toggle({ id, label, checked, onChange }: { id: string; label: string; checked: boolean; onChange: (v: boolean) => void }) {
+function Toggle({ id, label, checked, onChange, help }: { id: string; label: string; checked: boolean; onChange: (v: boolean) => void; help?: string }) {
   return (
     <div className="flex items-center gap-2">
       <Switch id={id} checked={checked} onCheckedChange={onChange} />
       <Label htmlFor={id}>{label}</Label>
+      {help && <Help label={label} text={help} />}
+    </div>
+  )
+}
+
+/** A small help icon after a control's label: what the control does, on hover or focus. */
+function Help({ label, text }: { label: string; text: string }) {
+  // hover or focus on a mouse; a tap toggles it on a touch screen, which has no hover
+  const [open, setOpen] = React.useState(false)
+  return (
+    <Tooltip open={open} onOpenChange={setOpen}>
+      <TooltipTrigger asChild>
+        <button type="button" aria-label={`About ${label}`} onClick={() => setOpen((o) => !o)}
+          className="-ml-0.5 rounded-full text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
+          <CircleHelp className="size-3.5" aria-hidden />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent collisionPadding={12} className="max-w-[260px] text-xs leading-snug">{text}</TooltipContent>
+    </Tooltip>
+  )
+}
+
+/** A labelled control in the 3D panel: label, help icon, then the control. */
+function Control({ label, help, labelClass = "", children }: { label: string; help: string; labelClass?: string; children: React.ReactNode }) {
+  return (
+    <div className="flex items-center gap-2.5 text-sm max-sm:w-full">
+      <span className={`flex items-center gap-1.5 whitespace-nowrap max-sm:min-w-[118px] ${labelClass}`}>
+        <Label className="font-normal">{label}</Label>
+        <Help label={label.replace(/×.*/, "stretch")} text={help} />
+      </span>
+      {children}
     </div>
   )
 }
@@ -2067,42 +2099,10 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
                   }
                 }} label="Model" />}
                 {!threeD && <Toggle id="compare-h" label="Compare" checked={compare} onChange={setCompare} />}
-                <Toggle id="three-d" label="3D" checked={threeD} onChange={(v) => { setThreeD(v); if (v) setCompare(false) }} />
+                <Toggle id="three-d" label="3D" checked={threeD} onChange={(v) => { setThreeD(v); if (v) setCompare(false) }}
+                  help="Tilt the map and draw a model's forecast through the depth of the atmosphere. Its controls appear below." />
               </div>
               {compare && !threeD && hB && <div className="flex max-sm:w-full"><ModelSelect options={layerModels.filter((m) => m.model !== hA)} value={hB} onChange={setHOther} label="Compare with" /></div>}
-              {threeD && volEntry && volName && (
-                <div className="flex flex-wrap items-center gap-x-5 gap-y-3 max-sm:w-full">
-                  <Select value={volName} onValueChange={(v) => setVolVar(v as VolVar)}>
-                    <SelectTrigger className="w-full sm:w-[170px]" aria-label="3D field"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {VOL_ORDER.filter((v) => volVarOf(volEntry, v)).map((v) => <SelectItem key={v} value={v}>{volLabel(volEntry, v)}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                  {vols!.length > 1 && (
-                    <Select value={volEntry.model} onValueChange={setVolModel}>
-                      <SelectTrigger className="w-full sm:w-[140px]" aria-label="3D model"><SelectValue /></SelectTrigger>
-                      <SelectContent>{vols!.map((v) => <SelectItem key={v.model} value={v.model}>{v.model}</SelectItem>)}</SelectContent>
-                    </Select>
-                  )}
-                  {hasUV && <Toggle id="vol-wind" label="Wind particles" checked={volWindOn} onChange={setVolWindOn} />}
-                  {layer === "radar" && <Toggle id="vol-precip" label="Falling precip" checked={volPrecip} onChange={setVolPrecip} />}
-                  <Toggle id="vol-xsec" label="Cross-section" checked={xsecOn} onChange={(v) => { setXsecOn(v); if (!v) setPicking(null) }} />
-                  <Toggle id="vol-terrain" label="3D terrain" checked={terr3d} onChange={(v) => { setTerr3d(v); if (v && exag > 10) setExag(8) }} />
-                  {terr3d && <Toggle id="vol-snow" label="Snow level" checked={snowOn} onChange={setSnowOn} />}
-                  <div className="flex items-center gap-2.5 text-sm max-sm:w-full">
-                    <Label className="font-normal whitespace-nowrap">Height ×{exag}</Label>
-                    <Slider className="w-[120px] max-sm:flex-1" value={[exag]} min={5} max={60} step={5} onValueChange={([v]) => setExag(v)} aria-label="Vertical stretch" />
-                  </div>
-                  <div className="flex items-center gap-2.5 text-sm max-sm:w-full">
-                    <Label className="min-w-[96px] font-normal whitespace-nowrap tabular-nums">
-                      {(() => { const [lo, hi] = zRange ?? [0, volEntry.topKm]; return lo === 0 && hi === volEntry.topKm ? `All heights` : `${lo} – ${hi} km` })()}
-                    </Label>
-                    <Slider className="w-[150px] max-sm:flex-1" value={zRange ?? [0, volEntry.topKm]} min={0} max={volEntry.topKm} step={0.5} minStepsBetweenThumbs={1}
-                      onValueChange={(v) => setZRange(v[0] === 0 && v[1] === volEntry.topKm ? null : [v[0], v[1]])}
-                      getAriaValueText={(v) => `${v} km`} aria-label="Heights shown" />
-                  </div>
-                </div>
-              )}
             </>
           )}
           <div className="max-sm:w-full sm:ml-auto">
@@ -2140,6 +2140,51 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
             />
           </div>
         </div>
+
+        {mode === "hourly" && threeD && volEntry && volName && (
+          <div className="space-y-3 rounded-lg border bg-muted/30 p-3">
+            <div className="text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">3D view</div>
+            <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
+              <Control label="Field" help="What the 3D view draws through the depth of the atmosphere: clouds, water and ice, humidity, moisture flow, rising and sinking air, the freezing level, temperature or wind.">
+                <Select value={volName} onValueChange={(v) => setVolVar(v as VolVar)}>
+                  <SelectTrigger className="min-w-0 flex-1 sm:w-[190px] sm:flex-none" aria-label="3D field"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {VOL_ORDER.filter((v) => volVarOf(volEntry, v)).map((v) => <SelectItem key={v} value={v}>{volLabel(volEntry, v)}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </Control>
+              {vols!.length > 1 && (
+                <Control label="Model" help="Whose pressure-level forecast to draw in 3D (GFS or ECMWF). It can differ from the 2D layer's model.">
+                  <Select value={volEntry.model} onValueChange={setVolModel}>
+                    <SelectTrigger className="min-w-0 flex-1 sm:w-[140px] sm:flex-none" aria-label="3D model"><SelectValue /></SelectTrigger>
+                    <SelectContent>{vols!.map((v) => <SelectItem key={v.model} value={v.model}>{v.model}</SelectItem>)}</SelectContent>
+                  </Select>
+                </Control>
+              )}
+              <Control label={`Height ×${exag}`} help="How much heights are stretched, so the atmosphere's 12 km show against a region hundreds of miles across. With 3D terrain on, the mountains stretch by the same amount.">
+                <Slider className="w-[120px] max-sm:flex-1" value={[exag]} min={5} max={60} step={5} onValueChange={([v]) => setExag(v)} aria-label="Vertical stretch" />
+              </Control>
+              <Control label={(() => { const [lo, hi] = zRange ?? [0, volEntry.topKm]; return lo === 0 && hi === volEntry.topKm ? "All heights" : `${lo} – ${hi} km` })()} labelClass="sm:min-w-[96px] tabular-nums"
+                help="Draw only the slab of the atmosphere between these heights (km above sea level), to see inside it or pick out one layer.">
+                <Slider className="w-[150px] max-sm:flex-1" value={zRange ?? [0, volEntry.topKm]} min={0} max={volEntry.topKm} step={0.5} minStepsBetweenThumbs={1}
+                  onValueChange={(v) => setZRange(v[0] === 0 && v[1] === volEntry.topKm ? null : [v[0], v[1]])}
+                  getAriaValueText={(v) => `${v} km`} aria-label="Heights shown" />
+              </Control>
+            </div>
+            <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
+              {hasUV && <Toggle id="vol-wind" label="Wind particles" checked={volWindOn} onChange={setVolWindOn}
+                help="Particles moving with the wind at 850, 700, 500, 300 and 250 mb, coloured by speed (or by moisture flow in that view)." />}
+              {layer === "radar" && <Toggle id="vol-precip" label="Falling precip" checked={volPrecip} onChange={setVolPrecip}
+                help="Rain and snow falling wherever the radar layer shows precipitation, thicker where it's heavier and coloured by type." />}
+              <Toggle id="vol-xsec" label="Cross-section" checked={xsecOn} onChange={(v) => { setXsecOn(v); if (!v) setPicking(null) }}
+                help="Slice the 3D field along a line, drawn under the map and as a curtain in 3D. Pick a preset line or draw your own." />
+              <Toggle id="vol-terrain" label="3D terrain" checked={terr3d} onChange={(v) => { setTerr3d(v); if (v && exag > 10) setExag(8) }}
+                help="Raise the mountains, at the same stretch as the 3D data, with the map's colours draped over them." />
+              {terr3d && <Toggle id="vol-snow" label="Snow level" checked={snowOn} onChange={setSnowOn}
+                help="Shade the terrain white above the model's snow level, about 1,000 ft below the wet-bulb freezing level." />}
+            </div>
+          </div>
+        )}
 
         {mode === "hourly" && times.length > 0 && <TimeBar times={times} clock={clock} playing={playing} setPlaying={setPlaying} />}
 
