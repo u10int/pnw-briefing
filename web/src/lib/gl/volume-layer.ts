@@ -43,6 +43,7 @@ export interface VolumeWind {
 export interface AxisPoint { x: number; y: number; label: string; side: "left" | "right" }
 
 const EARTH_CIRC = 2 * Math.PI * 6371008.8
+const GROUND_KM = 5             // the ground texture's range (above the region's highest peak)
 
 // ------------------------------------------------------------------ small 4×4 helpers (column-major)
 type M4 = Float64Array
@@ -101,6 +102,9 @@ uniform vec3 uSize;             // nx, ny, nz
 uniform int uSteps;
 uniform vec2 uZr;               // the heights drawn, as fractions of the box's height
 uniform bool uLit;              // shade by what lies above (clouds and the like); else flat colour
+uniform bool uHasGround;        // the terrain: rays stop where they reach it
+uniform sampler2D uGround;      // terrain height over the box (rows north to south), as a fraction of GROUND_KM
+uniform float uGroundScale;     // GROUND_KM / the box's top (km)
 // surfaces where the field crosses set values (isotherms, isotachs, the freezing level), lit by
 // the field's gradient; coloured by height (uHeight) when uIsoByHeight
 uniform int uIsoN;
@@ -155,6 +159,7 @@ void main() {
     if (t > tf || acc.a > 0.97) break;
     vec3 p = ro + rd * t;
     vec3 q = texPos(p);
+    if (uHasGround && p.z < texture(uGround, vec2(p.x, 1.0 - q.y)).r * uGroundScale) break;   // into the mountains
     if (q.y >= 0.0 && q.y <= 1.0) {
       float v = val(q);
       // a surface between the last sample and this one: composite it first, where it falls
@@ -286,6 +291,9 @@ export class VolumeLayer implements CustomLayerInterface {
   private fboSize = [0, 0]
   private lastKey = ""
   private heightTex?: WebGLTexture
+  // ---- the terrain, when the map shows it in 3D
+  private groundTex?: WebGLTexture
+  private ground: { width: number; height: number; km: Float32Array; fresh: boolean } | null = null
   private heightKey = ""
   private vao?: WebGLVertexArrayObject
   private lineVao?: WebGLVertexArrayObject
@@ -336,11 +344,13 @@ export class VolumeLayer implements CustomLayerInterface {
     this.fbo = gl.createFramebuffer()!
     this.fboTex = gl.createTexture()!
     this.heightTex = gl.createTexture()!
+    this.groundTex = gl.createTexture()!
     gl.bindTexture(gl.TEXTURE_2D, this.heightTex)
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([255, 255, 255, 255]))
     this.trailProg = program(gl, TRAIL_VS, TRAIL_FS)
     this.precip = new PrecipFx(gl)
     this.precip.setSource(this.precipDraw, this.precipT)
+    if (this.ground) this.precip.setGround((x, y) => this.groundAt(x, y))
     this.trailVao = gl.createVertexArray()!
     gl.bindVertexArray(this.trailVao)
     this.trailBuf = gl.createBuffer()!
@@ -481,6 +491,7 @@ export class VolumeLayer implements CustomLayerInterface {
       if (this.age[i] > this.life[i]) this.spawn(i)
       this.age[i] += dtf
       const x = P[b], y = P[b + 1], z = P[b + 2]
+      if (this.ground && z < this.groundAt(x, y)) { this.spawn(i); continue }    // under the mountains
       const [u, v] = this.sampleWind(x, y, z, latOf)
       this.speed[i] = Math.hypot(u, v) * 2.23694
       P.copyWithin(b + 3, b, b + (TRAIL - 1) * 3)          // shift the history back one
@@ -533,6 +544,25 @@ export class VolumeLayer implements CustomLayerInterface {
     if (!a || !b) this.curtain = null
     else this.curtain = { a, b, img: img ?? this.curtain?.img ?? null, fresh: !!img || !!this.curtain?.fresh }
     this.map?.triggerRepaint()
+  }
+  /** Terrain heights (km) over the box (rows north to south), or null: rays, particles and falling
+   *  precipitation stop at the ground. */
+  setGround(gr: { width: number; height: number; km: Float32Array } | null) {
+    this.ground = gr ? { ...gr, fresh: true } : null
+    this.precip?.setGround(gr ? (x, y) => this.groundAt(x, y) : null)
+    this.lastKey = ""
+    this.map?.triggerRepaint()
+  }
+  /** Terrain height at a point of the box, as a fraction of the box's height (0 without terrain). */
+  groundAt(x: number, y: number) {
+    const G = this.ground, d = this.draw
+    if (!G || !d) return 0
+    const g = d.grid
+    const yN = mercY(g.lat[1]), yS = mercY(g.lat[0])
+    const lat = (Math.atan(Math.sinh(Math.PI * (1 - 2 * (yN + y * (yS - yN))))) * 180) / Math.PI
+    const gx = Math.min(G.width - 1, Math.max(0, Math.floor(x * G.width)))
+    const gy = Math.min(G.height - 1, Math.max(0, Math.floor(((g.lat[1] - lat) / (g.lat[1] - g.lat[0])) * G.height)))
+    return G.km[gy * G.width + gx] / g.topKm
   }
   setExaggeration(x: number) {
     this.exaggeration = x
@@ -686,6 +716,22 @@ export class VolumeLayer implements CustomLayerInterface {
     gl.activeTexture(gl.TEXTURE3)
     gl.bindTexture(gl.TEXTURE_2D, this.heightTex!)
     gl.uniform1i(p.u("uHeight"), 3)
+    // the terrain (its own unit too)
+    gl.activeTexture(gl.TEXTURE4)
+    gl.bindTexture(gl.TEXTURE_2D, this.groundTex!)
+    gl.uniform1i(p.u("uGround"), 4)
+    const G = this.ground
+    if (G?.fresh) {
+      const bytes = new Uint8Array(G.km.length)
+      for (let i = 0; i < bytes.length; i++) bytes[i] = Math.round(Math.min(1, G.km[i] / GROUND_KM) * 255)
+      resetUnpack(gl)
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, G.width, G.height, 0, gl.RED, gl.UNSIGNED_BYTE, bytes)
+      for (const [k, v] of [[gl.TEXTURE_MIN_FILTER, gl.LINEAR], [gl.TEXTURE_MAG_FILTER, gl.LINEAR], [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE]])
+        gl.texParameteri(gl.TEXTURE_2D, k, v)
+      G.fresh = false
+    }
+    gl.uniform1i(p.u("uHasGround"), G ? 1 : 0)
+    gl.uniform1f(p.u("uGroundScale"), GROUND_KM / g.topKm)
     if (d.heightLut) {
       if (this.heightKey !== d.key) {
         resetUnpack(gl)

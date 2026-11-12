@@ -27,6 +27,7 @@ import type { MapRequest } from "@/lib/maplink"
 import { GridLayer, type GridDraw } from "@/lib/gl/grid-layer"
 import { ParticleLayer, type WindDraw } from "@/lib/gl/particle-layer"
 import { VolumeLayer } from "@/lib/gl/volume-layer"
+import { corners, GridDrape, groundFor, Snowline, snowLevels } from "@/lib/gl/terrain"
 import { type LonLat, SECTION_PRESETS, type SectionLine } from "@/lib/xsection"
 import { CrossSection } from "@/sections/CrossSection"
 import { frac, frzColor, heightLut, hexRgb, ISOS, legendStops, loadVolume, lutFor, mfluxRgb, SOURCE, transfer, unpack, useVolumes, VIEW_LABEL, VOL_ORDER,
@@ -263,20 +264,26 @@ const volLabel = (e: VolumeEntry, n: VolVar) => VIEW_LABEL[n] ?? e.vars[SOURCE[n
 /** Heights to release wind particles at: the standard levels, at the model's average heights. */
 const PARTICLE_HPA = [850, 700, 500, 300, 250]
 
+/** 3D terrain: its vertical stretch (the same as the volume's), and the snow level to shade on it. */
+export interface PaneTerrain { exaggeration: number; snow: { entry: VolumeEntry; levels: Float32Array[] } | null }
+
 /** The cross-section on the map: its line (and the points picked so far while drawing one). */
 interface PaneSection { line: SectionLine | null; picked: LonLat[] | null; sink: React.MutableRefObject<{ set?: (img: HTMLCanvasElement) => void }> }
 
-function MapPane({ data, view, clock, opacity, smooth, particles, particleColor, sync, terrain, sat, fronts, reports, fires, vol = null, xsec = null, onPick = null }: {
+function MapPane({ data, view, clock, opacity, smooth, particles, particleColor, sync, terrain, sat, fronts, reports, fires, vol = null, xsec = null, onPick = null, terrain3d = null }: {
   data: Briefing; view: View | null; clock: Clock; opacity: number; smooth: boolean
   particles: boolean; particleColor: [number, number, number, number]; sync: ReturnType<typeof useCameraSync>
   terrain: boolean; sat: { kind: SatKind; times: SatTimes } | null; fronts: Fronts | null; reports: ObsReport[] | null
   fires: Wildfire | null; vol?: PaneVolume | null
   xsec?: PaneSection | null; onPick?: ((ll: LonLat) => void) | null
+  terrain3d?: PaneTerrain | null
 }) {
   const el = React.useRef<HTMLDivElement>(null)
   const axisEl = React.useRef<HTMLDivElement>(null)
   const ready = React.useRef<Promise<maplibregl.Map> | null>(null)
   const layers = React.useRef<{ grid: GridLayer; particles: ParticleLayer; volume: VolumeLayer } | null>(null)
+  // the 2D grid and the snow level as images MapLibre drapes over the 3D terrain (made with the map)
+  const drape = React.useRef<{ grid: GridDrape; snow: Snowline } | null>(null)
   if (!layers.current) layers.current = { grid: new GridLayer("grid"), particles: new ParticleLayer("particles"), volume: new VolumeLayer("volume") }
   const loaded = React.useRef<{ v: Loaded | null; t: number }>({ v: null, t: 0 })
   const overlays = React.useRef<Overlays | null>(null)
@@ -321,6 +328,15 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
       // terrain shading over the weather colours (shadows only darken, so the colours still read)
       m.addSource("dem", { type: "raster-dem", tiles: [DEM_TILES], tileSize: 256, maxzoom: 12, encoding: "terrarium",
                            attribution: "Terrain: Mapzen / AWS Terrain Tiles" })
+      // 3D terrain (its own source: MapLibre warns when terrain and hillshade share one), and the
+      // images draped over it: the weather colours, then the snow level, under the hillshade
+      m.addSource("dem3d", { type: "raster-dem", tiles: [DEM_TILES], tileSize: 256, maxzoom: 12, encoding: "terrarium" })
+      const box = { west: d.lon_min, south: d.lat_min, east: d.lon_max, north: d.lat_max }
+      drape.current = { grid: new GridDrape(box), snow: new Snowline(box) }
+      m.addSource("drape", { type: "canvas", canvas: drape.current.grid.canvas, coordinates: corners(box), animate: false })
+      m.addLayer({ id: "drape", type: "raster", source: "drape", layout: { visibility: "none" }, paint: { "raster-fade-duration": 0, "raster-resampling": "linear" } }, labels)
+      m.addSource("snowline", { type: "canvas", canvas: drape.current.snow.canvas, coordinates: corners(box), animate: false })
+      m.addLayer({ id: "snowline", type: "raster", source: "snowline", layout: { visibility: "none" }, paint: { "raster-fade-duration": 0 } }, labels)
       m.addLayer({ id: "hillshade", type: "hillshade", source: "dem",
                    layout: { visibility: terrainRef.current ? "visible" : "none" },
                    paint: { "hillshade-exaggeration": 0.45, "hillshade-shadow-color": "rgba(20, 24, 30, 0.55)",
@@ -458,10 +474,11 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
         first = false
         loaded.current = { v, t }
         grid.setDraw(v?.draw ?? null, t)
+        drape.current?.grid.setDraw(v?.draw ?? null, t)
         layers.current!.volume.setPrecip(v?.draw ?? null, t)
         setStatus(v?.draw || v?.bare ? { kind: "ready" } : { kind: "empty", note: v?.note })
       },
-      (t) => { loaded.current.t = t; grid.setT(t); layers.current!.volume.setPrecipT(t) },
+      (t) => { loaded.current.t = t; grid.setT(t); drape.current?.grid.setT(t); layers.current!.volume.setPrecipT(t) },
       () => { first = false; setStatus({ kind: "error" }) },
       (on) => clock.hold(gridCh, on),
     )
@@ -495,8 +512,74 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
     return () => { unsub(); clearTimeout(slow); gridCh.cancel(); ovCh.cancel(); windCh.cancel() }
   }, [view?.key, particles])
 
-  React.useEffect(() => { layers.current!.grid.setOpacity(opacity) }, [opacity])
-  React.useEffect(() => { layers.current!.grid.setSmooth(smooth) }, [smooth])
+  React.useEffect(() => { layers.current!.grid.setOpacity(opacity); drape.current?.grid.setOpacity(opacity) }, [opacity])
+  React.useEffect(() => { layers.current!.grid.setSmooth(smooth); drape.current?.grid.setSmooth(smooth) }, [smooth])
+
+  // ---- 3D terrain: MapLibre's terrain at the volume's stretch, with the weather colours and the
+  // snow level draped over it in place of the flat grid; the volume, particles and falling
+  // precipitation stop at the ground
+  const terrOn = !!terrain3d
+  const terrEx = terrain3d?.exaggeration ?? 1
+  React.useEffect(() => {
+    let off = false
+    ready.current?.then((m) => {
+      if (off) return
+      const D = drape.current
+      // a canvas source re-reads its canvas only while "playing": play for one frame per change
+      const bump = (id: string) => {
+        const src = m.getSource(id) as maplibregl.CanvasSource | undefined
+        if (!src) return
+        src.play(); m.triggerRepaint()
+        m.once("render", () => src.pause())
+      }
+      if (terrOn && D?.grid.ok) {
+        D.grid.onFrame = () => bump("drape")
+        D.grid.render()
+        m.setTerrain({ source: "dem3d", exaggeration: terrEx })
+        m.setLayoutProperty("grid", "visibility", "none")
+        m.setLayoutProperty("drape", "visibility", "visible")
+      } else {
+        if (D) D.grid.onFrame = null
+        if (m.getTerrain()) m.setTerrain(null)
+        m.setLayoutProperty("grid", "visibility", "visible")
+        m.setLayoutProperty("drape", "visibility", "none")
+      }
+    })
+    return () => { off = true }
+  }, [terrOn, terrEx])
+  // the volume stops at the ground
+  const volModel = vol?.entry.model
+  React.useEffect(() => {
+    const L = layers.current!.volume
+    if (!terrOn || !vol) { L.setGround(null); return }
+    let live = true
+    groundFor(vol.entry).then((gr) => { if (live) L.setGround(gr) }).catch(() => {})
+    return () => { live = false; L.setGround(null) }
+  }, [terrOn, volModel])
+  // the snow level, following the clock
+  const snow = terrain3d?.snow ?? null
+  React.useEffect(() => {
+    let off = false
+    const D = drape.current
+    ready.current?.then((m) => {
+      if (off) return
+      m.setLayoutProperty("snowline", "visibility", terrOn && snow ? "visible" : "none")
+    })
+    if (!D || !terrOn || !snow) return () => { off = true }
+    D.snow.setLevels(snow.entry, snow.levels)
+    const ms = msOf(snow.entry.times)
+    const paint = () => {
+      const pos = posOf(ms, clock.time ?? ms[0]), i0 = Math.floor(pos)
+      if (D.snow.render(i0, Math.min(i0 + 1, ms.length - 1), pos - i0))
+        ready.current?.then((m) => {
+          const src = m.getSource("snowline") as maplibregl.CanvasSource | undefined
+          if (src) { src.play(); m.triggerRepaint(); m.once("render", () => src.pause()) }
+        })
+    }
+    D.snow.loadTerrain().then(() => { if (!off) paint() }).catch(() => {})
+    const un = clock.subscribe(paint)
+    return () => { off = true; un() }
+  }, [terrOn, snow])
   React.useEffect(() => {
     layers.current!.particles.setEnabled(particles)
     // arrows and particles both show the wind; particles replace the arrows when on
@@ -775,7 +858,7 @@ const VOL_NOTES: Record<VolVar, string> = {
 }
 /** How to read the 3D field: shell swatches for temperature and wind, a height scale for the freezing
  *  level, otherwise the colours over the useful range (paler where nearly see-through); then the box. */
-function VolumeLegend({ entry, name, exaggeration, particles, precip }: { entry: VolumeEntry; name: VolVar; exaggeration: number; particles: boolean; precip: boolean }) {
+function VolumeLegend({ entry, name, exaggeration, particles, precip, terrain = false, snow = false }: { entry: VolumeEntry; name: VolVar; exaggeration: number; particles: boolean; precip: boolean; terrain?: boolean; snow?: boolean }) {
   const v = volVarOf(entry, name)!
   const { show, ticks } = legendStops(name, v)
   const N = 48
@@ -815,6 +898,8 @@ function VolumeLegend({ entry, name, exaggeration, particles, precip }: { entry:
       <p className="text-xs text-muted-foreground">
         {VOL_NOTES[name]} {name === "frz" ? "" : v.note ?? ""}
         {particles && pk.length > 0 && <> Particles trace the wind at {pk.map((l) => `${l.hPa} mb`).join(", ")} (about {pk.map((l) => l.km.toFixed(1)).join(", ")} km), coloured by speed like the map's wind.</>}
+        {terrain && <> 3D terrain: the mountains at the same stretch as the 3D data (×{exaggeration}), so heights in the air and on the ground line up, with the map's colours draped over them; the 3D data, particles and falling precipitation stop at the ground.</>}
+        {snow && <> Snow level: the terrain above the model's snow level (about 1,000 ft below where the wet-bulb temperature reaches freezing) is shaded white.</>}
         {precip && <> Falling precipitation comes from the radar layer below: rain in streaks, snow drifting down, sleet and freezing rain in between, wherever the model's precipitation rate is 0.01 in/h or more (or, for a model without a rate, its simulated radar about 15 dBZ or more), thicker where it's heavier, in the radar legend's colours for each type. It falls from about 3 km.</>}
         {" "}{entry.model} on pressure levels, 0 – {entry.topKm} km, heights stretched ×{exaggeration}: kilometres up one edge of the box, the
         model's average pressure-level heights up the other. Steps every {hours} hours through {timeLabel(entry.times[steps - 1])}, blended in between. Right-drag (or Ctrl-drag) to tilt and turn, two fingers on a phone; drag the compass to tilt, click it to face north.
@@ -1822,6 +1907,21 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
     setXsecLine({ id: "custom", label: "Your line", a: picking[0], b: ll, aName: "A", bName: "B" })
     setPicking(null)
   }
+  // 3D terrain, and the snow level shaded on it (from the temperature and humidity volumes)
+  const [terr3d, setTerr3d] = React.useState(false)
+  const [snowOn, setSnowOn] = React.useState(true)
+  const terrShown = volOn && terr3d
+  const snowEntry = terrShown && snowOn && volEntry?.vars.temp && volEntry?.vars.rh ? volEntry : null
+  const [snowData, setSnowData] = React.useState<{ model: string; levels: Float32Array[] } | null>(null)
+  React.useEffect(() => {
+    if (!snowEntry || snowData?.model === snowEntry.model) return
+    let live = true
+    Promise.all([loadVolume(snowEntry.vars.temp), loadVolume(snowEntry.vars.rh)])
+      .then(([t, h]) => { if (live) setSnowData({ model: snowEntry.model, levels: snowLevels(snowEntry, t, h) }) }).catch(() => {})
+    return () => { live = false }
+  }, [snowEntry?.model])
+  const paneTerrain: PaneTerrain | null = terrShown
+    ? { exaggeration: exag, snow: snowEntry && snowData?.model === snowEntry.model ? { entry: snowEntry, levels: snowData.levels } : null } : null
   const showB = compare && !volOn && (mode === "hourly" || perModel)
   const viewB = !showB ? null : mode === "totals"
     ? variable === "ar" ? (data.arCoast ? arView(data.arCoast, pickOther(other), winLabel(d)) : null)
@@ -1924,6 +2024,8 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
                   {hasUV && <Toggle id="vol-wind" label="Wind particles" checked={volWindOn} onChange={setVolWindOn} />}
                   {layer === "radar" && <Toggle id="vol-precip" label="Falling precip" checked={volPrecip} onChange={setVolPrecip} />}
                   <Toggle id="vol-xsec" label="Cross-section" checked={xsecOn} onChange={(v) => { setXsecOn(v); if (!v) setPicking(null) }} />
+                  <Toggle id="vol-terrain" label="3D terrain" checked={terr3d} onChange={(v) => { setTerr3d(v); if (v && exag > 10) setExag(8) }} />
+                  {terr3d && <Toggle id="vol-snow" label="Snow level" checked={snowOn} onChange={setSnowOn} />}
                   <div className="flex items-center gap-2.5 text-sm max-sm:w-full">
                     <Label className="font-normal whitespace-nowrap">Height ×{exag}</Label>
                     <Slider className="w-[120px] max-sm:flex-1" value={[exag]} min={5} max={60} step={5} onValueChange={([v]) => setExag(v)} aria-label="Vertical stretch" />
@@ -1980,7 +2082,7 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
 
         <div className={`grid gap-3 ${showB ? "lg:grid-cols-2" : ""}`}>
           <MapPane data={data} view={viewA} clock={clock} opacity={opacity} smooth={smooth} particles={showParticles} particleColor={ink} sync={sync} terrain={terrain} sat={sat} fronts={frontsOn} reports={reportsOn} fires={firesOn} vol={paneVol}
-            xsec={volOn && xsecOn ? { line: xsecLine, picked: picking, sink: xsecSink } : null} onPick={volOn && xsecOn && picking ? onPick : null} />
+            xsec={volOn && xsecOn ? { line: xsecLine, picked: picking, sink: xsecSink } : null} onPick={volOn && xsecOn && picking ? onPick : null} terrain3d={paneTerrain} />
           {showB && <MapPane data={data} view={viewB} clock={clock} opacity={opacity} smooth={smooth} particles={showParticles} particleColor={ink} sync={sync} terrain={terrain} sat={sat} fronts={frontsOn} reports={reportsOn} fires={firesOn} />}
         </div>
 
@@ -2026,7 +2128,7 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
           <div className="space-y-2">
             {volOn && vols && !vols.length && <p className="text-xs text-muted-foreground">This briefing has no 3D data (it was built before the 3D view, or the models' pressure levels couldn't be read).</p>}
             {volOn && volError && <p className="text-xs text-muted-foreground">The 3D data could not be loaded.</p>}
-            {paneVol && <VolumeLegend entry={paneVol.entry} name={paneVol.name} exaggeration={exag} particles={!!paneVol.wind} precip={paneVol.precip} />}
+            {paneVol && <VolumeLegend entry={paneVol.entry} name={paneVol.name} exaggeration={exag} particles={!!paneVol.wind} precip={paneVol.precip} terrain={!!paneTerrain} snow={!!paneTerrain?.snow} />}
             {layer === "radar" && <RadarLegend withRefc={!!entriesA.refc} />}
             {smooth && layer === "radar" && !entriesA.refc && <p className="text-xs text-muted-foreground">Precipitation type is a category, so it isn't smoothed.</p>}
             {smooth && layer === "radar" && entriesA.refc && entriesA.ptype && <p className="text-xs text-muted-foreground">Reflectivity is smoothed; precipitation type keeps each model cell's category.</p>}
