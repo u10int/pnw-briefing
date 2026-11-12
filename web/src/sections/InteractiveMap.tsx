@@ -1842,6 +1842,44 @@ function Toggle({ id, label, checked, onChange, help }: { id: string; label: str
   )
 }
 
+/** A titled group of settings in the 3D panel. */
+function Group({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section className="min-w-0 space-y-2">
+      <h4 className="text-xs font-semibold text-foreground/80">{title}</h4>
+      <div className="space-y-2">{children}</div>
+    </section>
+  )
+}
+/** One setting: its label (and help) in a fixed column, the control filling the rest, and its value
+ *  at the end when there is one (for sliders). */
+function Row({ label, help, value, children }: { label: string; help?: string; value?: string; children: React.ReactNode }) {
+  return (
+    <div className={`grid items-center gap-x-3 text-sm ${value != null ? "grid-cols-[92px_minmax(0,1fr)_3.75rem]" : "grid-cols-[92px_minmax(0,1fr)]"}`}>
+      <span className="flex items-center gap-1.5 whitespace-nowrap">
+        <Label className="font-normal">{label}</Label>
+        {help && <Help label={label} text={help} />}
+      </span>
+      <div className="flex min-h-8 min-w-0 items-center">{children}</div>
+      {value != null && <span className="text-right text-xs text-muted-foreground tabular-nums">{value}</span>}
+    </div>
+  )
+}
+/** An on/off setting: label (and help) on the left, the switch on the right, lined up with the rows. */
+function SwitchRow({ id, label, checked, onChange, help, indent = false }: {
+  id: string; label: string; checked: boolean; onChange: (v: boolean) => void; help?: string; indent?: boolean
+}) {
+  return (
+    <div className={`flex min-h-8 items-center justify-between gap-3 text-sm ${indent ? "pl-4" : ""}`}>
+      <span className="flex items-center gap-1.5">
+        <Label htmlFor={id} className="font-normal">{label}</Label>
+        {help && <Help label={label} text={help} />}
+      </span>
+      <Switch id={id} checked={checked} onCheckedChange={onChange} />
+    </div>
+  )
+}
+
 /** A small help icon after a control's label: what the control does, on hover or focus. */
 function Help({ label, text }: { label: string; text: string }) {
   // hover or focus on a mouse; a tap toggles it on a touch screen, which has no hover
@@ -2755,103 +2793,111 @@ export function InteractiveMap({ data, request, active = true, standalone = fals
       </div>
     </div>
   )
+  // the 3D view's controls in groups: what to show, how to draw it, the box, what else goes in it,
+  // and the tools; each row a label on the left and its control filling the rest, switches on the right
+  const vv = volEntry && volName ? volVarOf(volEntry, volName) : undefined
   const threeDPanel = mode === "hourly" && threeD && volEntry && volName && (
-
-      <div className="space-y-3 rounded-lg border bg-muted/30 p-3">
-        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-          <div className="text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">3D view</div>
-          <Control label="Preset" help={PRESETS.find((p) => p.id === presetId)?.note ?? "A ready-made 3D view: a field, its options and a camera angle that shows it well. Change anything afterwards."}>
+    <div className="rounded-lg border bg-muted/30 p-3">
+      <div className="mb-2 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">3D view</div>
+      {/* one column with rules between the groups in the side panel; side by side in the card */}
+      <div className={`grid gap-x-8 gap-y-3 ${standalone ? "[&>section+section]:border-t [&>section+section]:pt-3" : "gap-y-5 md:grid-cols-2 xl:grid-cols-3"}`}>
+        <Group title="Show">
+          <Row label="Preset" help={PRESETS.find((p) => p.id === presetId)?.note ?? "A ready-made 3D view: a field, its options and a camera angle that shows it well. Change anything afterwards."}>
             <Select value={presetId} onValueChange={applyPreset}>
-              <SelectTrigger className="min-w-0 flex-1 sm:w-[210px] sm:flex-none" aria-label="3D preset"><SelectValue placeholder="Choose a view…" /></SelectTrigger>
-              <SelectContent>
-                {PRESETS.filter((p) => volVarOf(volEntry, p.field)).map((p) => <SelectItem key={p.id} value={p.id}>{p.label}</SelectItem>)}
-              </SelectContent>
+              <SelectTrigger className="h-8 w-full min-w-0" aria-label="3D preset"><SelectValue placeholder="Choose a view…" /></SelectTrigger>
+              <SelectContent>{PRESETS.filter((p) => volVarOf(volEntry, p.field)).map((p) => <SelectItem key={p.id} value={p.id}>{p.label}</SelectItem>)}</SelectContent>
             </Select>
-          </Control>
-        </div>
-        <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
-          <Control label="Field">
+          </Row>
+          <Row label="Field">
             <Select value={volNone ? "none" : volName} onValueChange={(v) => { setVolVar(v as VolVar | "none"); setPresetId("") }}>
-              <SelectTrigger className="min-w-0 flex-1 sm:w-[190px] sm:flex-none" aria-label="3D field"><SelectValue /></SelectTrigger>
+              <SelectTrigger className="h-8 w-full min-w-0" aria-label="3D field"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="none">None</SelectItem>
                 {VOL_ORDER.filter((v) => volVarOf(volEntry, v)).map((v) => <SelectItem key={v} value={v}>{volLabel(volEntry, v)}</SelectItem>)}
               </SelectContent>
             </Select>
-          </Control>
+          </Row>
           {vols!.length > 1 && (
-            <Control label="Model">
+            <Row label="Model">
               <Select value={volEntry.model} onValueChange={setVolModel}>
-                <SelectTrigger className="min-w-0 flex-1 sm:w-[140px] sm:flex-none" aria-label="3D model"><SelectValue /></SelectTrigger>
+                <SelectTrigger className="h-8 w-full min-w-0" aria-label="3D model"><SelectValue /></SelectTrigger>
                 <SelectContent>{vols!.map((v) => <SelectItem key={v.model} value={v.model}>{v.model}</SelectItem>)}</SelectContent>
               </Select>
-            </Control>
+            </Row>
           )}
-          <Control label={`Height ×${exag}`} help="How much heights are stretched, so the atmosphere's 12 km show against a region hundreds of miles across. With 3D terrain on, the mountains stretch by the same amount.">
-            <Slider className="w-[120px] max-sm:flex-1" value={[exag]} min={5} max={60} step={5} onValueChange={([v]) => setExag(v)} aria-label="Vertical stretch" />
-          </Control>
-          <Control label={(() => { const [lo, hi] = zRange ?? [0, volEntry.topKm]; return lo === 0 && hi === volEntry.topKm ? "All heights" : `${lo} – ${hi} km` })()} labelClass="sm:min-w-[96px] tabular-nums"
-            help="Draw only the slab of the atmosphere between these heights (km above sea level), to see inside it or pick out one layer.">
-            <Slider className="w-[150px] max-sm:flex-1" value={zRange ?? [0, volEntry.topKm]} min={0} max={volEntry.topKm} step={0.5} minStepsBetweenThumbs={1}
+        </Group>
+        {!volNone && (SOLID_AT[volName] || colorOpts.length > 0 || solidAt != null || LIT_VIEWS.includes(volName)) && (
+          <Group title="Draw it">
+            {SOLID_AT[volName] && (
+              <Row label="Solid" help="Draw the field as an opaque, lit surface where it reaches a value (the jet stream at 100 kt, say), instead of a see-through volume. Its shadow falls on the map.">
+                <Select value={solidAt == null ? "off" : String(solidAt)} onValueChange={(x) => {
+                  setSolidPick((p) => ({ ...p, [volName]: x === "off" ? null : Number(x) }))
+                  // the stratosphere above the tropopause is all over 2 PVU: cap the box below it so
+                  // the lobes folding down show, as they hang (the heights slider can lift it)
+                  if (volName === "pv" && x !== "off" && zRange == null) setZRange([0, 9])
+                }}>
+                  <SelectTrigger className="h-8 w-full min-w-0" aria-label="Solid surface"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="off">Off</SelectItem>
+                    {[...SOLID_AT[volName]!].sort((a, b) => a - b).map((x) => <SelectItem key={x} value={String(x)}>{solidLabel(volName, x, vv!.units)}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </Row>
+            )}
+            {colorOpts.length > 0 && (
+              <Row label="Colour" help="Colour the volume (or the solid) by its height, or by another field: humidity coloured by wind speed shows where the moist air is moving fastest.">
+                <Select value={colorBy} onValueChange={(x) => setColorPick(x as typeof colorPick)}>
+                  <SelectTrigger className="h-8 w-full min-w-0" aria-label="Colour by"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {colorOpts.map((c) => <SelectItem key={c} value={c}>{c === "own" ? "Its own colours" : c === "height" ? "By height" : `By ${volLabel(volEntry, c).toLowerCase()}`}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </Row>
+            )}
+            {(solidAt != null || LIT_VIEWS.includes(volName)) && <SwitchRow id="vol-shadow" label="Shadows" checked={shadowOn} onChange={setShadowOn} />}
+          </Group>
+        )}
+        <Group title="The box">
+          <Row label="Stretch" help="How much heights are stretched, so the atmosphere's 12 km show against a region hundreds of miles across. With 3D terrain on, the mountains stretch by the same amount."
+            value={`×${exag}`}>
+            <Slider className="w-full" value={[exag]} min={5} max={60} step={5} onValueChange={([v]) => setExag(v)} aria-label="Vertical stretch" />
+          </Row>
+          <Row label="Heights" help="Draw only the slab of the atmosphere between these heights (km above sea level), to see inside it or pick out one layer."
+            value={(() => { const [lo, hi] = zRange ?? [0, volEntry.topKm]; return lo === 0 && hi === volEntry.topKm ? "All" : `${lo}–${hi} km` })()}>
+            <Slider className="w-full" value={zRange ?? [0, volEntry.topKm]} min={0} max={volEntry.topKm} step={0.5} minStepsBetweenThumbs={1}
               onValueChange={(v) => setZRange(v[0] === 0 && v[1] === volEntry.topKm ? null : [v[0], v[1]])}
               getAriaValueText={(v) => `${v} km`} aria-label="Heights shown" />
-          </Control>
-        </div>
-        <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
-          {hasUV && <Toggle id="vol-wind" label="Wind particles" checked={volWindOn} onChange={setVolWindOn}
-            help="Particles moving with the wind at 850, 700, 500, 300 and 250 mb, coloured by speed (or by moisture flow in that view)." />}
-          {layer === "radar" && <Toggle id="vol-precip" label="Falling precip" checked={volPrecip} onChange={setVolPrecip} />}
-          {!volNone && <Toggle id="vol-xsec" label="Cross-section" checked={xsecOn} onChange={(v) => { setXsecOn(v); if (!v) setPicking(null) }}
-            help="Slice the 3D field along a line, drawn under the map and as a curtain in 3D. Pick a preset line or draw your own." />}
-          <Toggle id="vol-profile" label="Profile" checked={profileOn} onChange={setProfileOn}
-            help="The column of air over one point, like a simple sounding: temperature and dewpoint by height, cloud and wind. Click the map to move it." />
-          <Toggle id="vol-terrain" label="3D terrain" checked={terr3d} onChange={(v) => { setTerr3d(v); if (v && exag > 10) setExag(8) }} />
-          {terr3d && <Toggle id="vol-snow" label="Snow level" checked={snowOn} onChange={setSnowOn}
+          </Row>
+          <SwitchRow id="vol-terrain" label="3D terrain" checked={terr3d} onChange={(v) => { setTerr3d(v); if (v && exag > 10) setExag(8) }} />
+          {terr3d && <SwitchRow id="vol-snow" label="Snow level" indent checked={snowOn} onChange={setSnowOn}
             help="Shade the terrain white above the model's snow level, about 1,000 ft below the wet-bulb freezing level." />}
-        </div>
-        <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
-          {!volNone && SOLID_AT[volName] && (
-            <Control label="Solid" help="Draw the field as an opaque, lit surface where it reaches a value (the jet stream at 100 kt, say), instead of a see-through volume. Its shadow falls on the map.">
-              <Select value={solidAt == null ? "off" : String(solidAt)} onValueChange={(x) => {
-                setSolidPick((p) => ({ ...p, [volName]: x === "off" ? null : Number(x) }))
-                // the stratosphere above the tropopause is all over 2 PVU: cap the box below it so
-                // the lobes folding down show, as they hang (the heights slider can lift it)
-                if (volName === "pv" && x !== "off" && zRange == null) setZRange([0, 9])
-              }}>
-                <SelectTrigger className="min-w-0 flex-1 sm:w-[175px] sm:flex-none" aria-label="Solid surface"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="off">Off</SelectItem>
-                  {[...SOLID_AT[volName]!].sort((a, b) => a - b).map((x) => <SelectItem key={x} value={String(x)}>{solidLabel(volName, x, volVarOf(volEntry, volName)!.units)}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </Control>
-          )}
-          {colorOpts.length > 0 && (
-            <Control label="Colour" help="Colour the volume (or the solid) by its height, or by another field: humidity coloured by wind speed shows where the moist air is moving fastest.">
-              <Select value={colorBy} onValueChange={(x) => setColorPick(x as typeof colorPick)}>
-                <SelectTrigger className="min-w-0 flex-1 sm:w-[160px] sm:flex-none" aria-label="Colour by"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {colorOpts.map((c) => <SelectItem key={c} value={c}>{c === "own" ? "Its own colours" : c === "height" ? "By height" : `By ${volLabel(volEntry, c).toLowerCase()}`}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </Control>
-          )}
+        </Group>
+        <Group title="Add">
+          {hasUV && <SwitchRow id="vol-wind" label="Wind particles" checked={volWindOn} onChange={setVolWindOn}
+            help="Particles moving with the wind at 850, 700, 500, 300 and 250 mb, coloured by speed (or by moisture flow in that view)." />}
+          {layer === "radar" && <SwitchRow id="vol-precip" label="Falling precip" checked={volPrecip} onChange={setVolPrecip} />}
+          {hasUV && <SwitchRow id="vol-traj" label="Trajectories" checked={trajOn} onChange={setTrajOn}
+            help="Where the air arriving over each forecast location at about 1.5 and 3 km came from over the previous 24 hours (or since the model's first step), coloured by height: lines climbing toward a location show air being lifted." />}
           {levelOpts.length > 0 && (
-            <Control label="Level map" help="A pressure level drawn inside the box at its average height: its height contours (labelled in decametres; lows and troughs where they dip) and wind arrows.">
+            <Row label="Level map" help="A pressure level drawn inside the box at its average height: its height contours (labelled in decametres; lows and troughs where they dip) and wind arrows.">
               <Select value={level == null ? "off" : String(level)} onValueChange={(x) => setLevelHPa(x === "off" ? null : Number(x))}>
-                <SelectTrigger className="min-w-0 flex-1 sm:w-[120px] sm:flex-none" aria-label="Level map"><SelectValue /></SelectTrigger>
+                <SelectTrigger className="h-8 w-full min-w-0" aria-label="Level map"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="off">Off</SelectItem>
                   {[...levelOpts].sort((a, b) => b - a).map((h) => <SelectItem key={h} value={String(h)}>{h} mb</SelectItem>)}
                 </SelectContent>
               </Select>
-            </Control>
+            </Row>
           )}
-          {!volNone && (solidAt != null || LIT_VIEWS.includes(volName)) && <Toggle id="vol-shadow" label="Shadows" checked={shadowOn} onChange={setShadowOn} />}
-          {hasUV && <Toggle id="vol-traj" label="Trajectories" checked={trajOn} onChange={setTrajOn}
-            help="Where the air arriving over each forecast location at about 1.5 and 3 km came from over the previous 24 hours (or since the model's first step), coloured by height: lines climbing toward a location show air being lifted." />}
-        </div>
+        </Group>
+        <Group title="Tools">
+          {!volNone && <SwitchRow id="vol-xsec" label="Cross-section" checked={xsecOn} onChange={(v) => { setXsecOn(v); if (!v) setPicking(null) }}
+            help="Slice the 3D field along a line, shown as a chart and as a curtain in 3D. Pick a preset line or draw your own." />}
+          <SwitchRow id="vol-profile" label="Profile" checked={profileOn} onChange={setProfileOn}
+            help="The column of air over one point, like a simple sounding: temperature and dewpoint by height, cloud and wind. Click the map to move it." />
+        </Group>
       </div>
+    </div>
   )
   const aboutView = (
     <AboutView
