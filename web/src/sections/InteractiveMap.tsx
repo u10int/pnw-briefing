@@ -1659,12 +1659,12 @@ function Help({ label, text }: { label: string; text: string }) {
 }
 
 /** A labelled control in the 3D panel: label, help icon, then the control. */
-function Control({ label, help, labelClass = "", children }: { label: string; help: string; labelClass?: string; children: React.ReactNode }) {
+function Control({ label, help, labelClass = "", children }: { label: string; help?: string; labelClass?: string; children: React.ReactNode }) {
   return (
     <div className="flex items-center gap-2.5 text-sm max-sm:w-full">
       <span className={`flex items-center gap-1.5 whitespace-nowrap max-sm:min-w-[118px] ${labelClass}`}>
         <Label className="font-normal">{label}</Label>
-        <Help label={label.replace(/×.*/, "stretch")} text={help} />
+        {help && <Help label={label.replace(/×.*/, "stretch")} text={help} />}
       </span>
       {children}
     </div>
@@ -2099,8 +2099,7 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
                   }
                 }} label="Model" />}
                 {!threeD && <Toggle id="compare-h" label="Compare" checked={compare} onChange={setCompare} />}
-                <Toggle id="three-d" label="3D" checked={threeD} onChange={(v) => { setThreeD(v); if (v) setCompare(false) }}
-                  help="Tilt the map and draw a model's forecast through the depth of the atmosphere. Its controls appear below." />
+                <Toggle id="three-d" label="3D" checked={threeD} onChange={(v) => { setThreeD(v); if (v) setCompare(false) }} />
               </div>
               {compare && !threeD && hB && <div className="flex max-sm:w-full"><ModelSelect options={layerModels.filter((m) => m.model !== hA)} value={hB} onChange={setHOther} label="Compare with" /></div>}
             </>
@@ -2145,7 +2144,7 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
           <div className="space-y-3 rounded-lg border bg-muted/30 p-3">
             <div className="text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">3D view</div>
             <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
-              <Control label="Field" help="What the 3D view draws through the depth of the atmosphere: clouds, water and ice, humidity, moisture flow, rising and sinking air, the freezing level, temperature or wind.">
+              <Control label="Field">
                 <Select value={volName} onValueChange={(v) => setVolVar(v as VolVar)}>
                   <SelectTrigger className="min-w-0 flex-1 sm:w-[190px] sm:flex-none" aria-label="3D field"><SelectValue /></SelectTrigger>
                   <SelectContent>
@@ -2154,7 +2153,7 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
                 </Select>
               </Control>
               {vols!.length > 1 && (
-                <Control label="Model" help="Whose pressure-level forecast to draw in 3D (GFS or ECMWF). It can differ from the 2D layer's model.">
+                <Control label="Model">
                   <Select value={volEntry.model} onValueChange={setVolModel}>
                     <SelectTrigger className="min-w-0 flex-1 sm:w-[140px] sm:flex-none" aria-label="3D model"><SelectValue /></SelectTrigger>
                     <SelectContent>{vols!.map((v) => <SelectItem key={v.model} value={v.model}>{v.model}</SelectItem>)}</SelectContent>
@@ -2174,12 +2173,10 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
             <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
               {hasUV && <Toggle id="vol-wind" label="Wind particles" checked={volWindOn} onChange={setVolWindOn}
                 help="Particles moving with the wind at 850, 700, 500, 300 and 250 mb, coloured by speed (or by moisture flow in that view)." />}
-              {layer === "radar" && <Toggle id="vol-precip" label="Falling precip" checked={volPrecip} onChange={setVolPrecip}
-                help="Rain and snow falling wherever the radar layer shows precipitation, thicker where it's heavier and coloured by type." />}
+              {layer === "radar" && <Toggle id="vol-precip" label="Falling precip" checked={volPrecip} onChange={setVolPrecip} />}
               <Toggle id="vol-xsec" label="Cross-section" checked={xsecOn} onChange={(v) => { setXsecOn(v); if (!v) setPicking(null) }}
                 help="Slice the 3D field along a line, drawn under the map and as a curtain in 3D. Pick a preset line or draw your own." />
-              <Toggle id="vol-terrain" label="3D terrain" checked={terr3d} onChange={(v) => { setTerr3d(v); if (v && exag > 10) setExag(8) }}
-                help="Raise the mountains, at the same stretch as the 3D data, with the map's colours draped over them." />
+              <Toggle id="vol-terrain" label="3D terrain" checked={terr3d} onChange={(v) => { setTerr3d(v); if (v && exag > 10) setExag(8) }} />
               {terr3d && <Toggle id="vol-snow" label="Snow level" checked={snowOn} onChange={setSnowOn}
                 help="Shade the terrain white above the model's snow level, about 1,000 ft below the wet-bulb freezing level." />}
             </div>
