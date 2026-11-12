@@ -12,5 +12,8 @@ export default defineConfig(({ mode }) => ({
   plugins: [react(), tailwindcss(), ...(mode === "single" ? [viteSingleFile()] : [])],
   resolve: { alias: { "@": path.resolve(__dirname, "./src") } },
   worker: { format: "es" },
-  build: { chunkSizeWarningLimit: 1200, ...(mode === "single" ? { outDir: "dist-single", copyPublicDir: false } : {}) },
+  // the site has two pages: the briefing and the map on its own (map.html); the single-file copy is
+  // the briefing alone
+  build: { chunkSizeWarningLimit: 1200, ...(mode === "single" ? { outDir: "dist-single", copyPublicDir: false }
+    : { rollupOptions: { input: { main: path.resolve(__dirname, "index.html"), map: path.resolve(__dirname, "map.html") } } }) },
 }))
