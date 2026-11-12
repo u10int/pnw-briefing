@@ -1,3 +1,4 @@
+import { ChevronRight } from "lucide-react"
 import * as React from "react"
 import { DayHead } from "@/components/DayHead"
 
@@ -431,23 +432,32 @@ export function ImpactBoard({ data }: { data: Briefing }) {
           </div>
         </div>
 
-        {/* key */}
-        <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-muted-foreground">
-          <span>Red: likely (60%+ of models) · Amber: possible ({pct(minAg)}+)</span>
-          <span className="flex items-center gap-1.5"><Gauge v={50} thr={40} unit="" />Under each place: the worst value (bar) against that location's impact threshold (tick); past the tick means over it. Hover for the numbers</span>
-          {hasPrev ? <>
-            <span className="flex items-center gap-1.5"><Swatch fill="bold" />New or upgraded</span>
-            <span className="flex items-center gap-1.5"><Swatch fill="same" />Unchanged</span>
-            <span className="flex items-center gap-1.5"><Swatch fill="moved" />Moved</span>
-            <span className="flex items-center gap-1.5"><Swatch fill="down" />Downgraded</span>
-          </> : <span className="flex items-center gap-1.5"><Swatch fill="bold" />Period</span>}
-          <span className="flex items-center gap-1.5">
-            <span className="flex h-3 items-end gap-px border-b border-muted-foreground/50">{[0.3, 0.7, 1, 0.5].map((h, i) => <span key={i} className="w-1 rounded-t-[1px]" style={{ height: `${h * 100}%`, background: redCell(h).background }} />)}</span>
-            Share of models over the threshold each day; dashed line at {pct(minAg)}
-          </span>
-          {hasPrev && <span className="flex items-center gap-1.5"><span className="h-3 w-5 rounded-[3px] border border-dashed border-muted-foreground/60" />{base.edition ? "Earlier dates, or dropped" : "Yesterday's dates, or dropped"}</span>}
-          <span>Where: the area hit and its worst value; hover for each location</span>
-          <span>Click a bar to see it on the map</span>
+        {/* key: what the changes look like up front; the rest folds away */}
+        <div className="space-y-2 text-xs text-muted-foreground">
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+            {hasPrev ? <>
+              <span className="flex items-center gap-1.5"><Swatch fill="bold" />New or upgraded</span>
+              <span className="flex items-center gap-1.5"><Swatch fill="same" />Unchanged</span>
+              <span className="flex items-center gap-1.5"><Swatch fill="moved" />Moved</span>
+              <span className="flex items-center gap-1.5"><Swatch fill="down" />Downgraded</span>
+              <span className="flex items-center gap-1.5"><span className="h-3 w-5 rounded-[3px] border border-dashed border-muted-foreground/60" />{base.edition ? "Earlier dates, or dropped" : "Yesterday's dates, or dropped"}</span>
+            </> : <span className="flex items-center gap-1.5"><Swatch fill="bold" />Period</span>}
+          </div>
+          <details className="group">
+            <summary className="inline-flex cursor-pointer list-none items-center gap-1 font-medium select-none hover:text-foreground [&::-webkit-details-marker]:hidden">
+              <ChevronRight className="size-3.5 transition-transform group-open:rotate-90" aria-hidden />More about this chart
+            </summary>
+            <div className="mt-2 flex flex-wrap items-center gap-x-5 gap-y-2">
+              <span>Red: likely (60%+ of models) · Amber: possible ({pct(minAg)}+)</span>
+              <span className="flex items-center gap-1.5"><Gauge v={50} thr={40} unit="" />Under each place: the worst value (bar) against that location's impact threshold (tick); past the tick means over it. Hover for the numbers</span>
+              <span className="flex items-center gap-1.5">
+                <span className="flex h-3 items-end gap-px border-b border-muted-foreground/50">{[0.3, 0.7, 1, 0.5].map((h, i) => <span key={i} className="w-1 rounded-t-[1px]" style={{ height: `${h * 100}%`, background: redCell(h).background }} />)}</span>
+                Share of models over the threshold each day; dashed line at {pct(minAg)}
+              </span>
+              <span>Where: the area hit and its worst value; hover for each location</span>
+              <span>Click a bar to see it on the map</span>
+            </div>
+          </details>
         </div>
       </CardContent>
     </Card>
