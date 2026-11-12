@@ -57,7 +57,7 @@ def test_fetch_reads_levels_and_writes_manifest(tmp_path):
     H.xarray.return_value = [_ds([1000, 850, 700, 500])]
     with mock.patch("briefing.grib._H", return_value=H):
         vol = volume.fetch(spec, datetime(2026, 11, 11, 0), 12, DOM, hours=6, step=3)
-    assert vol["hours"] == [12, 15, 18] and sorted(vol["vars"]) == ["cloud", "rh", "temp", "u", "v", "wind"]
+    assert vol["hours"] == [12, 15, 18] and sorted(vol["vars"]) == ["cloud", "pv", "rh", "temp", "u", "v", "wind"]
     assert np.allclose(vol["vars"]["u"], 10) and np.allclose(vol["vars"]["v"], 0)
     assert vol["vars"]["temp"].shape == (3, len(volume.HEIGHTS_M), 3, 3)
     assert list(vol["lat"]) == [47.0, 47.25, 47.5] and list(vol["lon"]) == [-123.0, -122.75, -122.5]
@@ -108,3 +108,25 @@ def test_moisture_flow_and_vertical_motion():
     rho = np.array([85000, 70000]) / (287.05 * 280)
     assert np.allclose(d["w"][:, 0, 0], 1 / (rho * 9.81), rtol=1e-4) and (d["w"] > 0).all()
     assert "mflux" not in volume.derive({"t": one(280.0)}, "ecmwf", [850, 700])
+
+
+def test_potential_vorticity_tropopause():
+    """A resting standard atmosphere with an isothermal stratosphere: PV is small in the
+    troposphere and crosses 2 PVU near the tropopause."""
+    import numpy as np
+    from briefing.volume import potential_vorticity
+    levs = [1000, 850, 700, 500, 400, 300, 250, 200]
+    z = {1000: 0.11, 850: 1.46, 700: 3.01, 500: 5.57, 400: 7.18, 300: 9.16, 250: 10.36, 200: 11.78}
+    lat, lon = np.arange(44, 50.01, 0.25), np.arange(-128, -118, 0.25)
+    t = np.stack([np.full((len(lat), len(lon)), 288.15 - 6.5 * min(z[p], 10.5)) for p in levs])
+    pv = potential_vorticity(t, np.zeros_like(t), np.zeros_like(t), levs, lat, lon)
+    col = pv.mean(axis=(1, 2))
+    assert (col[:5] < 1).all() and col[-1] > 2
+
+
+def test_demo_volume_has_pv_and_level_heights():
+    from briefing.volume import demo_volume, HGT_LEVELS
+    dom = {"lat_min": 44, "lat_max": 50, "lon_min": -128, "lon_max": -118}
+    v = demo_volume({}, None, dom, "ncep", hours=6, step=3)
+    assert "pv" in v["vars"] and v["hgt"]["hPa"] == [p for p in (850, 700, 500, 300) if p in HGT_LEVELS]
+    assert v["hgt"]["values"].shape[1] == len(v["hgt"]["hPa"])

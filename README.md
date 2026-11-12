@@ -256,11 +256,25 @@ humidity, temperature and wind speed, both drawn as lit surfaces at set values (
 solid surface coloured by height in the 2D map's 1,000 ft bands. u and v (m/s) drive animated wind
 particles at 850, 700, 500, 300 and 250 hPa (the model's average heights), on by default with the
 wind view and switchable with any field.
+Potential vorticity (PVU, Ertel's on pressure levels from the wind and temperature) is drawn as
+its 2 PVU surface, the dynamic tropopause, coloured by height; the heights of 850, 700, 500 and
+300 hPa are stored per level (as departures from each level's mean) for the level maps. Two views
+are worked out in the page from the others: the snow growth zone (humidity between 10 and 0°F)
+and icing (liquid water between 32 and −4°F, GFS only).
+
+Any view can also be drawn as a **solid**, opaque surface at a chosen value (the jet at 100 kt, the
+tropopause at 2 PVU) with lighting and self-shadowing; volumes and solids can be **coloured** by
+height or by another field (humidity shaped, coloured by wind speed); solids and lit fields cast
+**shadows** on the ground. A **level map** draws a pressure level's height contours (in decametres)
+and wind arrows inside the box, and **trajectories** trace the air arriving over each forecast
+location at about 1.5 and 3 km back 24 hours through the model's u, v and w (RK2, 15-minute steps).
 
 On the page, `lib/gl/volume-layer.ts` is a MapLibre custom layer (WebGL2): each pixel casts a
 ray through the box, samples the 3D textures of the two time steps either side of the clock,
 looks up colour and extinction in a per-variable transfer table and composites front to back;
-clouds, water, ice and humidity are shaded by what lies above them. Surfaces are found where the
+clouds, water, ice and humidity are lit from the south-west by a short march towards the light
+through the same field (so undersides go gray), and a second march from the ground point under each
+pixel towards the light gives the shadows. Surfaces are found where the
 field crosses a value between two samples (so they stay crisp at any step size) and lit by the
 field's gradient. The wind particles are advected on the CPU from the same grids (trilinear,
 blended in time) and drawn as fading trails each frame over the cached volume image. The result is cached in an
