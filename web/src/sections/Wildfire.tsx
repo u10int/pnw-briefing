@@ -92,9 +92,8 @@ export function FirePotentialCard({ wf }: { wf: Wildfire }) {
     <Card>
       <CardHeader>
         <CardTitle>7-day significant fire potential</CardTitle>
-        <CardDescription>
-          Northwest Coordination Center Predictive Services: fuel dryness for each Predictive Service Area, and days at high risk
-          of new large fires or significant growth, with the trigger (L lightning, W wind, HD hot and dry, B burn environment).
+        <CardDescription info="Northwest Coordination Center Predictive Services: fuel dryness for each Predictive Service Area, and days at high risk of new large fires or significant growth, with the trigger (L lightning, W wind, HD hot and dry, B burn environment). Fuel dryness comes from Predictive Services' fuel and fire-danger indices (energy release component and others) against their local history. Moist fuels mean new fires are unlikely to grow large whatever the weather.">
+          Fuel dryness and high-risk days from Predictive Services.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -133,10 +132,6 @@ export function FirePotentialCard({ wf }: { wf: Wildfire }) {
                 })}
               </table>
             </div>
-            <p className="text-xs text-muted-foreground">
-              Fuel dryness comes from Predictive Services' fuel and fire-danger indices (energy release component and others) against
-              their local history. Moist fuels mean new fires are unlikely to grow large whatever the weather.
-            </p>
           </>
         )}
       </CardContent>
@@ -152,9 +147,8 @@ export function SpcFireCard({ wf }: { wf: Wildfire }) {
     <Card>
       <CardHeader>
         <CardTitle>SPC fire weather outlook</CardTitle>
-        <CardDescription>
-          The Storm Prediction Center's national outlook for critical wind and low humidity, and dry thunderstorms: categories for
-          days 1 and 2, probabilities for days 3 to 8. Only areas reaching the map are listed.
+        <CardDescription info="The Storm Prediction Center's national outlook for critical wind and low humidity, and dry thunderstorms: categories for days 1 and 2, probabilities for days 3 to 8. Only areas reaching the map are listed.">
+          SPC's fire weather outlook, days 1 to 8.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -239,9 +233,13 @@ export function FireWeatherByDayCard({ data }: { data: Briefing }) {
     <Card>
       <CardHeader>
         <CardTitle>Fire weather by day</CardTitle>
-        <CardDescription>
+        <CardDescription info={<>
           {model ? `${model.label}'s` : only ? `Each location's median of ${listNames(only)}` : "Each location's multi-model median"} {FWORD[v]} for each day (4 AM – 4 AM)
-          {model && `, out to day ${model.days}`}. Region rows show their {lowIsBad ? "driest" : "worst"} location.
+          {model && `, out to day ${model.days}`}. Region rows show their {lowIsBad ? "driest" : "worst"} location.{" "}
+          {v === "rh" && <>Humidity under about 25% with wind is when fires spread fastest; west-side lows under 30% usually come with offshore (east) flow. Hover for the driest model.</>}
+          {v === "hdw" && <>Vapour pressure deficit (hPa) times wind speed (m/s) from each model's 2 m temperature and humidity and 10 m wind. The published index takes the largest value in the lowest 500 m, so these surface values run lower; compare days and places rather than reading them against its thresholds.</>}
+          {v === "smoke" && <>HRRR and RRFS near-surface smoke, the daily maximum. Above about 35 µg/m³ is unhealthy for sensitive groups, 55 and up unhealthy. The Map tab animates it hour by hour.</>}</>}>
+          {model ? `${model.label}'s` : "The median"} {FWORD[v]} for each day.
         </CardDescription>
         <CardAction className="flex flex-wrap gap-2"><MapButton req={{ mode: "hourly", layer: "rh" }} label="Humidity on the map" /><MapButton req={{ mode: "hourly", layer: "smoke" }} label="Smoke on the map" /></CardAction>
       </CardHeader>
@@ -265,11 +263,6 @@ export function FireWeatherByDayCard({ data }: { data: Briefing }) {
         </div>
         <DayMatrix dates={data.dates} rows={rows} leadHead={lowIsBad ? "Driest" : "Peak"} leadSub={`${model ? Math.min(model.days, nd) : nd} days`}
           dimFrom={model ? model.days : undefined} style={(x) => rampCell(x, ramp, v === "smoke")} fmt={fmt} tip={tip} />
-        <p className="text-xs text-muted-foreground">
-          {v === "rh" && <>Humidity under about 25% with wind is when fires spread fastest; west-side lows under 30% usually come with offshore (east) flow. Hover for the driest model.</>}
-          {v === "hdw" && <>Vapour pressure deficit (hPa) times wind speed (m/s) from each model's 2 m temperature and humidity and 10 m wind. The published index takes the largest value in the lowest 500 m, so these surface values run lower; compare days and places rather than reading them against its thresholds.</>}
-          {v === "smoke" && <>HRRR and RRFS near-surface smoke, the daily maximum. Above about 35 µg/m³ is unhealthy for sensitive groups, 55 and up unhealthy. The Map tab animates it hour by hour.</>}
-        </p>
       </CardContent>
     </Card>
   )
@@ -282,7 +275,9 @@ export function WildfireMapCard({ data, wf }: { data: Briefing; wf: Wildfire }) 
     <Card>
       <CardHeader>
         <CardTitle>Fires, outlooks and drought</CardTitle>
-        <CardDescription>Current fire perimeters and incidents, the outlook areas above for a chosen day, and this week's Drought Monitor. Hover for details.</CardDescription>
+        <CardDescription info="Current fire perimeters and incidents, the outlook areas above for a chosen day, and this week's Drought Monitor. Hover for details.">
+          Current fires, outlook areas and drought.
+        </CardDescription>
       </CardHeader>
       <CardContent>
         <React.Suspense fallback={<p className="text-sm text-muted-foreground">Loading the map…</p>}>
@@ -339,10 +334,8 @@ export function IncidentsCard({ wf }: { wf: Wildfire }) {
     <Card>
       <CardHeader>
         <CardTitle>Current fires</CardTitle>
-        <CardDescription>
-          Active wildfire incidents in the map area from the national incident feed (NIFC), largest first. The feed keeps fires
-          until they're declared out, often weeks after containment, so fully contained, prescribed and long-quiet ones (no
-          containment reported and found over 30 days ago) are behind the switch.
+        <CardDescription info="Active wildfire incidents in the map area from the national incident feed (NIFC), largest first. The feed keeps fires until they're declared out, often weeks after containment, so fully contained, prescribed and long-quiet ones (no containment reported and found over 30 days ago) are behind the switch.">
+          Active incidents in the map area, largest first.
         </CardDescription>
         {items && hidden > 0 && (
           <CardAction className="flex items-center gap-2">
@@ -410,10 +403,8 @@ export function DroughtCard({ data, wf }: { data: Briefing; wf: Wildfire }) {
     <Card>
       <CardHeader>
         <CardTitle>Drought by location</CardTitle>
-        <CardDescription>
-          The US Drought Monitor category at each forecast location
-          {dm?.mapDate && <>, for the week ending {dayMD(new Date(dm.mapDate).toISOString())}</>}.
-          Long-term dryness that keeps heavy fuels and duff ready to burn.
+        <CardDescription info="Long-term dryness that keeps heavy fuels and duff ready to burn.">
+          The Drought Monitor category at each location{dm?.mapDate && <>, week ending {dayMD(new Date(dm.mapDate).toISOString())}</>}.
         </CardDescription>
       </CardHeader>
       <CardContent>

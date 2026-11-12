@@ -111,8 +111,8 @@ export function PeakTimingCard({ data, v }: { data: Briefing; v: Var }) {
       <CardHeader>
         <CardTitle>{v === "gust" ? "When the strongest gusts come" : v === "snow" ? "When the heaviest snow comes" : "When the heaviest precipitation comes"}</CardTitle>
         <Takeaway>{takeaway}</Takeaway>
-        <CardDescription>
-          The next {WINDOW_H} hours at the locations where {what}, from the median of {t.models.length} models with hourly output ({t.models.join(", ")}){t.weighted?.length && t.weighted.length < t.models.length ? `, with the high-resolution ones (${t.weighted.join(", ")}) counted double` : ""}. Each bar is how long it lasts and the dot marks the peak{v !== "gust" ? `; the pale fill is when any ${v === "snow" ? "snow" : "precipitation"} falls` : ""}; the red line is now. Hover for details.
+        <CardDescription info={<>The next {WINDOW_H} hours at the locations where {what}, from the median of {t.models.length} models with hourly output ({t.models.join(", ")}){t.weighted?.length && t.weighted.length < t.models.length ? `, with the high-resolution ones (${t.weighted.join(", ")}) counted double` : ""}. Each bar is how long it lasts and the dot marks the peak{v !== "gust" ? `; the pale fill is when any ${v === "snow" ? "snow" : "precipitation"} falls` : ""}; the red line is now. Hover for details.</>}>
+          When it starts, peaks and ends over the next {WINDOW_H} hours.
         </CardDescription>
         <CardAction>
           {/* the hour-by-hour layer, opened at the strongest peak in the window */}

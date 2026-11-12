@@ -81,10 +81,10 @@ export function ConvectiveCard({ data, part }: { data: Briefing; part?: "outlook
     <Card>
       <CardHeader>
         <CardTitle>{part === "outlook" ? "Thunderstorm outlook" : part === "now" ? "Thunderstorms now and lately" : "Thunderstorms"}</CardTitle>
-        <CardDescription>
-          {part === "outlook" ? "The Storm Prediction Center's convective outlook for each day."
+        <CardDescription info={part === "outlook" ? "The Storm Prediction Center's convective outlook for each day."
             : part === "now" ? "The Storm Prediction Center's mesoscale discussions for the area right now, and storm reports from the last three days."
-            : "The Storm Prediction Center's mesoscale discussions for the area right now, its convective outlook for each day, and storm reports from the last three days."}
+            : "The Storm Prediction Center's mesoscale discussions for the area right now, its convective outlook for each day, and storm reports from the last three days."}>
+          {part === "outlook" ? "SPC's thunderstorm outlook for each day." : part === "now" ? "SPC discussions now and recent storm reports." : "SPC outlooks, discussions and storm reports."}
         </CardDescription>
         <CardAction className="flex flex-wrap gap-2">{part === "now" && <MapButton req={{ mode: "totals", variable: "storms", days: 1 }} label="Discussions and reports on the map" />}</CardAction>
       </CardHeader>

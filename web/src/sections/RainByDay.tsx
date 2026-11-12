@@ -73,12 +73,18 @@ export function RainByDayCard({ data, only, switcher }: { data: Briefing; only?:
       <CardHeader>
         <CardTitle>{switcher ? "By location" : v === "precip" ? "Rain by day" : "Snow by day"}</CardTitle>
         <Takeaway>{takeaway}</Takeaway>
-        <CardDescription>
+        <CardDescription info={<>
           {model ? <>{model.label}'s forecast for each day (4 AM – 4 AM) ({what}), out to day {model.days}.</>
                  : skill ? <>Each location's skill-weighted median for each day (4 AM – 4 AM) ({what}){v === "snow" ? ", weighted by the models' precipitation skill" : ""}.</>
                  : coreOnly ? <>Each location's median of {listNames(coreOnly)} for each day (4 AM – 4 AM) ({what}).</>
                  : <>Each location's multi-model median for each day (4 AM – 4 AM) ({what}).</>}
-          {" "}Region rows average their locations. Hover for the range across models{v === "precip" && " and the normal for the day"}.
+          {" "}Region rows average their locations. Hover for the range across models{v === "precip" && " and the normal for the day"}.{" "}
+          {skill ? skillNote(skill)
+            : coreOnly ? `The core median uses only ${listNames(coreOnly)} on every day, so it stays the same set of models through the range; it leaves out the high-resolution regional models' detail in the first two days.`
+            : pick === MEDIAN
+            ? "The median uses whichever models reach that day, so the first two days include the high-resolution regional models and later days only the global ones."
+            : `Days past ${model!.label}'s range are blank; the total covers its ${span} days.`}</>}>
+          {model ? `${model.label}'s forecast` : skill ? "The skill-weighted median" : coreOnly ? `The median of ${listNames(coreOnly)}` : "The multi-model median"} for each day.
         </CardDescription>
         {switcher && <CardAction>{switcher}</CardAction>}
       </CardHeader>
@@ -97,12 +103,7 @@ export function RainByDayCard({ data, only, switcher }: { data: Briefing; only?:
         <DayMatrix dates={data.dates} rows={rows} leadHead="Total" leadSub={`${span} days`} dimFrom={model ? model.days : undefined}
           style={(x) => rampCell(x, ramp, true)} fmt={(x) => amt(x, ramp)} tip={tip} flag={model ? undefined : farApart} />
         <p className="text-xs text-muted-foreground">
-          <HatchKey what={`Hatched: models far apart (a spread of ${v === "precip" ? "½″" : "4″"} or more, and over 1¼ × the median)`} />{" "}
-          {skill ? skillNote(skill)
-            : coreOnly ? `The core median uses only ${listNames(coreOnly)} on every day, so it stays the same set of models through the range; it leaves out the high-resolution regional models' detail in the first two days.`
-            : pick === MEDIAN
-            ? "The median uses whichever models reach that day, so the first two days include the high-resolution regional models and later days only the global ones."
-            : `Days past ${model!.label}'s range are blank; the total covers its ${span} days.`}
+          <HatchKey what={`Hatched: models far apart (a spread of ${v === "precip" ? "½″" : "4″"} or more, and over 1¼ × the median)`} />
         </p>
       </CardContent>
     </Card>

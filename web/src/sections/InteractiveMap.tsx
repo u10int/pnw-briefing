@@ -2034,11 +2034,11 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
     <Card>
       <CardHeader>
         <CardTitle>Explore the grids</CardTitle>
-        <CardDescription>
-          {mode === "totals"
+        <CardDescription info={<>{mode === "totals"
             ? "Totals, extremes, ensemble odds and observed rainfall for each window, from each model's own grid. Model spread and percent of normal use the multi-model mean; ensemble odds pool GEFS and ECMWF ENS members."
             : "Forecast maps through time. HRRR, RRFS and NAM step hourly for the first 48 hours (RRFS every 3 hours after that); NBM and the global models every 6 hours. Playback blends smoothly between forecast steps. MRMS radar (under Observed) is NOAA's multi-radar composite reflectivity, loaded live: hourly since the briefing's start and every 10 minutes for the last 3 hours, so you can compare it with the forecast radar for the same times."}
-          {" "}Hover for values; drag and zoom to look closer.
+          {" "}Drawn from the same GeoTIFFs this briefing publishes.</>}>
+          {mode === "totals" ? "Totals and extremes for each window." : "The forecast hour by hour."} Hover for values; drag and zoom to look closer.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">

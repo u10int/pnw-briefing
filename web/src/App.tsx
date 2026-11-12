@@ -32,6 +32,7 @@ import { TempDepartureCard } from "@/sections/TempDeparture"
 import { WildfireTab } from "@/sections/Wildfire"
 import { WindByDayCard } from "@/sections/WindByDay"
 import type { Briefing } from "@/types"
+import { InfoTip } from "@/components/InfoTip"
 
 // MapLibre is large; it loads with the Map tab, which is the first tab and opens by default.
 const InteractiveMap = React.lazy(() => import("@/sections/InteractiveMap").then((m) => ({ default: m.InteractiveMap })))
@@ -70,15 +71,15 @@ function pickExtremes(data: Briefing, horizon: "short" | "long", over: string, v
   return extremeTabs(data, horizon, over).filter((t) => vars.includes(t.id)).map((t) => ({ ...t, id: `${t.id}-${horizon}`, label: t.label + suffix }))
 }
 
-function Section({ title, description, action, children, first }: {
-  title: string; description: string; action?: React.ReactNode; children: React.ReactNode; first?: boolean
+function Section({ title, description, about, action, children, first }: {
+  title: string; description: string; about?: React.ReactNode; action?: React.ReactNode; children: React.ReactNode; first?: boolean
 }) {
   return (
     <section className={`${first ? "mt-8" : "mt-12"} space-y-4`}>
       <div className="flex flex-wrap items-end justify-between gap-x-8 gap-y-3">
         <div className="max-w-3xl space-y-1">
           <h2 className="text-2xl font-semibold tracking-tight">{title}</h2>
-          <p className="text-muted-foreground">{description}</p>
+          <p className="text-muted-foreground">{description}{about && <>{" "}<InfoTip label={title} className="-mt-0.5">{about}</InfoTip></>}</p>
         </div>
         {action}
       </div>
@@ -238,13 +239,15 @@ export default function App() {
         </div>
 
         <Section title="Impacts to watch"
-          description={`Each hazard's share of models over its threshold day by day, the periods where at least ${Math.round(meta.minAgreement * 100)}% agree at a forecast location, and what changed since yesterday. Thresholds differ for lowland, coast and pass locations; regional models count for the days they cover. Hover anything for details.`}>
+          description="Where the models agree a hazard will reach its threshold, day by day."
+          about={`Each hazard's share of models over its threshold day by day, the periods where at least ${Math.round(meta.minAgreement * 100)}% agree at a forecast location, and what changed since yesterday. Thresholds differ for lowland, coast and pass locations; regional models count for the days they cover. Hover anything for details.`}>
           <ImpactBoard data={data} />
         </Section>
 
         {data.trends && (
           <Section title="Forecast trends"
-            description="Each location's precipitation, snow, strongest gust and average high and low over the chosen window, and how each moved since yesterday's briefing. The column headings open the details.">
+            description="Each location over the chosen window, and how it moved since yesterday."
+            about="Precipitation, snow, strongest gust and average high and low at each location, with the change since yesterday's briefing. Each value is the median across the models that cover the whole window. Region rows combine their locations within each model (precipitation and temperature averaged, snow at the passes, wind as the strongest lowland or coastal gust); their bars span the models, with the mark at the median, on one scale per column. Click a column heading for the details, a region for its locations, or a location for its forecast.">
             <TrendsCard data={data} onOpen={(t) => openTab(t)} onLocation={(n) => setPoint(n)} />
           </Section>
         )}
@@ -275,7 +278,7 @@ export default function App() {
 
           <TabsContent value="precip">
             <Section title="Precipitation" first
-              description="How much falls, when and where: region totals for each window, each location by day or by model, when the heaviest comes, and the model maps; then what has fallen lately, and how the models have been doing."
+              description="How much falls, when and where, what has fallen lately, and how the models have done."
               action={<MapLink req={{ mode: "totals", variable: "precip", days: 7 }} label="Precipitation totals on the map" />}>
               <Groups tab="precip" groups={[
                 { id: "forecast", title: GROUP_TITLES.forecast, show: true, children: <>
@@ -303,7 +306,8 @@ export default function App() {
 
           <TabsContent value="flood">
             <Section title="Flooding" first
-              description="What turns rain into a problem: the official river forecasts, whether an atmospheric river is coming, and how many ensemble members reach the heavy-rain thresholds; then how close recent rain puts the Seattle area to the landslide threshold. Recent rainfall itself is on the Precipitation tab."
+              description="River forecasts, atmospheric rivers, heavy-rain odds and landslide risk."
+              about="What turns rain into a problem: the official river forecasts, whether an atmospheric river is coming, how many ensemble members reach the heavy-rain thresholds, and how close recent rain puts the Seattle area to the landslide threshold. Recent rainfall itself is on the Precipitation tab."
               action={data.rivers ? <MapLink req={{ mode: "totals", variable: "rivers", days: 7 }} label="River forecasts on the map" /> : undefined}>
               <Groups tab="flood" groups={[
                 { id: "forecast", title: GROUP_TITLES.forecast, show: true, children: <>
@@ -318,7 +322,7 @@ export default function App() {
 
           <TabsContent value="wind">
             <Section title="Wind" first
-              description="The strongest gusts by region and location, by day or by model, when they come, the pressure gradients behind the region's classic wind events (south wind, Gorge and Fraser outflow, onshore pushes), and the model maps; then the gusts actually measured and reported."
+              description="The strongest gusts, when they come and the pressure patterns behind them."
               action={<MapLink req={{ mode: "totals", variable: "gust", days: 7 }} label="Strongest gusts on the map" />}>
               <Groups tab="wind" groups={[
                 { id: "forecast", title: GROUP_TITLES.forecast, show: true, children: <>
@@ -340,7 +344,7 @@ export default function App() {
 
           <TabsContent value="coast">
             <Section title="Coast and marine" first
-              description="The outer coast, the Strait of Juan de Fuca, the San Juans and Puget Sound: marine warnings, the wave forecast and the week's high tides against each gauge's flood level; then what the buoys are reading.">
+              description="Marine warnings, waves, tides and buoys, from the outer coast to Puget Sound.">
               {data.coast ? <Groups tab="coast" groups={[
                 { id: "forecast", title: GROUP_TITLES.forecast, show: true, children: <>
                   <MarineWarningsCard data={data} />
@@ -355,7 +359,7 @@ export default function App() {
 
           <TabsContent value="snow">
             <Section title="Snow and mountains" first
-              description="Where the snow level sits against the passes, how much snow the models put down and avalanche danger; then the new snow observed and the snowpack so far."
+              description="Snow level at the passes, snowfall, avalanche danger and the snowpack."
               action={<MapLink req={{ mode: "totals", variable: "snow", days: 7 }} label="Snowfall totals on the map" />}>
               <Groups tab="snow" groups={[
                 { id: "forecast", title: GROUP_TITLES.forecast, show: true, children: <>
@@ -380,7 +384,7 @@ export default function App() {
 
           <TabsContent value="temp">
             <Section title="Temperature" first
-              description="Daily highs and lows against normal for each location, the warmest and coldest each model gets, what the stations have measured lately, and how the models' highs and lows have verified."
+              description="Highs and lows against normal, what's been measured, and how the models have done."
               action={<MapLink req={{ mode: "hourly", layer: "t2m" }} label="Temperature on the map" />}>
               <Groups tab="temp" groups={[
                 { id: "forecast", title: GROUP_TITLES.forecast, show: true, children: <>
@@ -399,7 +403,7 @@ export default function App() {
 
           <TabsContent value="fire">
             <Section title="Wildfire" first
-              description="Red Flag Warnings, the fire outlooks from Predictive Services and SPC, humidity and Hot-Dry-Windy conditions in each model, current fires, smoke and drought."
+              description="Fire weather, the fire outlooks, current fires, smoke and drought."
               action={data.wildfire?.incidents?.length || data.wildfire?.perimeters?.features.length
                 ? <MapLink req={{ mode: "totals", overlays: { fires: true } }} label="Fires on the map" /> : undefined}>
               <WildfireTab data={data} />
@@ -409,7 +413,7 @@ export default function App() {
           <TabsContent value="map" forceMount className={tab === "map" ? "" : "hidden"}>
             {mapSeen && (
               <Section title="Map" first
-                description="Every gridded model and the multi-model products for each window, and the forecast through time, drawn from the same GeoTIFFs this briefing publishes.">
+                description="Every model and multi-model product, for each window or hour by hour.">
                 <React.Suspense fallback={<p className="text-sm text-muted-foreground">Loading the map…</p>}>
                   <InteractiveMap data={data} request={mapReq} active={tab === "map"} />
                 </React.Suspense>
@@ -419,7 +423,7 @@ export default function App() {
 
           <TabsContent value="outlooks">
             <Section title="Outlooks and discussions" first
-              description="Thunderstorm outlooks, mesoscale discussions and storm reports from SPC, the national excessive rainfall and extended outlooks, and the full forecast discussions from the Seattle and Portland offices."
+              description="Thunderstorm, rainfall and extended outlooks, and the NWS forecast discussions."
               action={data.convective ? <MapLink req={{ mode: "totals", variable: "storms", days: 1 }} label="Thunderstorm outlook on the map" /> : undefined}>
               <Groups tab="outlooks" groups={[
                 { id: "forecast", title: GROUP_TITLES.forecast, show: true, children: <>

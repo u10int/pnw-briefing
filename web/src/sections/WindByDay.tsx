@@ -58,9 +58,15 @@ export function WindByDayCard({ data, switcher }: { data: Briefing; switcher?: R
       <CardHeader>
         <CardTitle>{switcher ? "By location" : v === "gust" ? "Gusts by day" : "Wind by day"}</CardTitle>
         <Takeaway>{takeaway}</Takeaway>
-        <CardDescription>
+        <CardDescription info={<>
           {model ? `${model.label}'s` : only ? `Each location's median of ${listNames(only)}` : "Each location's multi-model median"} {WORD[v]} for each day (4 AM – 4 AM), in mph
-          {model && `, out to day ${model.days}`}. Region rows show their windiest location.
+          {model && `, out to day ${model.days}`}. Region rows show their windiest location.{" "}
+          {only ? `The core median uses only ${listNames(only)} on every day. Point values are the nearest model cell, which on coarse global grids smooths out terrain-driven winds.`
+            : pick === MEDIAN
+            ? "The median uses whichever models reach that day. Point values are the nearest model cell, which on coarse global grids smooths out terrain-driven winds."
+            : `Days past ${model!.label}'s range are blank. Point values are the nearest model cell.`}
+          {v === "gust" && " Some models (ECMWF AIFS among them) have no gust field and are left out."}</>}>
+          {model ? `${model.label}'s` : "The median"} {WORD[v]} for each day, in mph.
         </CardDescription>
         {switcher && <CardAction>{switcher}</CardAction>}
       </CardHeader>
@@ -77,12 +83,7 @@ export function WindByDayCard({ data, switcher }: { data: Briefing; switcher?: R
         <DayMatrix dates={data.dates} rows={rows} leadHead="Peak" leadSub={`${span} days`} dimFrom={model ? model.days : undefined}
           style={(x) => rampCell(x, ramp)} fmt={mph} tip={tip} flag={model ? undefined : farApart} />
         <p className="text-xs text-muted-foreground">
-          <HatchKey what={`Hatched: models ${v === "gust" ? 20 : 15}+ mph apart`} />{" "}
-          {only ? `The core median uses only ${listNames(only)} on every day. Point values are the nearest model cell, which on coarse global grids smooths out terrain-driven winds.`
-            : pick === MEDIAN
-            ? "The median uses whichever models reach that day. Point values are the nearest model cell, which on coarse global grids smooths out terrain-driven winds."
-            : `Days past ${model!.label}'s range are blank. Point values are the nearest model cell.`}
-          {v === "gust" && " Some models (ECMWF AIFS among them) have no gust field and are left out."}
+          <HatchKey what={`Hatched: models ${v === "gust" ? 20 : 15}+ mph apart`} />
         </p>
       </CardContent>
     </Card>

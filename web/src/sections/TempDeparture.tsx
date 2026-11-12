@@ -100,10 +100,14 @@ export function TempDepartureCard({ data }: { data: Briefing }) {
       <CardHeader>
         <CardTitle>{show === "dep" ? "Temperatures vs normal" : "Daily temperatures"}</CardTitle>
         <Takeaway>{takeaway}</Takeaway>
-        <CardDescription>
+        <CardDescription info={<>
           {model ? `${model.label}'s` : skill ? "Each location's skill-weighted median" : only ? `Each location's median of ${listNames(only)}` : "Each location's multi-model median"} daily {WORD[v]}{" "}
           {show === "dep" ? "against its 1991 – 2020 normal for the date (PRISM)" : "temperature"}{model && `, out to day ${model.days}`}.
-          {" "}Region rows average their locations.
+          {" "}Region rows average their locations. {skill && <>{skillNote(skill)} </>}Days past the selected window are shown too; the average covers only the window. Each day runs 4 AM to 4 AM
+          Pacific, which holds the day's afternoon high and early-morning low.
+          {show === "dep" && noNormal.length > 0 && ` PRISM normals cover the US only, so ${noNormal.join(", ")} ${noNormal.length > 1 ? "have" : "has"} no departure.`}
+          {" "}The interactive map's Summary mode has the gridded version under “Temperature vs normal”.</>}>
+          Daily {WORD[v]} {show === "dep" ? "against normal" : "temperature"}.
         </CardDescription>
         <CardAction className="flex flex-wrap gap-2"><MapButton req={{ mode: "totals", variable: "tmaxdep", days: 7 }} label="Highs vs normal on the map" /><MapButton req={{ mode: "totals", variable: "tmindep", days: 7 }} label="Lows vs normal on the map" /></CardAction>
       </CardHeader>
@@ -126,11 +130,7 @@ export function TempDepartureCard({ data }: { data: Briefing }) {
         <DayMatrix dates={td.dates} rows={rows} leadHead="Avg" leadSub={w.label} dimFrom={w.days}
           style={show === "dep" ? depCell : (x) => rampCell(x, TEMP)} fmt={show === "dep" ? (x) => signed(x) : deg} tip={tip} flag={model ? undefined : farApart} />
         <p className="text-xs text-muted-foreground">
-          <HatchKey what="Hatched: models 10°F+ apart" />{" "}
-          {skill && <>{skillNote(skill)} </>}Days past the selected window are shown too; the average covers only the window. Each day runs 4 AM to 4 AM
-          Pacific, which holds the day's afternoon high and early-morning low.
-          {show === "dep" && noNormal.length > 0 && ` PRISM normals cover the US only, so ${noNormal.join(", ")} ${noNormal.length > 1 ? "have" : "has"} no departure.`}
-          {" "}The interactive map's Summary mode has the gridded version under “Temperature vs normal”.
+          <HatchKey what="Hatched: models 10°F+ apart" />
         </p>
       </CardContent>
     </Card>

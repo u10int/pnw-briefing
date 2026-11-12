@@ -55,7 +55,8 @@ export function WindPeaks({ data }: { data: Briefing }) {
   })
   return (
     <RegionModelsCard data={data} title="Region peaks" unit={MPH} panels={panels}
-      description="The strongest gust in each region and window: the median across models, with their range and the change since yesterday; below, each model's own peak."
+      description="Each region's strongest gust across models, for each window."
+      about="The strongest gust in each region and window: the median across models, with their range and the change since yesterday; below, each model's own peak."
       byModel="strongest gust at the region's lowland and coastal locations"
       note={<>Range bars span the models, with the median marked. Passes are left out of a region's peak, as their gusts run far stronger than where people live. A model appears only in windows it fully covers.{data.meta.hasSupplement && " * from Open-Meteo; all other models are read from GRIB."}</>} />
   )
@@ -85,9 +86,10 @@ export function WindByLocation({ data, switcher }: { data: Briefing; switcher?: 
           const xs = rows.map((r) => r.points[pts[k]]).filter((x): x is number => x != null)
           return <Takeaway>Strongest: {pts[k]}, a median {Math.round(meds[k]!)} mph {v === "gust" ? "gust" : "sustained"}; models range {Math.round(Math.min(...xs))} – {Math.round(Math.max(...xs))} mph.</Takeaway>
         })()}
-        <CardDescription>
+        <CardDescription info={<>
           Each model's strongest {v === "gust" ? "gust" : "sustained wind"} at each location over the window, in mph. The Median row is the median across models
-          {chg ? "; the row below it is the change in that median since yesterday" : ""}.
+          {chg ? "; the row below it is the change in that median since yesterday" : ""}.</>}>
+          Each model's strongest {v === "gust" ? "gust" : "sustained wind"}, in mph.
         </CardDescription>
         {switcher && <CardAction>{switcher}</CardAction>}
       </CardHeader>

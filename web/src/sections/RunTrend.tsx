@@ -71,9 +71,9 @@ export function RunTrendCard({ data, vars }: { data: Briefing; vars: TrendVar[] 
       <CardHeader>
         <CardTitle>How the forecast has moved</CardTitle>
         <Takeaway>{takeaway}</Takeaway>
-        <CardDescription>
-          Each location's {WHAT[k]} in the last {nr} briefings (the median across models), over the {w.nDays} day{w.nDays === 1 ? "" : "s"} they
-          all cover ({ptDay(`${w.from}T20:00:00Z`)} – {ptDay(`${w.to}T20:00:00Z`)}), so every column compares the same days. A steady row is a forecast the models have stuck with.
+        <CardDescription info={<>Each location's {WHAT[k]} in the last {nr} briefings (the median across models), over the {w.nDays} day{w.nDays === 1 ? "" : "s"} they
+          all cover ({ptDay(`${w.from}T20:00:00Z`)} – {ptDay(`${w.to}T20:00:00Z`)}), so every column compares the same days. A steady row is a forecast the models have stuck with. Region rows are the region's value as in the trends table. Earlier briefings are each day's 12Z edition.</>}>
+          How the forecast has changed over the last {nr} briefings.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -131,7 +131,7 @@ export function RunTrendCard({ data, vars }: { data: Briefing; vars: TrendVar[] 
         </div>
         <p className="text-xs text-muted-foreground">
           Darker cells are larger values. Change is now against the oldest briefing shown, coloured {k === "precip" || k === "snow" ? "by wetter or drier" : k === "gust" ? "by stronger or calmer" : "by warmer or cooler"}
-          {" "}(<span style={{ color: UP_COLOR[k][0] }}>up</span>, <span style={{ color: UP_COLOR[k][1] }}>down</span>). Region rows are the region's value as in the trends table. Earlier briefings are each day's 12Z edition.
+          {" "}(<span style={{ color: UP_COLOR[k][0] }}>up</span>, <span style={{ color: UP_COLOR[k][1] }}>down</span>).
         </p>
       </CardContent>
     </Card>
