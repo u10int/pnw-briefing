@@ -408,7 +408,7 @@ export interface Outlooks {
 }
 
 /** data/fields.json: time-stepped grids for the interactive map (latest briefing only). */
-export type FieldVar = "t2m" | "gust" | "u10" | "v10" | "mslp" | "frz" | "refc" | "ptype" | "ivtu" | "ivtv" | "apcp" | "asnow" | "rh" | "smoke"
+export type FieldVar = "t2m" | "gust" | "u10" | "v10" | "mslp" | "frz" | "refc" | "ptype" | "ivtu" | "ivtv" | "apcp" | "asnow" | "rh" | "smoke" | "prate"
 export interface FieldEntry {
   path: string; model: string; tier: string; var: FieldVar; units: string
   scale: number; nodata: number; times: string[]; run: string; init: string

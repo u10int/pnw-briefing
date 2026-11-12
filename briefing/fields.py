@@ -36,6 +36,8 @@ VARS = {
     "mslp":  {"label": "Sea-level pressure",        "units": "hPa", "scale": 0.1},
     "frz":   {"label": "Freezing level",            "units": "ft",  "scale": 1.0},
     "refc":  {"label": "Composite reflectivity",    "units": "dBZ", "scale": 0.1},
+    # instantaneous precipitation rate: the 3D view's falling precipitation and the radar readout
+    "prate": {"label": "Precipitation rate",        "units": "in/h", "scale": 0.001},
     # water vapour transport (from the AR computation), kg m-1 s-1; the magnitude is drawn from these
     "ivtu":  {"label": "Water vapor transport (east component)",  "units": "kg/m/s", "scale": 0.1},
     "ivtv":  {"label": "Water vapor transport (north component)", "units": "kg/m/s", "scale": 0.1},
@@ -61,10 +63,11 @@ PATTERNS = {
         "crain": [":CRAIN:surface:"], "csnow": [":CSNOW:surface:"],
         "cfrzr": [":CFRZR:surface:"], "cicep": [":CICEP:surface:"],
         "rh": [":RH:2 m above ground:"], "smoke": [":MASSDEN:8 m above ground:"],
+        "prate": [":PRATE:surface:"],          # instantaneous first (GFS also has period averages)
     },
     "ecmwf": {"u10": [":10u:"], "v10": [":10v:"], "mslp": [":msl:"], "ptype": [":ptype:"],
               "t2m": [":2t:"], "gust": [":10fg:", ":10fg3:", ":10fg6:"],
-              "d2m": [":2d:"]},      # 2 m dewpoint: humidity comes from it and the temperature
+              "d2m": [":2d:"], "prate": [":tprate:"]},      # 2 m dewpoint: humidity comes from it and the temperature
 }
 
 CONVERT = {
@@ -75,6 +78,7 @@ CONVERT = {
     "mslp": lambda p: p / 100.0,
     "frz": lambda m: m * 3.28084,
     "refc": lambda d: d,
+    "prate": lambda r: np.clip(r, 0, None) * 3600 / 25.4,  # kg m-2 s-1 (mm/s) -> in/h
     "rh": lambda r: np.clip(r, 0, 100),
     "smoke": lambda m: np.clip(m, 0, None) * 1e9,       # kg/m³ -> µg/m³
 }

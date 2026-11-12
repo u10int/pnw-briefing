@@ -20,6 +20,9 @@ export interface GridDraw {
   /** Precipitation type at those times, for `refc`. */
   auxA?: Float32Array | null
   auxB?: Float32Array | null
+  /** Precipitation rate (in/h) at those times, on the same grid, for the 3D view's falling precipitation. */
+  rateA?: Float32Array | null
+  rateB?: Float32Array | null
 }
 
 // up to 256 levels: Maue's temperature table has 201 one-degree bands. The levels sit in a float

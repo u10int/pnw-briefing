@@ -772,7 +772,7 @@ function VolumeLegend({ entry, name, exaggeration, particles, precip }: { entry:
       <p className="text-xs text-muted-foreground">
         {VOL_NOTES[name]} {name === "frz" ? "" : v.note ?? ""}
         {particles && pk.length > 0 && <> Particles trace the wind at {pk.map((l) => `${l.hPa} mb`).join(", ")} (about {pk.map((l) => l.km.toFixed(1)).join(", ")} km), coloured by speed like the map's wind.</>}
-        {precip && <> Falling precipitation comes from the radar layer below: rain in streaks, snow drifting down, sleet and freezing rain in between, wherever the simulated radar shows about 15 dBZ or more (thicker where it's heavier), in the radar legend's colours for each type. It falls from about 3 km.</>}
+        {precip && <> Falling precipitation comes from the radar layer below: rain in streaks, snow drifting down, sleet and freezing rain in between, wherever the model's precipitation rate is 0.01 in/h or more (or, for a model without a rate, its simulated radar about 15 dBZ or more), thicker where it's heavier, in the radar legend's colours for each type. It falls from about 3 km.</>}
         {" "}{entry.model} on pressure levels, 0 – {entry.topKm} km, heights stretched ×{exaggeration}: kilometres up one edge of the box, the
         model's average pressure-level heights up the other. Steps every {hours} hours through {timeLabel(entry.times[steps - 1])}, blended in between. Right-drag (or Ctrl-drag) to tilt and turn, two fingers on a phone; drag the compass to tilt, click it to face north.
       </p>
@@ -1229,17 +1229,29 @@ function hourlyView(model: string, entries: Record<string, FieldEntry>, layer: H
           const isoA = prim.times[b.i0], isoB = prim.times[b.i1]
           let draw: GridDraw
           let describe: (lon: number, lat: number, t: number, smooth: boolean) => string | null
+          // the model's precipitation rate on the same grid (intensity for the 3D view's falling precipitation)
+          let rateA: Float32Array | null = null, rateB: Float32Array | null = null
+          if (layer === "radar") {
+            const ra = await bandNear(entries.prate, isoA), rb = B ? await bandNear(entries.prate, isoB) : null
+            rateA = ra && sameGrid(ra.f, f) ? ra.data : null
+            rateB = rateA && rb && sameGrid(rb.f, f) ? rb.data : rateA
+          }
+          const rateText = (lon: number, lat: number, t: number) => {
+            if (!rateA) return ""
+            const r = blendAt(f, rateA, rateB, t, lon, lat, false)
+            return r >= 0.005 ? `, ${r < 0.1 ? r.toFixed(2) : r.toFixed(1)} in/h` : ""
+          }
           if (layer === "radar" && prim.var === "refc") {
             const pa = await bandNear(entries.ptype, isoA), pb = B ? await bandNear(entries.ptype, isoB) : null
             const aux = pa && sameGrid(pa.f, f) ? pa.data : null
             const auxB = aux && pb && sameGrid(pb.f, f) ? pb.data : aux
-            draw = { grid: f, a: A, b: B, auxA: aux, auxB, paint: { kind: "refc" } }
+            draw = { grid: f, a: A, b: B, auxA: aux, auxB, rateA, rateB, paint: { kind: "refc" } }
             describe = (lon, lat, t, smooth) => {
               const v = blendAt(f, A, B, t, lon, lat, smooth)
               if (!(v >= 5)) return "No precipitation"
               const code = aux ? categoryAt(f, aux, auxB, t, lon, lat) : NaN
               const tn = PTYPE_NAMES[code] as string | undefined
-              return `${tn && tn !== "none" ? cap(tn) + ", " : ""}${Math.round(v)} dBZ`
+              return `${tn && tn !== "none" ? cap(tn) + ", " : ""}${Math.round(v)} dBZ${rateText(lon, lat, t)}`
             }
           } else if (layer === "pgrad") {
             const elev = await elevationFor(f).catch(() => null)
@@ -1251,10 +1263,10 @@ function hourlyView(model: string, entries: Record<string, FieldEntry>, layer: H
               return elev && Number.isFinite(valueAt(f, A, lon, lat, false)) ? "Mountains: not shown (sea-level pressure there is an extrapolation)" : null
             }
           } else if (layer === "radar") {
-            draw = { grid: f, a: A, b: B, paint: { kind: "ptype" } }
+            draw = { grid: f, a: A, b: B, rateA, rateB, paint: { kind: "ptype" } }
             describe = (lon, lat, t) => {
               const tn = PTYPE_NAMES[categoryAt(f, A, B, t, lon, lat)] ?? "none"
-              return tn === "none" ? "No precipitation" : cap(tn)
+              return tn === "none" ? "No precipitation" : cap(tn) + rateText(lon, lat, t)
             }
           } else if (layer === "wind" || layer === "ivt") {
             const vEntry = layer === "ivt" ? entries.ivtv : entries.v10
@@ -1345,7 +1357,7 @@ function hourlyView(model: string, entries: Record<string, FieldEntry>, layer: H
     prefetch(time) {
       // decode the next few steps ahead of playback
       const i = Math.floor(posOf(msOf(prim.times), time))
-      for (const e of [prim, entries.ptype, entries.v10, entries.u10, entries.ivtv]) {
+      for (const e of [prim, entries.ptype, entries.prate, entries.v10, entries.u10, entries.ivtv]) {
         if (!e) continue
         for (let k = 1; k <= 6; k++) {
           const iso = prim.times[i + k]

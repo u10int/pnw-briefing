@@ -4,9 +4,10 @@ import type { GridDraw } from "./grid-layer"
 import { MISSING, mercY, program, type Program } from "./util"
 
 /**
- * Falling precipitation for the 3D view, from the map's radar layer: where the model's simulated
- * reflectivity shows precipitation, streaks of rain or drifting flakes of snow fall from a few
- * kilometres up to the ground, as many as the intensity calls for, coloured by precipitation type
+ * Falling precipitation for the 3D view, from the map's radar layer: where the model's precipitation
+ * rate (or, without one, its simulated reflectivity or precipitation type) shows precipitation,
+ * streaks of rain or drifting flakes of snow fall from a few kilometres up to the ground, as many as
+ * the intensity calls for, coloured by precipitation type
  * (the radar legend's colours). Rain falls fast in streaks; snow slowly, wobbling; sleet and
  * freezing rain in between. Positions are in the volume box's coordinates (0 – 1 each way, z up).
  */
@@ -107,6 +108,7 @@ export class PrecipFx {
     if (this.src && key === this.srcKey) return this.src
     const vals = later ? d.b! : d.a
     const types = d.paint.kind === "ptype" ? vals : (later ? d.auxB : d.auxA) ?? null
+    const rates = (later ? d.rateB : d.rateA) ?? null
     const g = d.grid
     const dLon = (g.east - g.west) / g.width, dLat = (g.north - g.south) / g.height
     const yN = mercY(box.lat[1]), yS = mercY(box.lat[0])
@@ -122,7 +124,12 @@ export class PrecipFx {
         const v = vals[i]
         if (!(v > MISSING / 2)) continue
         let w: number
-        if (d.paint.kind === "refc") {
+        if (rates) {
+          // the model's own rate: from 0.01 in/h (a quarter of a millimetre an hour)
+          const r = rates[i]
+          if (!(r >= 0.01)) continue
+          w = Math.min(40, r * 25.4)                 // mm/h
+        } else if (d.paint.kind === "refc") {
           if (v < 15) continue                       // below about 0.5 mm/h: too light to show
           w = Math.min(40, rate(v))
         } else {
