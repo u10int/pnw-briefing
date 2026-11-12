@@ -125,7 +125,7 @@ below are described in that order of content, not page order.
     travel advice and when the summary ends.
 - **Interactive map.** MapLibre map with two modes. *Summary* shows every gridded model, the
   multi-model mean, spread and percent of normal for each window, plus highest and lowest
-  temperature, strongest wind and strongest gust over each window. *Through time* steps through
+  temperature, strongest wind and strongest gust over each window. *Hourly* steps through
   the forecast with a time slider and play button: simulated radar coloured by precipitation type
   (rain, snow, mix, freezing rain, sleet), 2 m temperature with the 32°F line, gusts, wind, and
   freezing level, water vapor transport (IVT, GFS and ECMWF AIFS) on the atmospheric-river
@@ -237,7 +237,7 @@ grids to object storage such as Cloudflare R2; only the publish step changes.
 
 ## The 3D view
 
-The interactive map's **3D** switch (under "Through time") tilts the map and draws a model's
+The interactive map's **3D** switch (under "Hourly") tilts the map and draws a model's
 forecast through the depth of the atmosphere over it, following the time slider. The volumes
 come from their own workflow (`.github/workflows/volume.yml`), which starts when a briefing run
 succeeds, so the edition never waits on these downloads: it builds them for the published

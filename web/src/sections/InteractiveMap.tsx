@@ -1673,7 +1673,7 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
   const accStart = timeLabel(data.meta.cycle ?? `${data.dates[0]}T12:00:00Z`)
 
   // Keep the clock on one of the main model's steps when the model or layer changes (or on the
-  // step nearest a moment an "Open on map" link asked for). Switching to "Through time" starts at
+  // step nearest a moment an "Open on map" link asked for). Switching to "Hourly" starts at
   // the current hour when the forecast covers it.
   const startNow = React.useRef(true)
   const lastMode = React.useRef(mode)
@@ -1782,7 +1782,7 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
             <Tabs value={mode} onValueChange={(v) => { setMode(v as "totals" | "hourly"); setPlaying(false) }} className="max-sm:w-full">
               <TabsList className="max-sm:w-full">
                 <TabsTrigger value="totals">Summary</TabsTrigger>
-                <TabsTrigger value="hourly">Through time</TabsTrigger>
+                <TabsTrigger value="hourly">Hourly</TabsTrigger>
               </TabsList>
             </Tabs>
           )}
