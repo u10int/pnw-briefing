@@ -27,6 +27,8 @@ import type { MapRequest } from "@/lib/maplink"
 import { GridLayer, type GridDraw } from "@/lib/gl/grid-layer"
 import { ParticleLayer, type WindDraw } from "@/lib/gl/particle-layer"
 import { VolumeLayer } from "@/lib/gl/volume-layer"
+import { type LonLat, SECTION_PRESETS, type SectionLine } from "@/lib/xsection"
+import { CrossSection } from "@/sections/CrossSection"
 import { frac, frzColor, heightLut, hexRgb, ISOS, legendStops, loadVolume, lutFor, SOURCE, transfer, useVolumes, VIEW_LABEL, VOL_ORDER,
   type VolumeEntry, type VolumeVar, type VolVar } from "@/lib/volume"
 import { type Grid, sameGrid } from "@/lib/gl/util"
@@ -261,11 +263,15 @@ const volLabel = (e: VolumeEntry, n: VolVar) => VIEW_LABEL[n] ?? e.vars[SOURCE[n
 /** Heights to release wind particles at: the standard levels, at the model's average heights. */
 const PARTICLE_HPA = [850, 700, 500, 300, 250]
 
-function MapPane({ data, view, clock, opacity, smooth, particles, particleColor, sync, terrain, sat, fronts, reports, fires, vol = null }: {
+/** The cross-section on the map: its line (and the points picked so far while drawing one). */
+interface PaneSection { line: SectionLine | null; picked: LonLat[] | null; sink: React.MutableRefObject<{ set?: (img: HTMLCanvasElement) => void }> }
+
+function MapPane({ data, view, clock, opacity, smooth, particles, particleColor, sync, terrain, sat, fronts, reports, fires, vol = null, xsec = null, onPick = null }: {
   data: Briefing; view: View | null; clock: Clock; opacity: number; smooth: boolean
   particles: boolean; particleColor: [number, number, number, number]; sync: ReturnType<typeof useCameraSync>
   terrain: boolean; sat: { kind: SatKind; times: SatTimes } | null; fronts: Fronts | null; reports: ObsReport[] | null
   fires: Wildfire | null; vol?: PaneVolume | null
+  xsec?: PaneSection | null; onPick?: ((ll: LonLat) => void) | null
 }) {
   const el = React.useRef<HTMLDivElement>(null)
   const axisEl = React.useRef<HTMLDivElement>(null)
@@ -275,6 +281,8 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
   const loaded = React.useRef<{ v: Loaded | null; t: number }>({ v: null, t: 0 })
   const overlays = React.useRef<Overlays | null>(null)
   const smoothRef = React.useRef(smooth)
+  const pickRef = React.useRef(onPick)
+  pickRef.current = onPick
   smoothRef.current = smooth
   const viewRef = React.useRef(view)
   viewRef.current = view
@@ -405,6 +413,12 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
         m.addLayer({ id: "ar-rank", type: "symbol", source: "ar", filter: ["!=", ["get", "num"], ""],
           layout: { "text-field": ["get", "num"], "text-font": arFont as string[], "text-size": 11, "text-allow-overlap": true },
           paint: { "text-color": ["get", "text"] } })
+      // the cross-section's line, and its ends (A, B)
+      m.addSource("xsec", { type: "geojson", data: EMPTY })
+      m.addLayer({ id: "xsec-line", type: "line", source: "xsec", filter: ["==", ["geometry-type"], "LineString"],
+        paint: { "line-color": "#1f2328", "line-width": 2.5, "line-dasharray": [2, 1.2] } })
+      m.addLayer({ id: "xsec-ends", type: "circle", source: "xsec", filter: ["==", ["geometry-type"], "Point"],
+        paint: { "circle-radius": 5, "circle-color": "#1f2328", "circle-stroke-color": "#fff", "circle-stroke-width": 2 } })
       // the 3D view's volume, over everything
       m.addLayer(layers.current!.volume)
       resolve(m)
@@ -415,12 +429,13 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
       const near = m.queryRenderedFeatures([[e.point.x - 6, e.point.y - 6], [e.point.x + 6, e.point.y + 6]], { layers: ["points"] })
       const { v, t } = loaded.current
       const parts = [v?.sample(e.lngLat.lng, e.lngLat.lat, t, smoothRef.current), overlays.current?.sample?.(e.lngLat.lng, e.lngLat.lat, smoothRef.current)]
-      m.getCanvas().style.cursor = near.length ? "pointer" : ""
+      m.getCanvas().style.cursor = pickRef.current ? "crosshair" : near.length ? "pointer" : ""
       setHover({ x: e.point.x, y: e.point.y, text: parts.filter(Boolean).join(", ") || null, place: near.length ? String(near[0].properties?.name) : null })
     })
     m.on("mouseout", () => setHover(null))
     // a forecast location opens its detail panel
     m.on("click", (e: MapMouseEvent) => {
+      if (pickRef.current) { pickRef.current([e.lngLat.lng, e.lngLat.lat]); return }   // drawing a cross-section
       const near = m.queryRenderedFeatures([[e.point.x - 6, e.point.y - 6], [e.point.x + 6, e.point.y + 6]], { layers: ["points"] })
       if (near.length) openLocation(String(near[0].properties?.name))
     })
@@ -540,6 +555,30 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
   }, [volKey, vol?.data])
   React.useEffect(() => { layers.current!.volume.setExaggeration(vol?.exaggeration ?? 25) }, [vol?.exaggeration])
   React.useEffect(() => { layers.current!.volume.setPrecipOn(!!vol?.precip) }, [vol?.precip])
+  // ---- the cross-section: its line on the map, and the slice as a curtain in the 3D view
+  const xLine = xsec?.line ?? null
+  const xKey = xLine ? `${xLine.a}|${xLine.b}` : ""
+  const xPicked = xsec?.picked ? xsec.picked.map(String).join("|") : ""
+  React.useEffect(() => {
+    ready.current?.then((m) => {
+      const pts: LonLat[] = xsec?.picked?.length ? xsec.picked : xLine ? [xLine.a, xLine.b] : []
+      const fc = { type: "FeatureCollection" as const, features: [
+        ...(pts.length === 2 ? [{ type: "Feature" as const, properties: {}, geometry: { type: "LineString" as const, coordinates: pts } }] : []),
+        ...pts.map((p) => ({ type: "Feature" as const, properties: {}, geometry: { type: "Point" as const, coordinates: p } })),
+      ] }
+      ;(m.getSource("xsec") as maplibregl.GeoJSONSource | undefined)?.setData(fc)
+    })
+    const L = layers.current!.volume
+    if (xsec && xLine && !xsec.picked) {
+      xsec.sink.current.set = (img) => L.setCurtain(xLine.a, xLine.b, img)
+      L.setCurtain(xLine.a, xLine.b)
+      L.setOpacity(0.45)                     // the volume steps back so the slice reads
+    } else {
+      if (xsec) xsec.sink.current.set = undefined
+      L.setCurtain(null)
+      L.setOpacity(1)
+    }
+  }, [!!xsec, xKey, xPicked])
   React.useEffect(() => { layers.current!.volume.setHeightRange(vol?.range[0] ?? 0, vol?.range[1] ?? 99) }, [vol?.range[0], vol?.range[1], vol?.data])
   React.useEffect(() => {
     const e = vol?.entry, w = vol?.wind
@@ -1752,6 +1791,33 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
   const paneWind = volWindOn && volEntry && volWind?.model === volEntry.model ? { u: volWind.u, v: volWind.v } : null
   const paneVol: PaneVolume | null = volEntry && volName
     ? { entry: volEntry, name: volName, data: volData?.path === volPath ? volData.data : null, exaggeration: exag, wind: paneWind, range: zRange ?? [0, volEntry.topKm], precip: layer === "radar" && volPrecip } : null
+  // the cross-section: a preset line or one drawn on the map, sliced through the 3D field
+  const [xsecOn, setXsecOn] = React.useState(false)
+  const [xsecLine, setXsecLine] = React.useState<SectionLine>(SECTION_PRESETS[0])
+  const [picking, setPicking] = React.useState<LonLat[] | null>(null)
+  const xsecSink = React.useRef<{ set?: (img: HTMLCanvasElement) => void }>({})
+  const xsecShown = !!(volOn && xsecOn && paneVol?.data)
+  const needTemp = xsecShown && volEntry && volName && SOURCE[volName] !== "temp" && volEntry.vars.temp ? volEntry : null
+  const [volTemp, setVolTemp] = React.useState<{ model: string; data: Uint8Array } | null>(null)
+  React.useEffect(() => {
+    if (!needTemp || volTemp?.model === needTemp.model) return
+    let live = true
+    loadVolume(needTemp.vars.temp).then((d) => { if (live) setVolTemp({ model: needTemp.model, data: d }) }).catch(() => {})
+    return () => { live = false }
+  }, [needTemp?.model])
+  const sectionTime = React.useCallback(() => {
+    const ms = msOf(volEntry?.times ?? [])
+    if (!ms.length) return { i0: 0, i1: 0, t: 0 }
+    const pos = posOf(ms, clock.time ?? ms[0]), i0 = Math.floor(pos)
+    return { i0, i1: Math.min(i0 + 1, ms.length - 1), t: pos - i0 }
+  }, [volEntry, clock])
+  const sectionSub = React.useCallback((fn: () => void) => clock.subscribe(fn), [clock])
+  const onSectionImage = React.useCallback((img: HTMLCanvasElement) => xsecSink.current.set?.(img), [])
+  const onPick = (ll: LonLat) => {
+    if (!picking?.length) { setPicking([ll]); return }
+    setXsecLine({ id: "custom", label: "Your line", a: picking[0], b: ll, aName: "A", bName: "B" })
+    setPicking(null)
+  }
   const showB = compare && !volOn && (mode === "hourly" || perModel)
   const viewB = !showB ? null : mode === "totals"
     ? variable === "ar" ? (data.arCoast ? arView(data.arCoast, pickOther(other), winLabel(d)) : null)
@@ -1853,6 +1919,7 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
                   )}
                   {hasUV && <Toggle id="vol-wind" label="Wind particles" checked={volWindOn} onChange={setVolWindOn} />}
                   {layer === "radar" && <Toggle id="vol-precip" label="Falling precip" checked={volPrecip} onChange={setVolPrecip} />}
+                  <Toggle id="vol-xsec" label="Cross-section" checked={xsecOn} onChange={(v) => { setXsecOn(v); if (!v) setPicking(null) }} />
                   <div className="flex items-center gap-2.5 text-sm max-sm:w-full">
                     <Label className="font-normal whitespace-nowrap">Height ×{exag}</Label>
                     <Slider className="w-[120px] max-sm:flex-1" value={[exag]} min={5} max={60} step={5} onValueChange={([v]) => setExag(v)} aria-label="Vertical stretch" />
@@ -1908,9 +1975,38 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
         {mode === "hourly" && times.length > 0 && <TimeBar times={times} clock={clock} playing={playing} setPlaying={setPlaying} />}
 
         <div className={`grid gap-3 ${showB ? "lg:grid-cols-2" : ""}`}>
-          <MapPane data={data} view={viewA} clock={clock} opacity={opacity} smooth={smooth} particles={showParticles} particleColor={ink} sync={sync} terrain={terrain} sat={sat} fronts={frontsOn} reports={reportsOn} fires={firesOn} vol={paneVol} />
+          <MapPane data={data} view={viewA} clock={clock} opacity={opacity} smooth={smooth} particles={showParticles} particleColor={ink} sync={sync} terrain={terrain} sat={sat} fronts={frontsOn} reports={reportsOn} fires={firesOn} vol={paneVol}
+            xsec={volOn && xsecOn ? { line: xsecLine, picked: picking, sink: xsecSink } : null} onPick={volOn && xsecOn && picking ? onPick : null} />
           {showB && <MapPane data={data} view={viewB} clock={clock} opacity={opacity} smooth={smooth} particles={showParticles} particleColor={ink} sync={sync} terrain={terrain} sat={sat} fronts={frontsOn} reports={reportsOn} fires={firesOn} />}
         </div>
+
+        {volOn && xsecOn && volEntry && volName && (
+          <div className="space-y-2">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+              <Select value={xsecLine.id} onValueChange={(id) => { const p = SECTION_PRESETS.find((x) => x.id === id); if (p) { setXsecLine(p); setPicking(null) } }}>
+                <SelectTrigger className="w-full sm:w-[330px]" aria-label="Cross-section line"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {SECTION_PRESETS.map((p) => <SelectItem key={p.id} value={p.id}>{p.label}</SelectItem>)}
+                  {xsecLine.id === "custom" && <SelectItem value="custom">Your line</SelectItem>}
+                </SelectContent>
+              </Select>
+              {picking
+                ? <><span className="text-sm">{picking.length ? "Now click the line's other end on the map." : "Click one end of the line on the map."}</span>
+                    <Button variant="ghost" size="sm" onClick={() => setPicking(null)}>Cancel</Button></>
+                : <Button variant="outline" size="sm" onClick={() => setPicking([])}>Draw a line</Button>}
+            </div>
+            {xsecShown && paneVol?.data ? (
+              <CrossSection data={data} entry={volEntry} name={volName} values={paneVol.data}
+                temp={SOURCE[volName] === "temp" ? paneVol.data : volTemp?.model === volEntry.model ? volTemp.data : null}
+                line={xsecLine} time={sectionTime} subscribe={sectionSub} onImage={onSectionImage} />
+            ) : <p className="text-xs text-muted-foreground">Loading the 3D data…</p>}
+            <p className="text-xs text-muted-foreground">
+              {volEntry.model} {(VIEW_LABEL[volName] ?? volEntry.vars[SOURCE[volName]]?.label ?? "").toLowerCase()} along the line, from the ground to {volEntry.topKm} km, at the map's time.
+              The heavy blue line is the freezing level (32°F); the brown is the terrain along the line (smoother in the model);
+              thin lines are contours. The slice also stands in the 3D view as a curtain. Hover for values.
+            </p>
+          </div>
+        )}
 
         {frontsOn && <FrontLegend />}
         {reportsOn && <ReportLegend reports={reportsOn} hours={data.obsReports?.reportHours ?? 48} />}

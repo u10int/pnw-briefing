@@ -193,6 +193,29 @@ void main() {
 }`
 
 // the cached volume image, drawn over the map each frame
+// the cross-section's curtain: a vertical quad along the line, textured with the slice
+const CURTAIN_VS = /* glsl */ `#version 300 es
+layout(location = 0) in vec2 aPos;          // along the line, up
+uniform mat4 uMVP;
+uniform vec4 uLine;                         // box x, y of the line's two ends
+uniform vec2 uZr;                           // the heights drawn
+out vec2 vUv;
+void main() {
+  float z = mix(uZr.x, uZr.y, aPos.y);
+  vUv = vec2(aPos.x, z);
+  gl_Position = uMVP * vec4(mix(uLine.xy, uLine.zw, aPos.x), z, 1.0);
+}`
+const CURTAIN_FS = /* glsl */ `#version 300 es
+precision highp float;
+uniform sampler2D uImg;
+uniform float uAlpha;
+in vec2 vUv;
+out vec4 fragColor;
+void main() {
+  vec4 c = texture(uImg, vec2(vUv.x, 1.0 - vUv.y));
+  fragColor = vec4(c.rgb * c.a, c.a) * uAlpha;
+}`
+
 const BLIT_FS = /* glsl */ `#version 300 es
 precision highp float;
 uniform sampler2D uImg;
@@ -277,6 +300,10 @@ export class VolumeLayer implements CustomLayerInterface {
   private precipDraw: GridDraw | null = null
   private precipT = 0
   private precipOn = false
+  // ---- cross-section curtain
+  private curtainProg?: Program
+  private curtainTex?: WebGLTexture
+  private curtain: { a: [number, number]; b: [number, number]; img: TexImageSource | null; fresh: boolean } | null = null
   private opacity = 1
   private moving = false
   private dataChanged = false
@@ -302,6 +329,8 @@ export class VolumeLayer implements CustomLayerInterface {
     this.prog = program(gl, VS, FS)
     this.lineProg = program(gl, LINE_VS, LINE_FS)
     this.blitProg = program(gl, VS, BLIT_FS)
+    this.curtainProg = program(gl, CURTAIN_VS, CURTAIN_FS)
+    this.curtainTex = gl.createTexture()!
     this.fbo = gl.createFramebuffer()!
     this.fboTex = gl.createTexture()!
     this.heightTex = gl.createTexture()!
@@ -349,6 +378,8 @@ export class VolumeLayer implements CustomLayerInterface {
     if (this.prog) gl.deleteProgram(this.prog.program)
     if (this.lineProg) gl.deleteProgram(this.lineProg.program)
     if (this.blitProg) gl.deleteProgram(this.blitProg.program)
+    if (this.curtainProg) gl.deleteProgram(this.curtainProg.program)
+    if (this.curtainTex) gl.deleteTexture(this.curtainTex)
     if (this.trailProg) gl.deleteProgram(this.trailProg.program)
     if (this.trailBuf) gl.deleteBuffer(this.trailBuf)
     if (this.fbo) gl.deleteFramebuffer(this.fbo)
@@ -480,6 +511,12 @@ export class VolumeLayer implements CustomLayerInterface {
   }
   setPrecipT(t: number) { this.precipT = t; this.precip?.setT(t) }
   setPrecipOn(on: boolean) { this.precipOn = on; this.map?.triggerRepaint() }
+  /** The cross-section's line (lon, lat of its ends) and its slice image, or null for none. */
+  setCurtain(a: [number, number] | null, b?: [number, number], img?: TexImageSource | null) {
+    if (!a || !b) this.curtain = null
+    else this.curtain = { a, b, img: img ?? this.curtain?.img ?? null, fresh: !!img || !!this.curtain?.fresh }
+    this.map?.triggerRepaint()
+  }
   setExaggeration(x: number) {
     this.exaggeration = x
     this.map?.triggerRepaint()
@@ -569,6 +606,7 @@ export class VolumeLayer implements CustomLayerInterface {
     gl.bindVertexArray(this.vao!)
     gl.drawArrays(gl.TRIANGLES, 0, 6)
 
+    this.drawCurtain(gl, mvp, g)
     this.drawParticles(gl, mvp)
     if (this.precipOn && this.precip?.render(gl, Float32Array.from(mvp), { lon: g.lon, lat: g.lat, topKm: g.topKm }, this.zr, window.devicePixelRatio || 1))
       this.map?.triggerRepaint()                             // keep it falling
@@ -644,6 +682,35 @@ export class VolumeLayer implements CustomLayerInterface {
     gl.disable(gl.DEPTH_TEST)
     gl.disable(gl.CULL_FACE)
     gl.disable(gl.BLEND)              // the image starts clear and the march composites itself
+    gl.bindVertexArray(this.vao!)
+    gl.drawArrays(gl.TRIANGLES, 0, 6)
+    gl.bindVertexArray(null)
+  }
+
+  private drawCurtain(gl: WebGL2RenderingContext, mvp: M4, g: VolumeGrid) {
+    const c = this.curtain
+    if (!c || !c.img || !this.curtainProg || !this.curtainTex) return
+    gl.activeTexture(gl.TEXTURE0)
+    gl.bindTexture(gl.TEXTURE_2D, this.curtainTex)
+    if (c.fresh) {
+      resetUnpack(gl)
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, c.img)
+      for (const [k, v] of [[gl.TEXTURE_MIN_FILTER, gl.LINEAR], [gl.TEXTURE_MAG_FILTER, gl.LINEAR], [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE]])
+        gl.texParameteri(gl.TEXTURE_2D, k, v)
+      c.fresh = false
+    }
+    const bx = (lon: number) => (lon - g.lon[0]) / (g.lon[1] - g.lon[0])
+    const yN = mercY(g.lat[1]), yS = mercY(g.lat[0])
+    const by = (lat: number) => (mercY(lat) - yN) / (yS - yN)
+    const p = this.curtainProg
+    gl.useProgram(p.program)
+    gl.uniformMatrix4fv(p.u("uMVP"), false, Float32Array.from(mvp))
+    gl.uniform4f(p.u("uLine"), bx(c.a[0]), by(c.a[1]), bx(c.b[0]), by(c.b[1]))
+    gl.uniform2f(p.u("uZr"), this.zr[0], this.zr[1])
+    gl.uniform1i(p.u("uImg"), 0)
+    gl.uniform1f(p.u("uAlpha"), 0.93)
+    gl.enable(gl.BLEND)
+    gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA)
     gl.bindVertexArray(this.vao!)
     gl.drawArrays(gl.TRIANGLES, 0, 6)
     gl.bindVertexArray(null)
