@@ -5,7 +5,7 @@ import "maplibre-gl/dist/maplibre-gl.css"
 // MapLibre runs a web worker for vector/GeoJSON work; have Vite bundle it and tell MapLibre where it is.
 import { summarize } from "@/sections/Hazards"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { ChevronRight, CircleHelp, ExternalLink, Maximize2, Minimize2, Pause, Play, SlidersHorizontal } from "lucide-react"
+import { ChevronRight, CircleHelp, ExternalLink, Maximize2, Minimize2, Pause, Play, SlidersHorizontal, X } from "lucide-react"
 import { Popover } from "radix-ui"
 
 import { Button } from "@/components/ui/button"
@@ -1874,6 +1874,31 @@ function useStoredFlag(key: string, initial: boolean, forced?: boolean): [boolea
 const SEC_PER_STEP = 0.7
 
 /** Play button, time slider and label; the only part of the card that re-renders during playback. */
+/**
+ * A panel floating in the map's bottom-left corner (the cross-section on the map page and in full
+ * screen): a title bar that folds it away or closes it, and the content under it. Open at first on
+ * wider screens; on a phone it starts folded so the map shows, and spans the map's width.
+ */
+function FloatPanel({ title, onClose, picking, className, children }: {
+  title: string; onClose: () => void; picking?: boolean; className: string; children: React.ReactNode
+}) {
+  const [open, setOpen] = React.useState(() => typeof window === "undefined" || window.matchMedia("(min-width: 640px)").matches)
+  React.useEffect(() => { if (picking) setOpen(true) }, [picking])        // the instructions show while drawing
+  return (
+    <section aria-label={title}
+      className={`absolute left-3 z-10 w-[min(600px,calc(100%-24px))] rounded-lg border bg-card/95 shadow-lg backdrop-blur max-sm:right-2 max-sm:left-2 max-sm:w-auto ${className}`}>
+      <div className="flex items-center gap-1 py-1 pr-1 pl-2">
+        <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open}
+          className="flex flex-1 items-center gap-1 rounded-md px-1 py-1 text-left text-[13px] font-semibold outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
+          <ChevronRight className={`size-3.5 text-muted-foreground transition-transform ${open ? "rotate-90" : ""}`} aria-hidden />{title}
+        </button>
+        <Button variant="ghost" size="icon" className="size-7" onClick={onClose} aria-label={`Close the ${title.toLowerCase()}`}><X className="size-4" aria-hidden /></Button>
+      </div>
+      {open && <div className="max-h-[min(60dvh,420px)] space-y-2 overflow-y-auto px-3 pb-3">{children}</div>}
+    </section>
+  )
+}
+
 /** The legends over the full screen map: open on wider screens, a "Legend" button on phones. */
 function MapKey({ children }: { children: React.ReactNode }) {
   const [open, setOpen] = React.useState(() => typeof window === "undefined" || window.matchMedia("(min-width: 640px)").matches)
@@ -2337,6 +2362,36 @@ export function InteractiveMap({ data, request, active = true, standalone = fals
     return () => { a(); b(); window.clearTimeout(shareTimer.current) }
   }, [clock, sync, scheduleShare])
 
+  // ---- the cross-section's controls and chart: under the map, or on the map page and in full screen
+  // a panel floating in the map's corner
+  const xsecOpen = !!(volOn && xsecOn && !volNone && volEntry && volName)
+  const xsecFloat = xsecOpen && (standalone || full)
+  const xsecControls = xsecOpen && (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+      <Select value={xsecLine.id} onValueChange={(id) => { const p = SECTION_PRESETS.find((x) => x.id === id); if (p) { setXsecLine(p); setPicking(null) } }}>
+        <SelectTrigger className={xsecFloat ? "h-8 min-w-0 flex-1 text-[13px]" : "w-full sm:w-[330px]"} aria-label="Cross-section line"><SelectValue /></SelectTrigger>
+        <SelectContent>
+          {SECTION_PRESETS.map((p) => <SelectItem key={p.id} value={p.id}>{p.label}</SelectItem>)}
+          {xsecLine.id === "custom" && <SelectItem value="custom">Your line</SelectItem>}
+        </SelectContent>
+      </Select>
+      {picking
+        ? <><span className="text-sm">{picking.length ? "Now click the line's other end on the map." : "Click one end of the line on the map."}</span>
+            <Button variant="ghost" size="sm" onClick={() => setPicking(null)}>Cancel</Button></>
+        : <Button variant="outline" size="sm" className={xsecFloat ? "h-8" : ""} onClick={() => setPicking([])}>Draw a line</Button>}
+    </div>
+  )
+  const xsecChart = xsecOpen && (
+    <>
+      {xsecShown && paneVol?.data ? (
+        <CrossSection data={data} entry={volEntry!} name={volName!} values={paneVol.data}
+          temp={SOURCE[volName!] === "temp" ? paneVol.data : volTemp?.model === volEntry!.model ? volTemp.data : null}
+          line={xsecLine} time={sectionTime} subscribe={sectionSub} onImage={onSectionImage} />
+      ) : <p className="text-xs text-muted-foreground">Loading the 3D data…</p>}
+      <p className="text-xs text-muted-foreground">Heavy blue: freezing level. Brown: terrain. Hover for values.</p>
+    </>
+  )
+
   // the legends, under the map and (compact) over it in full screen
   const legends = (
     <>
@@ -2591,6 +2646,13 @@ export function InteractiveMap({ data, request, active = true, standalone = fals
             {full ? <Minimize2 className="size-4" aria-hidden /> : <Maximize2 className="size-4" aria-hidden />}
           </Button>
           {full && <MapKey>{legends}</MapKey>}
+          {xsecFloat && (
+            <FloatPanel title="Cross-section" onClose={() => { setXsecOn(false); setPicking(null) }} picking={!!picking}
+              className={full && mode === "hourly" ? "bottom-[calc(7.5rem+env(safe-area-inset-bottom))] sm:bottom-28" : "bottom-3 max-sm:bottom-2"}>
+              {xsecControls}
+              {xsecChart}
+            </FloatPanel>
+          )}
           {full && mode === "hourly" && times.length > 0 && (
             <div className="pointer-events-none absolute inset-x-3 bottom-[calc(3rem+env(safe-area-inset-bottom))] z-10 flex justify-center sm:bottom-10">
               <TimeBar times={times} clock={clock} playing={playing} setPlaying={setPlaying}
@@ -2599,27 +2661,10 @@ export function InteractiveMap({ data, request, active = true, standalone = fals
           )}
         </div>
 
-        {volOn && xsecOn && !volNone && volEntry && volName && (
+        {xsecOpen && !xsecFloat && (
           <div className="space-y-2">
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-              <Select value={xsecLine.id} onValueChange={(id) => { const p = SECTION_PRESETS.find((x) => x.id === id); if (p) { setXsecLine(p); setPicking(null) } }}>
-                <SelectTrigger className="w-full sm:w-[330px]" aria-label="Cross-section line"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {SECTION_PRESETS.map((p) => <SelectItem key={p.id} value={p.id}>{p.label}</SelectItem>)}
-                  {xsecLine.id === "custom" && <SelectItem value="custom">Your line</SelectItem>}
-                </SelectContent>
-              </Select>
-              {picking
-                ? <><span className="text-sm">{picking.length ? "Now click the line's other end on the map." : "Click one end of the line on the map."}</span>
-                    <Button variant="ghost" size="sm" onClick={() => setPicking(null)}>Cancel</Button></>
-                : <Button variant="outline" size="sm" onClick={() => setPicking([])}>Draw a line</Button>}
-            </div>
-            {xsecShown && paneVol?.data ? (
-              <CrossSection data={data} entry={volEntry} name={volName} values={paneVol.data}
-                temp={SOURCE[volName] === "temp" ? paneVol.data : volTemp?.model === volEntry.model ? volTemp.data : null}
-                line={xsecLine} time={sectionTime} subscribe={sectionSub} onImage={onSectionImage} />
-            ) : <p className="text-xs text-muted-foreground">Loading the 3D data…</p>}
-            <p className="text-xs text-muted-foreground">Heavy blue: freezing level. Brown: terrain. Hover for values.</p>
+            {xsecControls}
+            {xsecChart}
           </div>
         )}
 
