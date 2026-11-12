@@ -110,6 +110,10 @@ export function sliceColor(name: VolVar, x: number): [number, number, number] {
   if (name === "wind") return x < 10 ? SKY : rampAt(WIND.levels, WIND.colors, x) as [number, number, number]
   const [r, g, b, e] = transfer(name, x)
   if (name === "rh") return [r, g, b]
+  if (name === "w") {                                   // diverging: white where the air is still
+    const a = Math.min(1, Math.abs(x) / 0.6)
+    return [255 + (r - 255) * a, 255 + (g - 255) * a, 255 + (b - 255) * a]
+  }
   const a = Math.min(1, e / (name === "cloud" ? 1.0 : 1.2))
   const shade = name === "cloud" ? 0.82 : 1             // clouds a little gray, so white reads on the sky
   return [SKY[0] + (r * shade - SKY[0]) * a, SKY[1] + (g * shade - SKY[1]) * a, SKY[2] + (b * shade - SKY[2]) * a]
@@ -122,6 +126,8 @@ export function contourLevels(name: VolVar): { at: number[]; bold?: number; unit
     case "wind": return { at: [20, 40, 60, 80, 100, 120, 140, 160, 180], unit: " mph" }
     case "rh": return { at: [70, 90], unit: "%" }
     case "cloud": return { at: [50], unit: "%" }
+    case "mflux": return { at: [100, 200, 300, 400], unit: "" }
+    case "w": return { at: [-0.5, -0.2, 0.2, 0.5], unit: " m/s" }
     default: return { at: [0.05, 0.2, 0.5], unit: " g/kg" }
   }
 }

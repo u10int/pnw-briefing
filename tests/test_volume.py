@@ -96,3 +96,15 @@ def test_fetch_says_why_steps_fail(caplog):
     with mock.patch("briefing.grib._H", return_value=H), mock.patch("briefing.grib._retry", side_effect=lambda f, *a, **k: f(*a, **k)):
         assert volume.fetch(spec, datetime(2026, 11, 11, 12), 6, DOM, hours=6, step=3) is None
     assert "3 of 3 steps unreadable (f006: KeyError" in caplog.text
+
+
+def test_moisture_flow_and_vertical_motion():
+    one = lambda x: np.full((2, 1, 1), x, dtype="float32")
+    got = {"t": one(280.0), "u": one(6.0), "v": one(8.0), "q": one(0.008), "wz": one(0.3)}
+    d = volume.derive(got, "ncep", [850, 700])
+    assert np.allclose(d["mflux"], 8 * 10) and np.allclose(d["w"], 0.3)
+    # ECMWF: pressure velocity (Pa/s, negative rising) to m/s with the air's density
+    d = volume.derive({"t": one(280.0), "omega": one(-1.0)}, "ecmwf", [850, 700])
+    rho = np.array([85000, 70000]) / (287.05 * 280)
+    assert np.allclose(d["w"][:, 0, 0], 1 / (rho * 9.81), rtol=1e-4) and (d["w"] > 0).all()
+    assert "mflux" not in volume.derive({"t": one(280.0)}, "ecmwf", [850, 700])

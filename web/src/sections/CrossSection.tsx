@@ -176,7 +176,8 @@ export function CrossSection({ data, entry, name, values, temp, line, time, subs
     const v = L.sec[z0 * N + col] * (1 - (rz - z0)) + L.sec[(z0 + 1) * N + col] * (rz - z0)
     const km = fz * entry.topKm
     const u = contourLevels(name).unit
-    const val = !Number.isFinite(v) ? "no data" : name === "water" || name === "ice" ? `${v.toFixed(2)}${u}` : `${Math.round(v)}${u}`
+    const val = !Number.isFinite(v) ? "no data" : name === "water" || name === "ice" || name === "w" ? `${v.toFixed(2)}${u}`
+      : name === "mflux" ? `${Math.round(v)} (g/kg)(m/s)` : `${Math.round(v)}${u}`
     const ground = terrain && km < terrain[col] ? " (below the terrain)" : ""
     setHover({ x: ev.clientX - r.left, y: ev.clientY - r.top,
                text: `${Math.round(fx * dist)} mi from ${line.aName}, ${km.toFixed(1)} km (${Math.round((km * 3.281) * 10) / 10}k ft): ${val}${ground}` })
