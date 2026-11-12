@@ -11,8 +11,8 @@ import { Chg, FLAT, fmt, fmtU, UP_COLOR } from "@/sections/Trends"
 import type { Briefing, TrendStat, TrendVar } from "@/types"
 
 const WHAT: Record<TrendVar, string> = { precip: "precipitation total", snow: "snowfall total", gust: "strongest gust", tmax: "average high", tmin: "average low" }
-/** One hue per variable: a cell's tint grows with its value against the table's largest. */
-const HUE: Record<TrendVar, string> = { precip: "#2563c9", snow: "#6142c4", gust: "#c2410c", tmax: "#c0392b", tmin: "#2c6fbb" }
+/** The move from one briefing to the next that gets a cell's full tint. */
+const FULL: Record<TrendVar, number> = { precip: 0.5, snow: 4, gust: 15, tmax: 6, tmin: 6 }
 const temp = (k: TrendVar) => k === "tmax" || k === "tmin"
 
 type Row = { key: string; name: string; group?: boolean; region?: string; vals: (TrendStat | null)[] }
@@ -43,11 +43,17 @@ export function RunTrendCard({ data, vars }: { data: Briefing; vars: TrendVar[] 
   }
   for (const p of data.points.filter((p) => !p.region && w.points?.[p.name]?.[k])) rows.push({ key: p.name, name: p.name, vals: w.points![p.name][k]! })
 
-  const all = rows.flatMap((r) => r.vals.flatMap((s) => (s ? [s.median] : [])))
-  const lo = temp(k) ? Math.min(...all) : 0, hi = Math.max(...all, k === "gust" ? 30 : 0.1)
-  const tint = (v: number) => {
-    const f = Math.max(0, Math.min(1, (v - lo) / (hi - lo || 1)))
-    return `color-mix(in srgb, ${HUE[k]} ${Math.round(6 + 34 * f)}%, transparent)`
+  // each cell is shaded by how it moved from the briefing before: the up colour (wetter, stronger,
+  // warmer) or the down colour, deeper the bigger the move; the first column and small moves stay plain
+  const step = (r: Row, i: number) => {
+    const s = r.vals[i]
+    for (let j = i - 1; j >= 0; j--) if (r.vals[j]) return s ? s.median - r.vals[j]!.median : null
+    return null
+  }
+  const tint = (d: number | null) => {
+    if (d == null || Math.abs(d) < FLAT[k]) return undefined
+    const f = Math.min(1, Math.abs(d) / FULL[k])
+    return `color-mix(in srgb, ${UP_COLOR[k][d > 0 ? 0 : 1]} ${Math.round(10 + 30 * f)}%, transparent)`
   }
   const first = (r: Row) => r.vals.find((s) => s != null) ?? null
   const last = (r: Row) => r.vals[nr - 1] ?? null
@@ -109,7 +115,7 @@ export function RunTrendCard({ data, vars }: { data: Briefing; vars: TrendVar[] 
                     ) : r.name}
                   </th>
                   {r.vals.map((s, i) => (
-                    <td key={i} className="border-t border-l border-l-card px-1 py-1 text-center tabular-nums" style={s ? { background: tint(s.median) } : undefined}>
+                    <td key={i} className="border-t border-l border-l-card px-1 py-1 text-center tabular-nums" style={s ? { background: tint(step(r, i)) } : undefined}>
                       {s == null ? <span className="text-muted-foreground">–</span> : r.group ? <span className="font-semibold">{fmt(s.median, k)}</span> : (
                         <Tooltip>
                           <TooltipTrigger asChild>
@@ -118,6 +124,7 @@ export function RunTrendCard({ data, vars }: { data: Briefing; vars: TrendVar[] 
                           <TooltipContent>
                             <p className="font-semibold">{r.name} · {i === nr - 1 ? "this briefing" : `briefing of ${runHead(w.runs[i], i)}`}</p>
                             <p>Median {fmtU(s.median, k)} of {s.n} models (range {fmt(s.lo, k)} – {fmtU(s.hi, k)})</p>
+                            {step(r, i) != null && <p>{step(r, i)! >= 0 ? "+" : "−"}{fmtU(Math.abs(step(r, i)!), k).replace(/^\+/, "")} from the briefing before</p>}
                           </TooltipContent>
                         </Tooltip>
                       )}
@@ -130,8 +137,8 @@ export function RunTrendCard({ data, vars }: { data: Briefing; vars: TrendVar[] 
           </table>
         </div>
         <p className="text-xs text-muted-foreground">
-          Darker cells are larger values. Change is now against the oldest briefing shown, coloured {k === "precip" || k === "snow" ? "by wetter or drier" : k === "gust" ? "by stronger or calmer" : "by warmer or cooler"}
-          {" "}(<span style={{ color: UP_COLOR[k][0] }}>up</span>, <span style={{ color: UP_COLOR[k][1] }}>down</span>).
+          Each cell is shaded by how it moved from the briefing before: <span style={{ color: UP_COLOR[k][0] }}>{k === "precip" || k === "snow" ? "wetter" : k === "gust" ? "stronger" : "warmer"}</span> or{" "}
+          <span style={{ color: UP_COLOR[k][1] }}>{k === "precip" || k === "snow" ? "drier" : k === "gust" ? "calmer" : "cooler"}</span>, deeper for a bigger move. Change is now against the oldest briefing shown.
         </p>
       </CardContent>
     </Card>
