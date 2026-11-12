@@ -109,7 +109,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .cache/prism
-          key: prism-normals-4km-v2   # precipitation, high and low normals
+          key: prism-normals-4km-v3   # precipitation, high and low normals (US PRISM, B.C. ClimateNA)
 
       - name: Get yesterday's briefing for the change view
         if: ${{ !inputs.page_only }}

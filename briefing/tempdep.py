@@ -4,7 +4,7 @@ model-mean departure per window.
 
 PRISM normals are for calendar days; the models' days run 12Z – 12Z (4 AM to 4 AM Pacific in
 winter), which still holds the afternoon high and the early-morning low of the same date.
-PRISM covers the US only, so B.C. locations have no normal.
+B.C. normals come from ClimateNA (see normals.py).
 """
 from __future__ import annotations
 
@@ -76,7 +76,8 @@ def summarize(models, cfg, cache: Path, demo: bool = False):
                         "points": {name: {var: mean(r[var]["departure"][:n]) for var in VARS} for name, r in points.items()},
                         "regions": {rid: {var: mean(r[var][:n]) for var in VARS} for rid, r in regions.items()}})
     log.info("temperature departures: %d locations, %d days", len(points), nd)
-    summary = {"source": "PRISM 1991 – 2020 monthly normals, 4 km, interpolated to each day" + (" (synthetic in demo)" if demo else ""),
+    from .normals import SOURCE
+    summary = {"source": SOURCE.replace(", 4 km", ", 4 km, interpolated to each day") + (" (synthetic in demo)" if demo else ""),
                "dates": dates, "normals": normals, "points": points, "regions": regions, "windows": windows}
     return summary, {"lat": lat, "lon": lon, **nrm}
 
