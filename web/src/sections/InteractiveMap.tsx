@@ -5,7 +5,7 @@ import "maplibre-gl/dist/maplibre-gl.css"
 // MapLibre runs a web worker for vector/GeoJSON work; have Vite bundle it and tell MapLibre where it is.
 import { summarize } from "@/sections/Hazards"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { ChevronRight, CircleHelp, ExternalLink, Maximize2, Minimize2, Pause, Play, SlidersHorizontal, X, GripHorizontal } from "lucide-react"
+import { ChevronLeft, ChevronRight, CircleHelp, ExternalLink, Maximize2, Minimize2, Pause, Play, SlidersHorizontal, X, GripHorizontal, PanelLeftClose, PanelLeftOpen } from "lucide-react"
 import { Popover } from "radix-ui"
 
 import { Button } from "@/components/ui/button"
@@ -30,11 +30,12 @@ import { ParticleLayer, type WindDraw } from "@/lib/gl/particle-layer"
 import { VolumeLayer } from "@/lib/gl/volume-layer"
 import { corners, GridDrape, groundFor, Snowline, snowLevels } from "@/lib/gl/terrain"
 import { type LonLat, SECTION_PRESETS, type SectionLine } from "@/lib/xsection"
+import { Profile } from "@/sections/Profile"
 import { CrossSection } from "@/sections/CrossSection"
 import { colorLut, frac, frzColor, heightLut, heightRgb, hexRgb, ISO_BY_HEIGHT, ISOS, legendStops, loadVolume, lutFor, mfluxRgb, SOURCE, transfer, unpack, useVolumes,
   viewVar, VIEW_LABEL, VOL_ORDER, type VolumeEntry, type VolumeVar, type VolVar } from "@/lib/volume"
 import { levelOverlay, trajectories } from "@/lib/volume-overlays"
-import { type Grid, sameGrid } from "@/lib/gl/util"
+import { type Grid, mercY, sameGrid } from "@/lib/gl/util"
 import { AR_COLORS, AR_LABELS, FLOOD_COLORS, FLOOD_LABELS, FRZ, GUST, IVT, legendBins, PCT, PGRAD, PRECIP, PROB, PTYPE_COLORS, PTYPE_NAMES, type Ramp, REFC, RH, SMOKE, SNOW, SPREAD, TDEP, TEMP, WIND } from "@/lib/ramps"
 import { contrastTextColor } from "@/lib/contrast"
 import type { ArCoast, Briefing, Cog, Convective, ExtremeVar, FrontFrame, Fronts, ObsReport, RiverGauge, Wildfire, Rivers, FieldEntry, FieldsManifest, FieldVar, Gradient } from "@/types"
@@ -77,6 +78,19 @@ function addDemProtocol() {
 const cogUrl = (c: Cog) => (c.path.startsWith("data:") ? c.path : `data/${c.path}`)
 
 /** Keeps several maps' cameras together. */
+/** One volume variable's bytes for a model, loaded while `on` (null until then, or without it). */
+function useVolData(entry: VolumeEntry | undefined, name: string, on: boolean): Uint8Array | null {
+  const v = entry?.vars[name]
+  const [got, setGot] = React.useState<{ path: string; data: Uint8Array } | null>(null)
+  React.useEffect(() => {
+    if (!v || !on || got?.path === v.path) return
+    let live = true
+    loadVolume(v).then((d) => { if (live) setGot({ path: v.path, data: d }) }).catch(() => {})
+    return () => { live = false }
+  }, [v?.path, on])
+  return v && got?.path === v.path ? got.data : null
+}
+
 /** A camera: centre, zoom, tilt and turn. */
 export interface Camera { lon: number; lat: number; zoom: number; pitch: number; bearing: number }
 /** Keeps the panes' cameras together; opens the first on `initial` (a shared link's view) and tells
@@ -116,6 +130,11 @@ function useCameraSync(initial: Camera | null = null) {
       return { lon: c.lng, lat: c.lat, zoom: m.getZoom(), pitch: m.getPitch(), bearing: m.getBearing() }
     },
     onMove(f: () => void) { listeners.current.add(f); return () => { listeners.current.delete(f) } },
+    /** Glide every pane to a camera. */
+    fly(c: Camera) {
+      const m = maps.current.values().next().value
+      m?.easeTo({ center: [c.lon, c.lat], zoom: c.zoom, pitch: c.pitch, bearing: c.bearing, duration: 1400 })
+    },
     /** True once, when a restored view was tilted: the 3D view then keeps it rather than tilting itself. */
     keepRestored3d() { const k = keep3d.current; keep3d.current = false; return k },
   }), [])
@@ -300,6 +319,8 @@ export interface PaneVolume {
   traj: { w: Uint8Array | null } | null
   /** No field: just the box, for the terrain, particles, falling precipitation and the rest. */
   none?: boolean
+  /** The vertical profile's point, marked in the box. */
+  profile?: LonLat | null
 }
 /** Values a view's solid surface can sit at (display units); the first is the default. */
 const SOLID_AT: Partial<Record<VolVar, number[]>> = {
@@ -313,6 +334,27 @@ const solidLabel = (n: VolVar, x: number, units: string) =>
 const VOLUME_VIEWS: VolVar[] = ["cloud", "water", "ice", "rh", "dgz", "icing", "mflux", "w"]
 const LIT_VIEWS: VolVar[] = ["cloud", "water", "ice", "rh", "mflux", "dgz", "icing"]
 const COLOR_BY: VolVar[] = ["temp", "wind", "rh", "w", "pv", "cloud"]
+
+/** Ready-made 3D views: a field and its options, and a camera that shows them well. */
+interface Preset {
+  id: string; label: string; note: string; field: VolVar
+  solid?: number; level?: number; wind?: boolean; traj?: boolean; terrain?: boolean; precip?: boolean; heights?: [number, number]; color?: "own" | "height"
+  cam: Camera
+}
+const PRESETS: Preset[] = [
+  { id: "ar", label: "Atmospheric river", note: "Moisture flow off the Pacific, with particles and where the air came from.", field: "mflux", wind: true, traj: true,
+    cam: { lon: -125.6, lat: 45.3, zoom: 5.2, pitch: 62, bearing: 40 } },
+  { id: "jet", label: "Jet stream", note: "The jet as a solid at 100 kt with its shadow, and the 300 mb map.", field: "wind", solid: 115, level: 300, wind: false,
+    cam: { lon: -123.6, lat: 46.4, zoom: 4.9, pitch: 58, bearing: -15 } },
+  { id: "snow", label: "Snow levels", note: "The freezing level over the stretched Cascades and Olympics, snow above the snow level, and falling precipitation.",
+    field: "frz", terrain: true, precip: true, wind: false, cam: { lon: -122.4, lat: 46.6, zoom: 6.2, pitch: 64, bearing: 55 } },
+  { id: "low", label: "Upper low", note: "The tropopause (2 PVU) folding down under upper lows, coloured by height, with the 500 mb map.",
+    field: "pv", solid: 2, level: 500, heights: [0, 9], wind: false, cam: { lon: -124.2, lat: 47.2, zoom: 5.0, pitch: 52, bearing: -25 } },
+  { id: "clouds", label: "Clouds and precipitation", note: "Lit clouds with their shadows, falling precipitation and the terrain.", field: "cloud", terrain: true, precip: true, wind: false,
+    cam: { lon: -123.2, lat: 46.2, zoom: 5.6, pitch: 60, bearing: 20 } },
+  { id: "lift", label: "Mountain lift", note: "Rising air up the windward slopes and sinking in their lee, over the terrain, with the low-level wind.",
+    field: "w", terrain: true, wind: true, heights: [0, 6], cam: { lon: -123.0, lat: 46.9, zoom: 6.0, pitch: 62, bearing: 75 } },
+]
 /** A 3D view's data file and label (the freezing level draws from temperature). */
 const volVarOf = (e: VolumeEntry, n: VolVar): VolumeVar | undefined => viewVar(e, n)
 const volLabel = (e: VolumeEntry, n: VolVar) => VIEW_LABEL[n] ?? viewVar(e, n)?.label ?? n
@@ -325,7 +367,7 @@ export interface PaneTerrain { exaggeration: number; snow: { entry: VolumeEntry;
 /** The cross-section on the map: its line (and the points picked so far while drawing one). */
 interface PaneSection { line: SectionLine | null; picked: LonLat[] | null; sink: React.MutableRefObject<{ set?: (img: HTMLCanvasElement) => void }> }
 
-function MapPane({ data, view, clock, opacity, smooth, particles, particleColor, sync, terrain, sat, fronts, reports, fires, vol = null, xsec = null, onPick = null, terrain3d = null, tall = false, page = false }: {
+function MapPane({ data, view, clock, opacity, smooth, particles, particleColor, sync, terrain, sat, fronts, reports, fires, vol = null, xsec = null, onPick = null, terrain3d = null, tall = false, insetTitle = false }: {
   data: Briefing; view: View | null; clock: Clock; opacity: number; smooth: boolean
   particles: boolean; particleColor: [number, number, number, number]; sync: ReturnType<typeof useCameraSync>
   terrain: boolean; sat: { kind: SatKind; times: SatTimes } | null; fronts: Fronts | null; reports: ObsReport[] | null
@@ -334,8 +376,8 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
   terrain3d?: PaneTerrain | null
   /** full screen: the map takes most of the window's height */
   tall?: boolean
-  /** the map page: the map fills most of the window under its controls */
-  page?: boolean
+  /** room at the top left for the map page's Controls button */
+  insetTitle?: boolean
 }) {
   const el = React.useRef<HTMLDivElement>(null)
   const axisEl = React.useRef<HTMLDivElement>(null)
@@ -735,6 +777,18 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
     update()
     return clock.subscribe(update)
   }, [vol?.entry, !!vol?.data, vol?.level?.hPa, vol?.level?.hgt, vol?.uv, vol?.traj, vol?.traj?.w])
+  // the vertical profile's point: a stalk from the ground to the top, with a tick every 2 km
+  const prof = vol?.profile ? vol.profile.join(",") : ""
+  React.useEffect(() => {
+    const L = layers.current!.volume, e = vol?.entry, pt = vol?.profile
+    if (!e || !pt) { L.setOverlay("profile", null); return }
+    const x = (pt[0] - e.lon[0]) / (e.lon[1] - e.lon[0])
+    const yN = mercY(e.lat[1]), yS = mercY(e.lat[0]), y = (mercY(pt[1]) - yN) / (yS - yN)
+    const c = [0.1, 0.11, 0.14, 0.95], v: number[] = [x, y, 0, ...c, x, y, 1, ...c]
+    const dx = 0.006
+    for (let km = 2; km < e.topKm; km += 2) v.push(x - dx, y, km / e.topKm, ...c, x + dx, y, km / e.topKm, ...c)
+    L.setOverlay("profile", { verts: Float32Array.from(v), labels: [] })
+  }, [vol?.entry, prof])
   React.useEffect(() => { layers.current!.volume.setExaggeration(vol?.exaggeration ?? 25) }, [vol?.exaggeration])
   React.useEffect(() => { layers.current!.volume.setPrecipOn(!!vol?.precip) }, [vol?.precip])
   // ---- the cross-section: its line on the map, and the slice as a curtain in the 3D view
@@ -868,9 +922,9 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
 
   return (
     <div className={tall ? "relative h-full overflow-hidden" : "relative overflow-hidden rounded-lg border"}>
-      <div ref={el} className={tall ? "h-full w-full" : page ? "h-[calc(100dvh-210px)] min-h-[420px] w-full max-sm:h-[70dvh]" : "h-[520px] w-full max-sm:h-[420px]"} role="region" aria-label={`Map: ${view?.title ?? ""}`} />
+      <div ref={el} className={tall ? "h-full w-full" : "h-[520px] w-full max-sm:h-[420px]"} role="region" aria-label={`Map: ${view?.title ?? ""}`} />
       <div ref={axisEl} className={`pointer-events-none absolute inset-0 overflow-hidden ${vol?.data ? "" : "hidden"}`} aria-hidden />
-      <div className="pointer-events-none absolute top-2 left-2 max-w-[70%] rounded-md bg-card/95 px-2.5 py-1.5 text-xs shadow-sm ring-1 ring-border">
+      <div className={`pointer-events-none absolute top-2 max-w-[70%] rounded-md bg-card/95 px-2.5 py-1.5 text-xs shadow-sm ring-1 ring-border ${insetTitle ? "left-[118px] max-sm:top-12 max-sm:left-2" : "left-2"}`}>
         <div className="font-medium">{view?.title}</div>
         {vol && <div className="text-muted-foreground">3D: {vol.entry.model} {vol.none ? (vol.wind ? "wind" : "box") : volLabel(vol.entry, vol.name).toLowerCase()}{vol.wind && !vol.none ? " and wind" : ""}, {vol.entry.run} run{vol.data ? "" : " (loading…)"}</div>}
         {sub && <div className="text-muted-foreground">{sub}</div>}
@@ -1788,6 +1842,44 @@ function Toggle({ id, label, checked, onChange, help }: { id: string; label: str
   )
 }
 
+/** A titled group of settings in the 3D panel. */
+function Group({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section className="min-w-0 space-y-2">
+      <h4 className="text-xs font-semibold text-foreground/80">{title}</h4>
+      <div className="space-y-2">{children}</div>
+    </section>
+  )
+}
+/** One setting: its label (and help) in a fixed column, the control filling the rest, and its value
+ *  at the end when there is one (for sliders). */
+function Row({ label, help, value, children }: { label: string; help?: string; value?: string; children: React.ReactNode }) {
+  return (
+    <div className={`grid items-center gap-x-3 text-sm ${value != null ? "grid-cols-[92px_minmax(0,1fr)_3.75rem]" : "grid-cols-[92px_minmax(0,1fr)]"}`}>
+      <span className="flex items-center gap-1.5 whitespace-nowrap">
+        <Label className="font-normal">{label}</Label>
+        {help && <Help label={label} text={help} />}
+      </span>
+      <div className="flex min-h-8 min-w-0 items-center">{children}</div>
+      {value != null && <span className="text-right text-xs text-muted-foreground tabular-nums">{value}</span>}
+    </div>
+  )
+}
+/** An on/off setting: label (and help) on the left, the switch on the right, lined up with the rows. */
+function SwitchRow({ id, label, checked, onChange, help, indent = false }: {
+  id: string; label: string; checked: boolean; onChange: (v: boolean) => void; help?: string; indent?: boolean
+}) {
+  return (
+    <div className={`flex min-h-8 items-center justify-between gap-3 text-sm ${indent ? "pl-4" : ""}`}>
+      <span className="flex items-center gap-1.5">
+        <Label htmlFor={id} className="font-normal">{label}</Label>
+        {help && <Help label={label} text={help} />}
+      </span>
+      <Switch id={id} checked={checked} onCheckedChange={onChange} />
+    </div>
+  )
+}
+
 /** A small help icon after a control's label: what the control does, on hover or focus. */
 function Help({ label, text }: { label: string; text: string }) {
   // hover or focus on a mouse; a tap toggles it on a touch screen, which has no hover
@@ -1808,7 +1900,7 @@ function Help({ label, text }: { label: string; text: string }) {
 /** A labelled control in the 3D panel: label, help icon, then the control. */
 function Control({ label, help, labelClass = "", children }: { label: string; help?: string; labelClass?: string; children: React.ReactNode }) {
   return (
-    <div className="flex items-center gap-2.5 text-sm max-sm:w-full">
+    <div data-control className="flex items-center gap-2.5 text-sm max-sm:w-full">
       <span className={`flex items-center gap-1.5 whitespace-nowrap max-sm:min-w-[118px] ${labelClass}`}>
         <Label className="font-normal">{label}</Label>
         {help && <Help label={label.replace(/×.*/, "stretch")} text={help} />}
@@ -1879,8 +1971,8 @@ const SEC_PER_STEP = 0.7
  * screen): a title bar that folds it away or closes it, and the content under it. Open at first on
  * wider screens; on a phone it starts folded so the map shows, and spans the map's width.
  */
-function FloatPanel({ title, onClose, picking, className, children }: {
-  title: string; onClose: () => void; picking?: boolean; className: string; children: React.ReactNode
+function FloatPanel({ title, onClose, picking, className, children, side = "left" }: {
+  title: string; onClose: () => void; picking?: boolean; className: string; children: React.ReactNode; side?: "left" | "right"
 }) {
   const [open, setOpen] = React.useState(() => typeof window === "undefined" || window.matchMedia("(min-width: 640px)").matches)
   React.useEffect(() => { if (picking) setOpen(true) }, [picking])        // the instructions show while drawing
@@ -1938,7 +2030,7 @@ function FloatPanel({ title, onClose, picking, className, children }: {
   }, [clamp, setOff])
   return (
     <section ref={box} aria-label={title} style={{ transform: `translate(${off[0]}px, ${off[1]}px)` }}
-      className={`absolute left-3 z-10 w-[min(600px,calc(100%-24px))] rounded-lg border bg-card/95 shadow-lg backdrop-blur max-sm:right-2 max-sm:left-2 max-sm:w-auto ${className}`}>
+      className={`absolute z-10 rounded-lg border bg-card/95 shadow-lg backdrop-blur max-sm:right-2 max-sm:left-2 max-sm:w-auto ${side === "left" ? "left-3 w-[min(600px,calc(100%-24px))]" : "right-3 w-[min(430px,calc(100%-24px))]"} ${className}`}>
       <div className="flex cursor-grab touch-none items-center gap-1 py-1 pr-1 pl-2 select-none active:cursor-grabbing"
         onPointerDown={onDown} title="Drag to move">
         <button type="button" aria-expanded={open}
@@ -1958,10 +2050,10 @@ function FloatPanel({ title, onClose, picking, className, children }: {
 }
 
 /** The legends over the full screen map: open on wider screens, a "Legend" button on phones. */
-function MapKey({ children }: { children: React.ReactNode }) {
+function MapKey({ children, below3d = false }: { children: React.ReactNode; below3d?: boolean }) {
   const [open, setOpen] = React.useState(() => typeof window === "undefined" || window.matchMedia("(min-width: 640px)").matches)
   return (
-    <div className="absolute top-[84px] right-2 z-10 flex max-w-[calc(100%-16px)] flex-col items-end gap-1.5">
+    <div className={`absolute right-2 z-10 flex max-w-[calc(100%-16px)] flex-col items-end gap-1.5 ${below3d ? "top-[116px]" : "top-[84px]"}`}>
       <Button variant="outline" size="sm" className="h-7 gap-1 bg-card px-2 text-xs shadow-sm" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
         Legend<ChevronRight className={`size-3.5 transition-transform ${open ? "-rotate-90" : "rotate-90"}`} aria-hidden />
       </Button>
@@ -1974,21 +2066,65 @@ function MapKey({ children }: { children: React.ReactNode }) {
   )
 }
 
+const PT_PARTS = new Intl.DateTimeFormat("en-US", { timeZone: "America/Los_Angeles", weekday: "short", day: "numeric", hour: "numeric", minute: "numeric", hourCycle: "h23" })
+/** Each Pacific day's start within the times (as a fractional step) and its label, and where now falls. */
+function dayMarks(ms: number[]) {
+  const parts = (t: number) => Object.fromEntries(PT_PARTS.formatToParts(t).map((p) => [p.type, p.value]))
+  const out: { pos: number; label: string }[] = []
+  let prev = ""
+  for (let i = 0; i < ms.length; i++) {
+    const p = parts(ms[i])
+    const day = `${p.weekday} ${p.day}`
+    if (day !== prev && i > 0) {
+      const midnight = ms[i] - (Number(p.hour) * 60 + Number(p.minute)) * 60e3
+      out.push({ pos: posOf(ms, midnight), label: day })
+    }
+    prev = day
+  }
+  const now = Date.now()
+  return { days: out, now: now >= ms[0] && now <= ms[ms.length - 1] ? posOf(ms, now) : null }
+}
+
+/** The timeline: play, a step back and forward, and the slider over a track marked with each day's
+ *  start (labelled) and now. */
 function TimeBar({ times, clock, playing, setPlaying, className = "border bg-muted/40" }: { times: string[]; clock: Clock; playing: boolean; setPlaying: (p: boolean) => void; className?: string }) {
   React.useSyncExternalStore(clock.subscribe, clock.snapshot)
   const ms = msOf(times)
   const pos = clock.time == null ? 0 : posOf(ms, clock.time)
   const label = times[Math.round(pos)]
+  const marks = React.useMemo(() => dayMarks(ms), [ms])
+  const last = Math.max(1, times.length - 1)
+  const step = (d: number) => { setPlaying(false); clock.set(ms[Math.max(0, Math.min(times.length - 1, Math.round(pos) + d))], false) }
   return (
-    <div className={`flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg px-3 py-2.5 ${className}`}>
-      <Button size="icon" variant="outline" className="size-8 shrink-0" onClick={() => setPlaying(!playing)}
-              aria-label={playing ? "Pause" : "Play through time"}>
-        {playing ? <Pause className="size-4" /> : <Play className="size-4" />}
-      </Button>
-      <Slider className="min-w-[200px] flex-1 max-sm:order-2 max-sm:min-w-0 max-sm:basis-full" value={[pos]} min={0} max={times.length - 1} step={1}
-              onValueChange={([i]) => { setPlaying(false); clock.set(ms[Math.round(i)], false) }} aria-label="Forecast time"
-              getAriaValueText={(i) => (times[Math.round(i)] ? timeLabel(times[Math.round(i)]) : "")} />
-      <div className="text-sm tabular-nums max-sm:order-1 max-sm:flex-1 sm:w-[190px] sm:text-right">{label ? timeLabel(label) : ""}</div>
+    <div className={`flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg px-3 pt-2.5 pb-1.5 ${className}`}>
+      <div className="flex shrink-0 items-center gap-1">
+        <Button size="icon" variant="outline" className="size-8" onClick={() => setPlaying(!playing)} aria-label={playing ? "Pause" : "Play through time"}
+                title={playing ? "Pause (space)" : "Play (space)"}>
+          {playing ? <Pause className="size-4" /> : <Play className="size-4" />}
+        </Button>
+        <Button size="icon" variant="ghost" className="size-8" onClick={() => step(-1)} aria-label="Previous step" title="Previous step (←)"><ChevronLeft className="size-4" /></Button>
+        <Button size="icon" variant="ghost" className="size-8" onClick={() => step(1)} aria-label="Next step" title="Next step (→)"><ChevronRight className="size-4" /></Button>
+      </div>
+      <div className="relative min-w-[200px] flex-1 pb-4 max-sm:order-2 max-sm:min-w-0 max-sm:basis-full">
+        {/* each day's start, labelled, and now, under the slider's track */}
+        <div className="pointer-events-none absolute inset-x-0 top-1/2 -translate-y-[calc(50%+8px)]" aria-hidden>
+          {marks.days.map((d) => (
+            <span key={d.label} className="absolute" style={{ left: `${(100 * d.pos) / last}%` }}>
+              <span className="absolute top-0 h-[14px] w-px -translate-x-1/2 -translate-y-1/2 bg-muted-foreground/45" />
+              <span className="absolute top-[11px] -translate-x-0 pl-1 text-[10.5px] whitespace-nowrap text-muted-foreground">{d.label}</span>
+            </span>
+          ))}
+          {marks.now != null && (
+            <span className="absolute" style={{ left: `${(100 * marks.now) / last}%` }} title="Now">
+              <span className="absolute top-0 h-[16px] w-0.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-red-500/80" />
+            </span>
+          )}
+        </div>
+        <Slider className="relative" value={[pos]} min={0} max={times.length - 1} step={1}
+                onValueChange={([i]) => { setPlaying(false); clock.set(ms[Math.round(i)], false) }} aria-label="Forecast time"
+                getAriaValueText={(i) => (times[Math.round(i)] ? timeLabel(times[Math.round(i)]) : "")} />
+      </div>
+      <div className="pb-1 text-sm tabular-nums max-sm:order-1 max-sm:flex-1 sm:w-[170px] sm:text-right">{label ? timeLabel(label) : ""}</div>
     </div>
   )
 }
@@ -2020,6 +2156,8 @@ export function InteractiveMap({ data, request, active = true, standalone = fals
   // Fixed rather than the Fullscreen API, so tooltips, which open on the page's body, still show,
   // and so it works on iPhone; Escape or the button closes it
   const [full, setFull] = React.useState(false)
+  // the map page's side panel: open beside the map on wider screens, closed (over the map) on phones
+  const [panelOpen, setPanelOpen] = React.useState(() => standalone && typeof window !== "undefined" && window.matchMedia("(min-width: 768px)").matches)
   React.useEffect(() => {
     if (!full) return
     // the page behind stays put (on the root too, or its scrollbars take a strip of the window)
@@ -2197,6 +2335,26 @@ export function InteractiveMap({ data, request, active = true, standalone = fals
     clock.set(ms[Math.round(posOf(ms, target))], false)
   }, [times, request?.nonce, mode])
 
+  // Keys on the map page and in full screen: ← and → step through time, space plays and pauses
+  // (not while typing, or on a control that uses the keys itself)
+  React.useEffect(() => {
+    if (!(standalone || full) || mode !== "hourly" || !times.length || !active) return
+    const key = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey || !["ArrowLeft", "ArrowRight", " "].includes(e.key)) return
+      const t = e.target as HTMLElement
+      if (t.closest("input, textarea, select, button, [role=slider], [role=combobox], [role=listbox], [role=option], [contenteditable=true]")) return
+      // ahead of the map's own keys (a focused map pans with the arrows; shift-arrows still turn it)
+      e.preventDefault(); e.stopPropagation()
+      if (e.key === " ") { setPlaying((p) => !p); return }
+      const ms = msOf(times)
+      const i = Math.round(posOf(ms, clock.time ?? ms[0])) + (e.key === "ArrowRight" ? 1 : -1)
+      setPlaying(false)
+      clock.set(ms[Math.max(0, Math.min(ms.length - 1, i))], false)
+    }
+    window.addEventListener("keydown", key, true)
+    return () => window.removeEventListener("keydown", key, true)
+  }, [standalone, full, mode, times, active, clock])
+
   // Playback moves the clock continuously; the maps blend between forecast steps as it does.
   React.useEffect(() => {
     if (!playing || times.length < 2 || mode !== "hourly") return
@@ -2256,6 +2414,33 @@ export function InteractiveMap({ data, request, active = true, standalone = fals
   // a pressure level as a map (contours and arrows), and trajectories
   const [levelHPa, setLevelHPa] = React.useState<number | null>(() => (q.has("lvl") ? qn("lvl", NaN) || null : null))
   const [trajOn, setTrajOn] = React.useState(() => qb("trj", false))
+  // the vertical profile: the column over a point (clicked on the map), as a simple sounding
+  const [profileOn, setProfileOn] = React.useState(() => qb("pf", false))
+  const [profilePt, setProfilePt] = React.useState<LonLat>(() => {
+    const c = (q.get("pp") ?? "").split(",").map(Number)
+    if (c.length === 2 && c.every(Number.isFinite)) return [c[0], c[1]]
+    const p = data.points.find((x) => x.name === "Seattle") ?? data.points[0]
+    return [p.lon, p.lat]
+  })
+  const [presetId, setPresetId] = React.useState<string>("")
+  const applyPreset = (id: string) => {
+    const p = PRESETS.find((x) => x.id === id)
+    if (!p) return
+    setPresetId(id)
+    setVolVar(p.field)
+    setSolidPick((s) => ({ ...s, [p.field]: p.solid ?? null }))
+    setColorPick(p.color ?? "own")
+    setLevelHPa(p.level ?? null)
+    setVolWindOn(!!p.wind)
+    setTrajOn(!!p.traj)
+    setTerr3d(!!p.terrain)
+    if (p.terrain) setSnowOn(true)
+    setExag(p.terrain ? 8 : 25)
+    setZRange(p.heights ?? null)
+    if (p.precip) setVolPrecip(true)
+    setShadowOn(true)
+    sync.fly(p.cam)
+  }
   const solidAt = volName && !volNone && SOLID_AT[volName] ? solidPick[volName] ?? null : null
   const colorOpts: ("own" | "height" | VolVar)[] = !volEntry || !volName || volNone ? [] : (VOLUME_VIEWS.includes(volName) || solidAt != null)
     ? ["own", "height", ...COLOR_BY.filter((c) => c !== volName && SOURCE[c] !== SOURCE[volName] && volEntry.vars[SOURCE[c]])] : []
@@ -2288,7 +2473,7 @@ export function InteractiveMap({ data, request, active = true, standalone = fals
     loadVolume(wVar).then((d) => { if (live) setWData({ path: wVar.path, data: d }) }).catch(() => {})
     return () => { live = false }
   }, [wVar?.path, trajShown])
-  const needUV = volWindOn || level != null || trajShown
+  const needUV = volWindOn || level != null || trajShown || (profileOn && threeD)
   React.useEffect(() => {
     if (!volEntry || !hasUV || !needUV || volWind?.model === volEntry.model) return
     let live = true
@@ -2308,7 +2493,7 @@ export function InteractiveMap({ data, request, active = true, standalone = fals
   const paneVol: PaneVolume | null = volEntry && volName
     ? { entry: volEntry, name: volName, none: volNone, data: volNone ? emptyVol : volData?.path === volPath ? volData.data : null, exaggeration: exag, wind: paneWind, range: zRange ?? [0, volEntry.topKm], precip: layer === "radar" && volPrecip,
         solid: solidAt, color: colorView && colorData?.path !== colorPath ? "own" : colorBy, colorData: colorView && colorData?.path === colorPath ? colorData.data : null,
-        shadow: shadowOn, level: paneLevel, uv, traj: paneTraj } : null
+        shadow: shadowOn, level: paneLevel, uv, traj: paneTraj, profile: profileOn ? profilePt : null } : null
   // the cross-section: a preset line or one drawn on the map, sliced through the 3D field
   const [xsecOn, setXsecOn] = React.useState(() => qb("xs", false))
   const [xsecLine, setXsecLine] = React.useState<SectionLine>(() => {
@@ -2395,6 +2580,7 @@ export function InteractiveMap({ data, request, active = true, standalone = fals
       if (solidAt != null) p.set("sol", String(solidAt))
       put("col", colorPick, "own"); put("sh", shadowOn, true); put("lvl", level); put("trj", trajOn, false)
       put("t3", terr3d, false); put("sn", snowOn, true)
+      if (profileOn) { p.set("pf", "1"); p.set("pp", profilePt.map((x) => x.toFixed(3)).join(",")) }
       if (xsecOn) {
         p.set("xs", "1"); p.set("xl", xsecLine.id)
         if (xsecLine.id === "custom") p.set("xc", [...xsecLine.a, ...xsecLine.b].map((x) => x.toFixed(3)).join(","))
@@ -2419,6 +2605,27 @@ export function InteractiveMap({ data, request, active = true, standalone = fals
     const a = clock.subscribe(() => { if (!clock.playing) scheduleShare() }), b = sync.onMove(scheduleShare)
     return () => { a(); b(); window.clearTimeout(shareTimer.current) }
   }, [clock, sync, scheduleShare])
+
+  // a click on the map moves the profile, inside the model's box
+  const pickProfile = React.useCallback((ll: LonLat) => {
+    const e = volEntry
+    if (e && ll[0] >= e.lon[0] && ll[0] <= e.lon[1] && ll[1] >= e.lat[0] && ll[1] <= e.lat[1]) setProfilePt(ll)
+  }, [volEntry])
+  // ---- the vertical profile: its data (temperature, humidity, cloud and the wind) and chart
+  const profOpen = !!(volOn && profileOn && volEntry)
+  const pTemp = useVolData(volEntry, "temp", profOpen), pRh = useVolData(volEntry, "rh", profOpen), pCloud = useVolData(volEntry, "cloud", profOpen)
+  const profPlace = React.useMemo(() => {
+    const near = data.points.map((p) => ({ p, d: Math.hypot((p.lon - profilePt[0]) * Math.cos((p.lat * Math.PI) / 180), p.lat - profilePt[1]) * 69 }))
+      .sort((a, b) => a.d - b.d)[0]
+    const ll = `${Math.abs(profilePt[1]).toFixed(2)}°N ${Math.abs(profilePt[0]).toFixed(2)}°W`
+    return near && near.d < 12 ? (near.d < 2 ? near.p.name : `near ${near.p.name}`) : ll
+  }, [data.points, profilePt])
+  const profChart = profOpen && (pTemp
+    ? <>
+        <p className="text-xs text-muted-foreground">{profPlace} · {volEntry!.model}. Click the map to move it.</p>
+        <Profile entry={volEntry!} point={profilePt} place={profPlace} temp={pTemp} rh={pRh} cloud={pCloud} wind={uv} time={sectionTime} subscribe={sectionSub} />
+      </>
+    : <p className="text-xs text-muted-foreground">Loading the 3D data…</p>)
 
   // ---- the cross-section's controls and chart: under the map, or on the map page and in full screen
   // a panel floating in the map's corner
@@ -2484,9 +2691,332 @@ export function InteractiveMap({ data, request, active = true, standalone = fals
     </>
   )
 
+
+  // ---- the pieces: the briefing's card stacks them; the map page puts the controls in a side panel
+  // and everything else over a map that fills the window
+  const controlsRow = (
+    <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
+      {hasHourly && (
+        <Tabs value={mode} onValueChange={(v) => { setMode(v as "totals" | "hourly"); setPlaying(false) }} className="max-sm:w-full">
+          <TabsList className="max-sm:w-full">
+            <TabsTrigger value="totals">Summary</TabsTrigger>
+            <TabsTrigger value="hourly">Hourly</TabsTrigger>
+          </TabsList>
+        </Tabs>
+      )}
+      {mode === "totals" ? (
+        <>
+          <Select value={variable} onValueChange={(v) => setVariable(v as TotVar)}>
+            <SelectTrigger className="w-full sm:w-[190px]" aria-label="Variable"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {(["Totals", "Extremes", "Vs normal", "Odds", "Observed", "Outlooks"] as const).map((g) => [g, totAvail.filter((v) => v.group === g)] as const).filter(([, vs]) => vs.length).map(([g, vs]) => (
+                <SelectGroup key={g}>
+                  <SelectLabel>{GROUP_LABEL[g]}</SelectLabel>
+                  {vs.map((v) => <SelectItem key={v.id} value={v.id}>{v.label}</SelectItem>)}
+                </SelectGroup>
+              ))}
+            </SelectContent>
+          </Select>
+          <Tabs value={String(d)} onValueChange={(v) => setDays(Number(v))} className="max-sm:w-full">
+            <TabsList className="max-sm:w-full">{windows.map((w) => <TabsTrigger key={w} value={String(w)}>{winLabel(w).replace("next ", "").replace("past ", "")}</TabsTrigger>)}</TabsList>
+          </Tabs>
+          {perModel && (
+            <div data-wide className="flex items-center gap-x-5 max-sm:w-full">
+              <ModelSelect options={options} value={pick(model)?.model ?? ""} onChange={setModel} label="Model" />
+              <Toggle id="compare-t" label="Compare" checked={compare} onChange={setCompare} />
+            </div>
+          )}
+          {perModel && compare && <div className="flex max-sm:w-full"><ModelSelect options={options.filter((o) => o.model !== pick(model)?.model)} value={pickOther(other)?.model ?? ""} onChange={setOther} label="Compare with" /></div>}
+        </>
+      ) : (
+        <>
+          <Select value={layer} onValueChange={(v) => setLayer(v as HLayer)}>
+            <SelectTrigger className="w-full sm:w-[230px]" aria-label="Layer"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {H_GROUPS.map((g) => [g, HLAYERS.filter((l) => l.group === g && [...byModel.values()].some((v) => l.primary(v.entries)))] as const)
+                .filter(([, ls]) => ls.length).map(([g, ls]) => (
+                  <SelectGroup key={g}>
+                    <SelectLabel>{g}</SelectLabel>
+                    {ls.map((l) => <SelectItem key={l.id} value={l.id}>{l.label}</SelectItem>)}
+                  </SelectGroup>
+                ))}
+            </SelectContent>
+          </Select>
+          <div data-wide className="flex items-center gap-x-5 max-sm:w-full">
+            {hA && <ModelSelect options={layerModels} value={hA} onChange={(m) => {
+              setHModel(m)
+              // observed radar pairs best with a high-resolution forecast
+              if (m === MRMS_MODEL && !layerModels.some((x) => x.model === hOther && x.tier === "regional")) {
+                const r = layerModels.find((x) => x.tier === "regional")
+                if (r) setHOther(r.model)
+              }
+            }} label="Model" />}
+            {!threeD && <Toggle id="compare-h" label="Compare" checked={compare} onChange={setCompare} />}
+            <Toggle id="three-d" label="3D" checked={threeD} onChange={(v) => { setThreeD(v); if (v) setCompare(false) }} />
+          </div>
+          {compare && !threeD && hB && <div className="flex max-sm:w-full"><ModelSelect options={layerModels.filter((m) => m.model !== hA)} value={hB} onChange={setHOther} label="Compare with" /></div>}
+        </>
+      )}
+      <div data-wide className="max-sm:w-full sm:ml-auto">
+        <MapOptions
+          overlays={[
+            !!data.fronts?.frames.length && <OptionRow key="fronts" id="fronts" label="Fronts (WPC)" checked={showFronts} onChange={setShowFronts} />,
+            hasFires && <OptionRow key="fires" id="fires" label="Fires and perimeters" checked={showFires} onChange={setShowFires} />,
+            live.length > 0 && <OptionRow key="reports" id="nws-reports" label={`NWS reports, last ${data.obsReports?.reportHours ?? 48} h`} checked={showReports} onChange={setShowReports} />,
+          ...(mode === "hourly" ? [
+            entriesA.mslp && <OptionRow key="iso" id="isobars" label="Isobars" checked={isobars} onChange={setIsobars} />,
+            pairList.length > 0 && <OptionRow key="pairs" id="pairs" label="Gradient pairs" checked={showPairs} onChange={setShowPairs} />,
+            hasWind && <OptionRow key="part" id="particles" label={layer === "ivt" ? "Moisture particles" : "Wind particles"} checked={particles} onChange={setParticles} />,
+            satAll && (
+              <div key="sat" className="flex items-center justify-between gap-4 py-1">
+                <Label className="font-normal">Satellite</Label>
+                <Select value={satKind} onValueChange={(v) => setSatKind(v as SatKind | "off")}>
+                  <SelectTrigger size="sm" className="w-[130px]" aria-label="Satellite imagery"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="off">Off</SelectItem>
+                    {(Object.keys(SAT_KINDS) as SatKind[]).map((k) => <SelectItem key={k} value={k}>{SAT_KINDS[k].label}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            ),
+          ] : [])].filter(Boolean)}
+          active={(frontsOn ? 1 : 0) + (reportsOn ? 1 : 0) + (firesOn ? 1 : 0) + (mode === "hourly" ? [entriesA.mslp && isobars, pairList.length > 0 && showPairs, hasWind && particles, satAll && satKind !== "off"].filter(Boolean).length : 0)}
+          display={<>
+            <OptionRow id="terrain" label="Terrain" checked={terrain} onChange={setTerrain} />
+            <OptionRow id="smooth" label="Smooth" checked={smooth} onChange={setSmooth} />
+            <div className="flex items-center justify-between gap-4 py-1.5">
+              <Label className="font-normal">Opacity</Label>
+              <Slider className="w-[130px]" value={[opacity]} min={0.2} max={1} step={0.05} onValueChange={([v]) => setOpacity(v)} aria-label="Grid opacity" />
+            </div>
+          </>}
+        />
+      </div>
+    </div>
+  )
+  // the 3D view's controls in groups: what to show, how to draw it, the box, what else goes in it,
+  // and the tools; each row a label on the left and its control filling the rest, switches on the right
+  const vv = volEntry && volName ? volVarOf(volEntry, volName) : undefined
+  const threeDPanel = mode === "hourly" && threeD && volEntry && volName && (
+    <div className="rounded-lg border bg-muted/30 p-3">
+      <div className="mb-2 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">3D view</div>
+      {/* one column with rules between the groups in the side panel; side by side in the card */}
+      <div className={`grid gap-x-8 gap-y-3 ${standalone ? "[&>section+section]:border-t [&>section+section]:pt-3" : "gap-y-5 md:grid-cols-2 xl:grid-cols-3"}`}>
+        <Group title="Show">
+          <Row label="Preset" help={PRESETS.find((p) => p.id === presetId)?.note ?? "A ready-made 3D view: a field, its options and a camera angle that shows it well. Change anything afterwards."}>
+            <Select value={presetId} onValueChange={applyPreset}>
+              <SelectTrigger className="h-8 w-full min-w-0" aria-label="3D preset"><SelectValue placeholder="Choose a view…" /></SelectTrigger>
+              <SelectContent>{PRESETS.filter((p) => volVarOf(volEntry, p.field)).map((p) => <SelectItem key={p.id} value={p.id}>{p.label}</SelectItem>)}</SelectContent>
+            </Select>
+          </Row>
+          <Row label="Field">
+            <Select value={volNone ? "none" : volName} onValueChange={(v) => { setVolVar(v as VolVar | "none"); setPresetId("") }}>
+              <SelectTrigger className="h-8 w-full min-w-0" aria-label="3D field"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">None</SelectItem>
+                {VOL_ORDER.filter((v) => volVarOf(volEntry, v)).map((v) => <SelectItem key={v} value={v}>{volLabel(volEntry, v)}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </Row>
+          {vols!.length > 1 && (
+            <Row label="Model">
+              <Select value={volEntry.model} onValueChange={setVolModel}>
+                <SelectTrigger className="h-8 w-full min-w-0" aria-label="3D model"><SelectValue /></SelectTrigger>
+                <SelectContent>{vols!.map((v) => <SelectItem key={v.model} value={v.model}>{v.model}</SelectItem>)}</SelectContent>
+              </Select>
+            </Row>
+          )}
+        </Group>
+        {!volNone && (SOLID_AT[volName] || colorOpts.length > 0 || solidAt != null || LIT_VIEWS.includes(volName)) && (
+          <Group title="Draw it">
+            {SOLID_AT[volName] && (
+              <Row label="Solid" help="Draw the field as an opaque, lit surface where it reaches a value (the jet stream at 100 kt, say), instead of a see-through volume. Its shadow falls on the map.">
+                <Select value={solidAt == null ? "off" : String(solidAt)} onValueChange={(x) => {
+                  setSolidPick((p) => ({ ...p, [volName]: x === "off" ? null : Number(x) }))
+                  // the stratosphere above the tropopause is all over 2 PVU: cap the box below it so
+                  // the lobes folding down show, as they hang (the heights slider can lift it)
+                  if (volName === "pv" && x !== "off" && zRange == null) setZRange([0, 9])
+                }}>
+                  <SelectTrigger className="h-8 w-full min-w-0" aria-label="Solid surface"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="off">Off</SelectItem>
+                    {[...SOLID_AT[volName]!].sort((a, b) => a - b).map((x) => <SelectItem key={x} value={String(x)}>{solidLabel(volName, x, vv!.units)}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </Row>
+            )}
+            {colorOpts.length > 0 && (
+              <Row label="Colour" help="Colour the volume (or the solid) by its height, or by another field: humidity coloured by wind speed shows where the moist air is moving fastest.">
+                <Select value={colorBy} onValueChange={(x) => setColorPick(x as typeof colorPick)}>
+                  <SelectTrigger className="h-8 w-full min-w-0" aria-label="Colour by"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {colorOpts.map((c) => <SelectItem key={c} value={c}>{c === "own" ? "Its own colours" : c === "height" ? "By height" : `By ${volLabel(volEntry, c).toLowerCase()}`}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </Row>
+            )}
+            {(solidAt != null || LIT_VIEWS.includes(volName)) && <SwitchRow id="vol-shadow" label="Shadows" checked={shadowOn} onChange={setShadowOn} />}
+          </Group>
+        )}
+        <Group title="The box">
+          <Row label="Stretch" help="How much heights are stretched, so the atmosphere's 12 km show against a region hundreds of miles across. With 3D terrain on, the mountains stretch by the same amount."
+            value={`×${exag}`}>
+            <Slider className="w-full" value={[exag]} min={5} max={60} step={5} onValueChange={([v]) => setExag(v)} aria-label="Vertical stretch" />
+          </Row>
+          <Row label="Heights" help="Draw only the slab of the atmosphere between these heights (km above sea level), to see inside it or pick out one layer."
+            value={(() => { const [lo, hi] = zRange ?? [0, volEntry.topKm]; return lo === 0 && hi === volEntry.topKm ? "All" : `${lo}–${hi} km` })()}>
+            <Slider className="w-full" value={zRange ?? [0, volEntry.topKm]} min={0} max={volEntry.topKm} step={0.5} minStepsBetweenThumbs={1}
+              onValueChange={(v) => setZRange(v[0] === 0 && v[1] === volEntry.topKm ? null : [v[0], v[1]])}
+              getAriaValueText={(v) => `${v} km`} aria-label="Heights shown" />
+          </Row>
+          <SwitchRow id="vol-terrain" label="3D terrain" checked={terr3d} onChange={(v) => { setTerr3d(v); if (v && exag > 10) setExag(8) }} />
+          {terr3d && <SwitchRow id="vol-snow" label="Snow level" indent checked={snowOn} onChange={setSnowOn}
+            help="Shade the terrain white above the model's snow level, about 1,000 ft below the wet-bulb freezing level." />}
+        </Group>
+        <Group title="Add">
+          {hasUV && <SwitchRow id="vol-wind" label="Wind particles" checked={volWindOn} onChange={setVolWindOn}
+            help="Particles moving with the wind at 850, 700, 500, 300 and 250 mb, coloured by speed (or by moisture flow in that view)." />}
+          {layer === "radar" && <SwitchRow id="vol-precip" label="Falling precip" checked={volPrecip} onChange={setVolPrecip} />}
+          {hasUV && <SwitchRow id="vol-traj" label="Trajectories" checked={trajOn} onChange={setTrajOn}
+            help="Where the air arriving over each forecast location at about 1.5 and 3 km came from over the previous 24 hours (or since the model's first step), coloured by height: lines climbing toward a location show air being lifted." />}
+          {levelOpts.length > 0 && (
+            <Row label="Level map" help="A pressure level drawn inside the box at its average height: its height contours (labelled in decametres; lows and troughs where they dip) and wind arrows.">
+              <Select value={level == null ? "off" : String(level)} onValueChange={(x) => setLevelHPa(x === "off" ? null : Number(x))}>
+                <SelectTrigger className="h-8 w-full min-w-0" aria-label="Level map"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="off">Off</SelectItem>
+                  {[...levelOpts].sort((a, b) => b - a).map((h) => <SelectItem key={h} value={String(h)}>{h} mb</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </Row>
+          )}
+        </Group>
+        <Group title="Tools">
+          {!volNone && <SwitchRow id="vol-xsec" label="Cross-section" checked={xsecOn} onChange={(v) => { setXsecOn(v); if (!v) setPicking(null) }}
+            help="Slice the 3D field along a line, shown as a chart and as a curtain in 3D. Pick a preset line or draw your own." />}
+          <SwitchRow id="vol-profile" label="Profile" checked={profileOn} onChange={setProfileOn}
+            help="The column of air over one point, like a simple sounding: temperature and dewpoint by height, cloud and wind. Click the map to move it." />
+        </Group>
+      </div>
+    </div>
+  )
+  const aboutView = (
+    <AboutView
+      groups={[
+        { title: "3D view", items: mode === "totals" || !paneVol ? [] : volumeNotes({ entry: paneVol.entry, name: paneVol.name, exaggeration: exag, particles: !!paneVol.wind, precip: paneVol.precip, terrain: !!paneTerrain, snow: !!paneTerrain?.snow, vol: paneVol }) },
+        { title: "Cross-section", items: [
+          mode !== "totals" && volOn && xsecOn && volEntry && { label: "What it shows", text: <>The 3D field along the line from the ground to {volEntry.topKm} km, at the map's time, with contours. It also stands in the 3D view as a curtain.</> },
+          mode !== "totals" && volOn && xsecOn && { label: "Lines", text: <>Heavy blue is the freezing level (32°F); brown is the terrain along the line, smoother in the model than in reality.</> },
+        ] },
+        { title: "Map layer", items: mode === "totals" ? [] : [
+          volOn && vols && !vols.length && { label: "No 3D data", text: <>This briefing was built before the 3D view, or the models' pressure levels couldn't be read.</> },
+          layer === "radar" && smooth && (entriesA.refc && entriesA.ptype
+            ? { label: "Smoothing", text: <>Reflectivity is smoothed; precipitation type keeps each model cell's category.</> }
+            : !entriesA.refc ? { label: "Smoothing", text: <>Precipitation type is a category, so it isn't smoothed.</> } : null),
+          layer === "apcp" && { label: "Accumulated precipitation", text: <>Since {accStart}, the start of the briefing.</> },
+          layer === "asnow" && { label: "Accumulated snowfall", text: <>Since {accStart}. NCEP models report their own snowfall; ECMWF's is water equivalent at 10:1.</> },
+          layer === "rh" && { label: "Relative humidity", text: <>At 2 m; ECMWF's from its dewpoint.</> },
+          layer === "smoke" && { label: "Smoke", text: <>HRRR and RRFS near-surface smoke (8 m). 55 µg/m³ and up is unhealthy for everyone.</> },
+          layer === "wind" && { label: "Wind", text: showParticles ? <>Particles trace the 10 m wind; faster particles mean stronger wind.</> : <>Arrows point the way the wind is blowing; longer arrows are stronger winds.</> },
+          layer === "frz" && { label: "Freezing level", text: <>Snow usually reaches the ground about 1,000 ft below it.</> },
+          layer === "pgrad" && { label: "Pressure gradient", text: <>How fast sea-level pressure changes with distance, from the smoothed field; gap flows (Gorge, Fraser, Strait) pack tighter. Mountain cells (mean height above 600 m, or peaks above 1,400 m) are blank: sea-level pressure there is an extrapolation, and its gradient would mostly trace the terrain.</> },
+          layer === "ivt" && { label: "Water vapour transport", text: <>Vertically integrated (GFS and ECMWF AIFS), the measure behind the atmospheric-river scale{showParticles ? "; particles follow the moisture flow" : ""}.</> },
+        ] },
+        { title: "Overlays", items: [
+          mode !== "totals" && showPairs && pairList.length > 0 && { label: "Station pairs", text: <>Lines join each gradient pair, labelled with this model's pressure difference (hPa, first station minus second). Arrowheads point from high to low pressure, the way the gap flow blows; amber and red mark the pair's first and second thresholds, as on the pressure gradient card.</> },
+          mode !== "totals" && showParticles && layer !== "wind" && layer !== "ivt" && { label: "Wind particles", text: <>They trace the 10 m wind.</> },
+          mode !== "totals" && isobars && entriesA.mslp && { label: "Isobars", text: <>Sea-level pressure every 2 hPa; heavier, labelled lines every 4 hPa. H and L mark pressure centres.</> },
+          frontsOn && { label: "Fronts", text: <>The Weather Prediction Center's surface analyses every 3 hours for the last day, then its forecast chart once a day for days 1 – 3, so they move in steps rather than with each model hour. Symbols point the way the front is moving.</> },
+          reportsOn && { label: "Storm reports", text: <>NWS storm reports and report summaries from the last {data.obsReports?.reportHours ?? 48} hours; gusts in mph, amounts in inches.</> },
+          firesOn && { label: "Fires", text: <>Current wildfire and prescribed-fire incidents and perimeters, from the Wildfire tab's sources.</> },
+        ] },
+      ]}
+      downloads={!(mode === "totals" && (variable === "ar" || variable === "rivers" || variable === "storms")) && (
+        <p>
+          GeoTIFF:{" "}
+          {mode === "totals"
+            ? options.slice(0, 12).map((c, i) => (
+                <React.Fragment key={c.path}>{i > 0 && ", "}<a className="underline underline-offset-2 hover:text-foreground" href={cogUrl(c)} download>{c.model}</a></React.Fragment>
+              ))
+            : Object.values(entriesA).filter((e) => !e.path.startsWith("mrms:")).map((e, i) => (
+                <React.Fragment key={e.path}>{i > 0 && ", "}<a className="underline underline-offset-2 hover:text-foreground" href={fieldUrl(e)} download>{hA} {e.var}</a></React.Fragment>
+              ))}
+          {mode === "hourly" && " (one band per forecast time)"}.
+        </p>
+      )}
+    />
+
+  )
+  const timeBarOver = mode === "hourly" && times.length > 0 && (
+    <div className="pointer-events-none absolute inset-x-3 bottom-[calc(3rem+env(safe-area-inset-bottom))] z-10 flex justify-center sm:bottom-10">
+      <TimeBar times={times} clock={clock} playing={playing} setPlaying={setPlaying}
+        className="pointer-events-auto w-full max-w-3xl border bg-card/95 shadow-lg backdrop-blur" />
+    </div>
+  )
+  const floating = full || standalone                // the overlays: over the map rather than around it
+  const mapArea = (
+    <div className={full ? `fixed inset-0 z-50 m-0! grid bg-background ${showB ? "grid-rows-2 gap-px lg:grid-cols-2 lg:grid-rows-1" : ""}` : standalone ? `relative grid h-full ${showB ? "grid-rows-2 gap-px lg:grid-cols-2 lg:grid-rows-1" : ""}` : `relative grid gap-3 ${showB ? "lg:grid-cols-2" : ""}`}
+      role={full ? "dialog" : undefined} aria-modal={full || undefined} aria-label={full ? "Map, full screen" : undefined}>
+      <MapPane data={data} view={viewA} clock={clock} opacity={opacity} smooth={smooth} particles={showParticles} particleColor={ink} sync={sync} terrain={terrain} sat={sat} fronts={frontsOn} reports={reportsOn} fires={firesOn} vol={paneVol}
+        xsec={volOn && xsecOn ? { line: xsecLine, picked: picking, sink: xsecSink } : null} onPick={volOn && xsecOn && picking ? onPick : volOn && profileOn ? pickProfile : null} terrain3d={paneTerrain} tall={full || standalone} insetTitle={standalone && !panelOpen && !full} />
+      {showB && <MapPane data={data} view={viewB} clock={clock} opacity={opacity} smooth={smooth} particles={showParticles} particleColor={ink} sync={sync} terrain={terrain} sat={sat} fronts={frontsOn} reports={reportsOn} fires={firesOn} tall={full || standalone} />}
+      {/* left of the zoom buttons, so it doesn't cover them */}
+      <Button variant="outline" size="icon" onClick={() => setFull((f) => !f)} aria-pressed={full}
+        aria-label={full ? "Exit full screen" : "Full screen map"} title={full ? "Exit full screen (Esc)" : "Full screen"}
+        className="absolute top-[10px] right-12 z-10 size-[29px] bg-card shadow-sm">
+        {full ? <Minimize2 className="size-4" aria-hidden /> : <Maximize2 className="size-4" aria-hidden />}
+      </Button>
+      {floating && <MapKey below3d={volOn}>{legends}</MapKey>}
+      {xsecFloat && (
+        <FloatPanel title="Cross-section" onClose={() => { setXsecOn(false); setPicking(null) }} picking={!!picking}
+          className={mode === "hourly" ? "bottom-[calc(7.5rem+env(safe-area-inset-bottom))] sm:bottom-28" : "bottom-3 max-sm:bottom-2"}>
+          {xsecControls}
+          {xsecChart}
+        </FloatPanel>
+      )}
+      {floating && profOpen && (
+        <FloatPanel title="Profile" side="right" onClose={() => setProfileOn(false)}
+          className={`${mode === "hourly" ? "bottom-[calc(7.5rem+env(safe-area-inset-bottom))] sm:bottom-28" : "bottom-3"} ${xsecFloat ? "max-sm:bottom-[calc(10.5rem+env(safe-area-inset-bottom))]" : ""}`}>
+          {profChart}
+        </FloatPanel>
+      )}
+      {floating && timeBarOver}
+    </div>
+  )
+
+  if (standalone) return (
+    <div className="relative flex h-full min-h-0">
+      {/* the controls: a side panel beside the map, or over it on a phone */}
+      {panelOpen && (
+        <aside aria-label="Map controls"
+          className="z-30 flex w-[360px] shrink-0 flex-col border-r bg-card max-md:absolute max-md:inset-y-0 max-md:left-0 max-md:w-[min(360px,88%)] max-md:shadow-xl">
+          <div className="flex items-center justify-between border-b px-3 py-2">
+            <span className="text-[13px] font-semibold">Map controls</span>
+            <Button variant="ghost" size="icon" className="size-7" onClick={() => setPanelOpen(false)} aria-label="Hide the controls"><PanelLeftClose className="size-4" aria-hidden /></Button>
+          </div>
+          {/* in the panel the controls stack full width, as on a phone */}
+          <div className={"min-h-0 flex-1 space-y-4 overflow-y-auto p-3 [&_[data-control]]:w-full [&_[data-control]>span]:min-w-[112px] [&_[data-slot=select-trigger]]:min-w-0 "
+            + "[&_[data-slot=select-trigger]]:w-full [&_[data-slot=select-trigger]]:flex-1 [&_[data-control]_[data-slot=slider]]:w-auto [&_[data-control]_[data-slot=slider]]:flex-1 "
+            + "[&_[data-wide]]:w-full [&_[data-wide]>button]:w-full [&_[data-slot=tabs]]:w-full [&_[data-slot=tabs-list]]:w-full"}>
+            {controlsRow}
+            {threeDPanel}
+            {aboutView}
+          </div>
+        </aside>
+      )}
+      <div className="relative min-w-0 flex-1">
+        {mapArea}
+        {!panelOpen && (
+          <Button variant="outline" size="sm" onClick={() => setPanelOpen(true)} className="absolute top-2 left-2 z-20 h-8 bg-card shadow-sm">
+            <PanelLeftOpen aria-hidden />Controls
+          </Button>
+        )}
+      </div>
+    </div>
+  )
+
   return (
-    <Card className={standalone ? "gap-4 rounded-none border-0 py-3 shadow-none" : ""}>
-      <CardHeader className={standalone ? "hidden" : ""}>
+    <Card>
+      <CardHeader>
         <CardTitle>Explore the grids</CardTitle>
         <CardDescription info={<>{mode === "totals"
             ? "Totals, extremes, ensemble odds and observed rainfall for each window, from each model's own grid. Model spread and percent of normal use the multi-model mean; ensemble odds pool GEFS and ECMWF ENS members."
@@ -2503,221 +3033,15 @@ export function InteractiveMap({ data, request, active = true, standalone = fals
           </Button>
         </CardAction>
       </CardHeader>
-      <CardContent className={standalone ? "flex flex-col gap-3 px-4 max-sm:px-3" : "space-y-4"}>
-        <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
-          {hasHourly && (
-            <Tabs value={mode} onValueChange={(v) => { setMode(v as "totals" | "hourly"); setPlaying(false) }} className="max-sm:w-full">
-              <TabsList className="max-sm:w-full">
-                <TabsTrigger value="totals">Summary</TabsTrigger>
-                <TabsTrigger value="hourly">Hourly</TabsTrigger>
-              </TabsList>
-            </Tabs>
-          )}
-          {mode === "totals" ? (
-            <>
-              <Select value={variable} onValueChange={(v) => setVariable(v as TotVar)}>
-                <SelectTrigger className="w-full sm:w-[190px]" aria-label="Variable"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {(["Totals", "Extremes", "Vs normal", "Odds", "Observed", "Outlooks"] as const).map((g) => [g, totAvail.filter((v) => v.group === g)] as const).filter(([, vs]) => vs.length).map(([g, vs]) => (
-                    <SelectGroup key={g}>
-                      <SelectLabel>{GROUP_LABEL[g]}</SelectLabel>
-                      {vs.map((v) => <SelectItem key={v.id} value={v.id}>{v.label}</SelectItem>)}
-                    </SelectGroup>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Tabs value={String(d)} onValueChange={(v) => setDays(Number(v))} className="max-sm:w-full">
-                <TabsList className="max-sm:w-full">{windows.map((w) => <TabsTrigger key={w} value={String(w)}>{winLabel(w).replace("next ", "").replace("past ", "")}</TabsTrigger>)}</TabsList>
-              </Tabs>
-              {perModel && (
-                <div className="flex items-center gap-x-5 max-sm:w-full">
-                  <ModelSelect options={options} value={pick(model)?.model ?? ""} onChange={setModel} label="Model" />
-                  <Toggle id="compare-t" label="Compare" checked={compare} onChange={setCompare} />
-                </div>
-              )}
-              {perModel && compare && <div className="flex max-sm:w-full"><ModelSelect options={options.filter((o) => o.model !== pick(model)?.model)} value={pickOther(other)?.model ?? ""} onChange={setOther} label="Compare with" /></div>}
-            </>
-          ) : (
-            <>
-              <Select value={layer} onValueChange={(v) => setLayer(v as HLayer)}>
-                <SelectTrigger className="w-full sm:w-[230px]" aria-label="Layer"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {H_GROUPS.map((g) => [g, HLAYERS.filter((l) => l.group === g && [...byModel.values()].some((v) => l.primary(v.entries)))] as const)
-                    .filter(([, ls]) => ls.length).map(([g, ls]) => (
-                      <SelectGroup key={g}>
-                        <SelectLabel>{g}</SelectLabel>
-                        {ls.map((l) => <SelectItem key={l.id} value={l.id}>{l.label}</SelectItem>)}
-                      </SelectGroup>
-                    ))}
-                </SelectContent>
-              </Select>
-              <div className="flex items-center gap-x-5 max-sm:w-full">
-                {hA && <ModelSelect options={layerModels} value={hA} onChange={(m) => {
-                  setHModel(m)
-                  // observed radar pairs best with a high-resolution forecast
-                  if (m === MRMS_MODEL && !layerModels.some((x) => x.model === hOther && x.tier === "regional")) {
-                    const r = layerModels.find((x) => x.tier === "regional")
-                    if (r) setHOther(r.model)
-                  }
-                }} label="Model" />}
-                {!threeD && <Toggle id="compare-h" label="Compare" checked={compare} onChange={setCompare} />}
-                <Toggle id="three-d" label="3D" checked={threeD} onChange={(v) => { setThreeD(v); if (v) setCompare(false) }} />
-              </div>
-              {compare && !threeD && hB && <div className="flex max-sm:w-full"><ModelSelect options={layerModels.filter((m) => m.model !== hA)} value={hB} onChange={setHOther} label="Compare with" /></div>}
-            </>
-          )}
-          <div className="max-sm:w-full sm:ml-auto">
-            <MapOptions
-              overlays={[
-                !!data.fronts?.frames.length && <OptionRow key="fronts" id="fronts" label="Fronts (WPC)" checked={showFronts} onChange={setShowFronts} />,
-                hasFires && <OptionRow key="fires" id="fires" label="Fires and perimeters" checked={showFires} onChange={setShowFires} />,
-                live.length > 0 && <OptionRow key="reports" id="nws-reports" label={`NWS reports, last ${data.obsReports?.reportHours ?? 48} h`} checked={showReports} onChange={setShowReports} />,
-              ...(mode === "hourly" ? [
-                entriesA.mslp && <OptionRow key="iso" id="isobars" label="Isobars" checked={isobars} onChange={setIsobars} />,
-                pairList.length > 0 && <OptionRow key="pairs" id="pairs" label="Gradient pairs" checked={showPairs} onChange={setShowPairs} />,
-                hasWind && <OptionRow key="part" id="particles" label={layer === "ivt" ? "Moisture particles" : "Wind particles"} checked={particles} onChange={setParticles} />,
-                satAll && (
-                  <div key="sat" className="flex items-center justify-between gap-4 py-1">
-                    <Label className="font-normal">Satellite</Label>
-                    <Select value={satKind} onValueChange={(v) => setSatKind(v as SatKind | "off")}>
-                      <SelectTrigger size="sm" className="w-[130px]" aria-label="Satellite imagery"><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="off">Off</SelectItem>
-                        {(Object.keys(SAT_KINDS) as SatKind[]).map((k) => <SelectItem key={k} value={k}>{SAT_KINDS[k].label}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                ),
-              ] : [])].filter(Boolean)}
-              active={(frontsOn ? 1 : 0) + (reportsOn ? 1 : 0) + (firesOn ? 1 : 0) + (mode === "hourly" ? [entriesA.mslp && isobars, pairList.length > 0 && showPairs, hasWind && particles, satAll && satKind !== "off"].filter(Boolean).length : 0)}
-              display={<>
-                <OptionRow id="terrain" label="Terrain" checked={terrain} onChange={setTerrain} />
-                <OptionRow id="smooth" label="Smooth" checked={smooth} onChange={setSmooth} />
-                <div className="flex items-center justify-between gap-4 py-1.5">
-                  <Label className="font-normal">Opacity</Label>
-                  <Slider className="w-[130px]" value={[opacity]} min={0.2} max={1} step={0.05} onValueChange={([v]) => setOpacity(v)} aria-label="Grid opacity" />
-                </div>
-              </>}
-            />
-          </div>
-        </div>
+      <CardContent className="space-y-4">
+        {controlsRow}
 
-        {mode === "hourly" && threeD && volEntry && volName && (
-          <div className="space-y-3 rounded-lg border bg-muted/30 p-3">
-            <div className="text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">3D view</div>
-            <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
-              <Control label="Field">
-                <Select value={volNone ? "none" : volName} onValueChange={(v) => setVolVar(v as VolVar | "none")}>
-                  <SelectTrigger className="min-w-0 flex-1 sm:w-[190px] sm:flex-none" aria-label="3D field"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">None</SelectItem>
-                    {VOL_ORDER.filter((v) => volVarOf(volEntry, v)).map((v) => <SelectItem key={v} value={v}>{volLabel(volEntry, v)}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </Control>
-              {vols!.length > 1 && (
-                <Control label="Model">
-                  <Select value={volEntry.model} onValueChange={setVolModel}>
-                    <SelectTrigger className="min-w-0 flex-1 sm:w-[140px] sm:flex-none" aria-label="3D model"><SelectValue /></SelectTrigger>
-                    <SelectContent>{vols!.map((v) => <SelectItem key={v.model} value={v.model}>{v.model}</SelectItem>)}</SelectContent>
-                  </Select>
-                </Control>
-              )}
-              <Control label={`Height ×${exag}`} help="How much heights are stretched, so the atmosphere's 12 km show against a region hundreds of miles across. With 3D terrain on, the mountains stretch by the same amount.">
-                <Slider className="w-[120px] max-sm:flex-1" value={[exag]} min={5} max={60} step={5} onValueChange={([v]) => setExag(v)} aria-label="Vertical stretch" />
-              </Control>
-              <Control label={(() => { const [lo, hi] = zRange ?? [0, volEntry.topKm]; return lo === 0 && hi === volEntry.topKm ? "All heights" : `${lo} – ${hi} km` })()} labelClass="sm:min-w-[96px] tabular-nums"
-                help="Draw only the slab of the atmosphere between these heights (km above sea level), to see inside it or pick out one layer.">
-                <Slider className="w-[150px] max-sm:flex-1" value={zRange ?? [0, volEntry.topKm]} min={0} max={volEntry.topKm} step={0.5} minStepsBetweenThumbs={1}
-                  onValueChange={(v) => setZRange(v[0] === 0 && v[1] === volEntry.topKm ? null : [v[0], v[1]])}
-                  getAriaValueText={(v) => `${v} km`} aria-label="Heights shown" />
-              </Control>
-            </div>
-            <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
-              {hasUV && <Toggle id="vol-wind" label="Wind particles" checked={volWindOn} onChange={setVolWindOn}
-                help="Particles moving with the wind at 850, 700, 500, 300 and 250 mb, coloured by speed (or by moisture flow in that view)." />}
-              {layer === "radar" && <Toggle id="vol-precip" label="Falling precip" checked={volPrecip} onChange={setVolPrecip} />}
-              {!volNone && <Toggle id="vol-xsec" label="Cross-section" checked={xsecOn} onChange={(v) => { setXsecOn(v); if (!v) setPicking(null) }}
-                help="Slice the 3D field along a line, drawn under the map and as a curtain in 3D. Pick a preset line or draw your own." />}
-              <Toggle id="vol-terrain" label="3D terrain" checked={terr3d} onChange={(v) => { setTerr3d(v); if (v && exag > 10) setExag(8) }} />
-              {terr3d && <Toggle id="vol-snow" label="Snow level" checked={snowOn} onChange={setSnowOn}
-                help="Shade the terrain white above the model's snow level, about 1,000 ft below the wet-bulb freezing level." />}
-            </div>
-            <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
-              {!volNone && SOLID_AT[volName] && (
-                <Control label="Solid" help="Draw the field as an opaque, lit surface where it reaches a value (the jet stream at 100 kt, say), instead of a see-through volume. Its shadow falls on the map.">
-                  <Select value={solidAt == null ? "off" : String(solidAt)} onValueChange={(x) => {
-                    setSolidPick((p) => ({ ...p, [volName]: x === "off" ? null : Number(x) }))
-                    // the stratosphere above the tropopause is all over 2 PVU: cap the box below it so
-                    // the lobes folding down show, as they hang (the heights slider can lift it)
-                    if (volName === "pv" && x !== "off" && zRange == null) setZRange([0, 9])
-                  }}>
-                    <SelectTrigger className="min-w-0 flex-1 sm:w-[175px] sm:flex-none" aria-label="Solid surface"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="off">Off</SelectItem>
-                      {[...SOLID_AT[volName]!].sort((a, b) => a - b).map((x) => <SelectItem key={x} value={String(x)}>{solidLabel(volName, x, volVarOf(volEntry, volName)!.units)}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </Control>
-              )}
-              {colorOpts.length > 0 && (
-                <Control label="Colour" help="Colour the volume (or the solid) by its height, or by another field: humidity coloured by wind speed shows where the moist air is moving fastest.">
-                  <Select value={colorBy} onValueChange={(x) => setColorPick(x as typeof colorPick)}>
-                    <SelectTrigger className="min-w-0 flex-1 sm:w-[160px] sm:flex-none" aria-label="Colour by"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {colorOpts.map((c) => <SelectItem key={c} value={c}>{c === "own" ? "Its own colours" : c === "height" ? "By height" : `By ${volLabel(volEntry, c).toLowerCase()}`}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </Control>
-              )}
-              {levelOpts.length > 0 && (
-                <Control label="Level map" help="A pressure level drawn inside the box at its average height: its height contours (labelled in decametres; lows and troughs where they dip) and wind arrows.">
-                  <Select value={level == null ? "off" : String(level)} onValueChange={(x) => setLevelHPa(x === "off" ? null : Number(x))}>
-                    <SelectTrigger className="min-w-0 flex-1 sm:w-[120px] sm:flex-none" aria-label="Level map"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="off">Off</SelectItem>
-                      {[...levelOpts].sort((a, b) => b - a).map((h) => <SelectItem key={h} value={String(h)}>{h} mb</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </Control>
-              )}
-              {!volNone && (solidAt != null || LIT_VIEWS.includes(volName)) && <Toggle id="vol-shadow" label="Shadows" checked={shadowOn} onChange={setShadowOn} />}
-              {hasUV && <Toggle id="vol-traj" label="Trajectories" checked={trajOn} onChange={setTrajOn}
-                help="Where the air arriving over each forecast location at about 1.5 and 3 km came from over the previous 24 hours (or since the model's first step), coloured by height: lines climbing toward a location show air being lifted." />}
-            </div>
-          </div>
-        )}
 
-        {/* on the map page on a phone, the map and its timeline come first and the controls follow */}
-        {mode === "hourly" && times.length > 0 && <TimeBar times={times} clock={clock} playing={playing} setPlaying={setPlaying}
-          className={`border bg-muted/40 ${standalone ? "max-sm:order-[-1]" : ""}`} />}
+        {threeDPanel}
 
-        <div className={full ? `fixed inset-0 z-50 m-0! grid bg-background ${showB ? "grid-rows-2 gap-px lg:grid-cols-2 lg:grid-rows-1" : ""}` : `relative grid gap-3 ${showB ? "lg:grid-cols-2" : ""} ${standalone ? "max-sm:order-[-2]" : ""}`}
-          role={full ? "dialog" : undefined} aria-modal={full || undefined} aria-label={full ? "Map, full screen" : undefined}>
-          <MapPane data={data} view={viewA} clock={clock} opacity={opacity} smooth={smooth} particles={showParticles} particleColor={ink} sync={sync} terrain={terrain} sat={sat} fronts={frontsOn} reports={reportsOn} fires={firesOn} vol={paneVol}
-            xsec={volOn && xsecOn ? { line: xsecLine, picked: picking, sink: xsecSink } : null} onPick={volOn && xsecOn && picking ? onPick : null} terrain3d={paneTerrain} tall={full} page={standalone} />
-          {showB && <MapPane data={data} view={viewB} clock={clock} opacity={opacity} smooth={smooth} particles={showParticles} particleColor={ink} sync={sync} terrain={terrain} sat={sat} fronts={frontsOn} reports={reportsOn} fires={firesOn} tall={full} page={standalone} />}
-          {/* left of the zoom buttons, so it doesn't cover them */}
-          <Button variant="outline" size="icon" onClick={() => setFull((f) => !f)} aria-pressed={full}
-            aria-label={full ? "Exit full screen" : "Full screen map"} title={full ? "Exit full screen (Esc)" : "Full screen"}
-            className="absolute top-[10px] right-12 z-10 size-[29px] bg-card shadow-sm">
-            {full ? <Minimize2 className="size-4" aria-hidden /> : <Maximize2 className="size-4" aria-hidden />}
-          </Button>
-          {full && <MapKey>{legends}</MapKey>}
-          {xsecFloat && (
-            <FloatPanel title="Cross-section" onClose={() => { setXsecOn(false); setPicking(null) }} picking={!!picking}
-              className={full && mode === "hourly" ? "bottom-[calc(7.5rem+env(safe-area-inset-bottom))] sm:bottom-28" : "bottom-3 max-sm:bottom-2"}>
-              {xsecControls}
-              {xsecChart}
-            </FloatPanel>
-          )}
-          {full && mode === "hourly" && times.length > 0 && (
-            <div className="pointer-events-none absolute inset-x-3 bottom-[calc(3rem+env(safe-area-inset-bottom))] z-10 flex justify-center sm:bottom-10">
-              <TimeBar times={times} clock={clock} playing={playing} setPlaying={setPlaying}
-                className="pointer-events-auto w-full max-w-3xl border bg-card/95 shadow-lg backdrop-blur" />
-            </div>
-          )}
-        </div>
+        {mode === "hourly" && times.length > 0 && <TimeBar times={times} clock={clock} playing={playing} setPlaying={setPlaying} />}
+
+        {mapArea}
 
         {xsecOpen && !xsecFloat && (
           <div className="space-y-2">
@@ -2725,53 +3049,16 @@ export function InteractiveMap({ data, request, active = true, standalone = fals
             {xsecChart}
           </div>
         )}
+        {profOpen && !floating && (
+          <div className="max-w-xl space-y-1.5">
+            <div className="text-sm font-medium">Profile</div>
+            {profChart}
+          </div>
+        )}
 
         {legends}
 
-        <AboutView
-          groups={[
-            { title: "3D view", items: mode === "totals" || !paneVol ? [] : volumeNotes({ entry: paneVol.entry, name: paneVol.name, exaggeration: exag, particles: !!paneVol.wind, precip: paneVol.precip, terrain: !!paneTerrain, snow: !!paneTerrain?.snow, vol: paneVol }) },
-            { title: "Cross-section", items: [
-              mode !== "totals" && volOn && xsecOn && volEntry && { label: "What it shows", text: <>The 3D field along the line from the ground to {volEntry.topKm} km, at the map's time, with contours. It also stands in the 3D view as a curtain.</> },
-              mode !== "totals" && volOn && xsecOn && { label: "Lines", text: <>Heavy blue is the freezing level (32°F); brown is the terrain along the line, smoother in the model than in reality.</> },
-            ] },
-            { title: "Map layer", items: mode === "totals" ? [] : [
-              volOn && vols && !vols.length && { label: "No 3D data", text: <>This briefing was built before the 3D view, or the models' pressure levels couldn't be read.</> },
-              layer === "radar" && smooth && (entriesA.refc && entriesA.ptype
-                ? { label: "Smoothing", text: <>Reflectivity is smoothed; precipitation type keeps each model cell's category.</> }
-                : !entriesA.refc ? { label: "Smoothing", text: <>Precipitation type is a category, so it isn't smoothed.</> } : null),
-              layer === "apcp" && { label: "Accumulated precipitation", text: <>Since {accStart}, the start of the briefing.</> },
-              layer === "asnow" && { label: "Accumulated snowfall", text: <>Since {accStart}. NCEP models report their own snowfall; ECMWF's is water equivalent at 10:1.</> },
-              layer === "rh" && { label: "Relative humidity", text: <>At 2 m; ECMWF's from its dewpoint.</> },
-              layer === "smoke" && { label: "Smoke", text: <>HRRR and RRFS near-surface smoke (8 m). 55 µg/m³ and up is unhealthy for everyone.</> },
-              layer === "wind" && { label: "Wind", text: showParticles ? <>Particles trace the 10 m wind; faster particles mean stronger wind.</> : <>Arrows point the way the wind is blowing; longer arrows are stronger winds.</> },
-              layer === "frz" && { label: "Freezing level", text: <>Snow usually reaches the ground about 1,000 ft below it.</> },
-              layer === "pgrad" && { label: "Pressure gradient", text: <>How fast sea-level pressure changes with distance, from the smoothed field; gap flows (Gorge, Fraser, Strait) pack tighter. Mountain cells (mean height above 600 m, or peaks above 1,400 m) are blank: sea-level pressure there is an extrapolation, and its gradient would mostly trace the terrain.</> },
-              layer === "ivt" && { label: "Water vapour transport", text: <>Vertically integrated (GFS and ECMWF AIFS), the measure behind the atmospheric-river scale{showParticles ? "; particles follow the moisture flow" : ""}.</> },
-            ] },
-            { title: "Overlays", items: [
-              mode !== "totals" && showPairs && pairList.length > 0 && { label: "Station pairs", text: <>Lines join each gradient pair, labelled with this model's pressure difference (hPa, first station minus second). Arrowheads point from high to low pressure, the way the gap flow blows; amber and red mark the pair's first and second thresholds, as on the pressure gradient card.</> },
-              mode !== "totals" && showParticles && layer !== "wind" && layer !== "ivt" && { label: "Wind particles", text: <>They trace the 10 m wind.</> },
-              mode !== "totals" && isobars && entriesA.mslp && { label: "Isobars", text: <>Sea-level pressure every 2 hPa; heavier, labelled lines every 4 hPa. H and L mark pressure centres.</> },
-              frontsOn && { label: "Fronts", text: <>The Weather Prediction Center's surface analyses every 3 hours for the last day, then its forecast chart once a day for days 1 – 3, so they move in steps rather than with each model hour. Symbols point the way the front is moving.</> },
-              reportsOn && { label: "Storm reports", text: <>NWS storm reports and report summaries from the last {data.obsReports?.reportHours ?? 48} hours; gusts in mph, amounts in inches.</> },
-              firesOn && { label: "Fires", text: <>Current wildfire and prescribed-fire incidents and perimeters, from the Wildfire tab's sources.</> },
-            ] },
-          ]}
-          downloads={!(mode === "totals" && (variable === "ar" || variable === "rivers" || variable === "storms")) && (
-            <p>
-              GeoTIFF:{" "}
-              {mode === "totals"
-                ? options.slice(0, 12).map((c, i) => (
-                    <React.Fragment key={c.path}>{i > 0 && ", "}<a className="underline underline-offset-2 hover:text-foreground" href={cogUrl(c)} download>{c.model}</a></React.Fragment>
-                  ))
-                : Object.values(entriesA).filter((e) => !e.path.startsWith("mrms:")).map((e, i) => (
-                    <React.Fragment key={e.path}>{i > 0 && ", "}<a className="underline underline-offset-2 hover:text-foreground" href={fieldUrl(e)} download>{hA} {e.var}</a></React.Fragment>
-                  ))}
-              {mode === "hourly" && " (one band per forecast time)"}.
-            </p>
-          )}
-        />
+        {aboutView}
       </CardContent>
     </Card>
   )
