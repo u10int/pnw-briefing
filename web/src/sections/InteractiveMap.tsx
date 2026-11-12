@@ -29,7 +29,7 @@ import { ParticleLayer, type WindDraw } from "@/lib/gl/particle-layer"
 import { VolumeLayer } from "@/lib/gl/volume-layer"
 import { type LonLat, SECTION_PRESETS, type SectionLine } from "@/lib/xsection"
 import { CrossSection } from "@/sections/CrossSection"
-import { frac, frzColor, heightLut, hexRgb, ISOS, legendStops, loadVolume, lutFor, SOURCE, transfer, useVolumes, VIEW_LABEL, VOL_ORDER,
+import { frac, frzColor, heightLut, hexRgb, ISOS, legendStops, loadVolume, lutFor, mfluxRgb, SOURCE, transfer, unpack, useVolumes, VIEW_LABEL, VOL_ORDER,
   type VolumeEntry, type VolumeVar, type VolVar } from "@/lib/volume"
 import { type Grid, sameGrid } from "@/lib/gl/util"
 import { AR_COLORS, AR_LABELS, FLOOD_COLORS, FLOOD_LABELS, FRZ, GUST, IVT, legendBins, PCT, PGRAD, PRECIP, PROB, PTYPE_COLORS, PTYPE_NAMES, type Ramp, REFC, RH, SMOKE, SNOW, SPREAD, TDEP, TEMP, WIND } from "@/lib/ramps"
@@ -543,7 +543,7 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
     const v = volVarOf(vol.entry, vol.name)!
     const isos = (ISOS[vol.name] ?? []).map((x) => ({ at: frac(x.at, v), rgba: [...hexRgb(x.color).map((c) => c / 255), x.alpha] as [number, number, number, number] }))
     L.setDraw({ grid: vol.entry, data: vol.data, steps: vol.entry.times.length, lut: lutFor(vol.name, v), key: volKey,
-      lit: ["cloud", "water", "ice", "rh"].includes(vol.name), isos, heightLut: vol.name === "frz" ? heightLut(vol.entry.topKm) : undefined }, vol.entry.levels)
+      lit: ["cloud", "water", "ice", "rh", "mflux"].includes(vol.name), isos, heightLut: vol.name === "frz" ? heightLut(vol.entry.topKm) : undefined }, vol.entry.levels)
     const ms = msOf(vol.entry.times)
     const update = () => {
       const pos = posOf(ms, clock.time ?? ms[0])
@@ -585,8 +585,10 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
     layers.current!.volume.setWind(e && w && vol?.data ? {
       u: w.u, v: w.v, range: [e.vars.u.min, e.vars.u.max],
       heightsKm: PARTICLE_HPA.map((p) => e.levels.find((l) => l.hPa === p)?.km).filter((k): k is number => k != null && k < e.topKm),
+      // in the moisture-flow view, particles take the plume's colours: the river shows in them too
+      tint: vol?.name === "mflux" && e.vars.mflux ? (b) => mfluxRgb(unpack(b, e.vars.mflux)) : undefined,
     } : null)
-  }, [vol?.wind, vol?.data ? vol.entry.model : null])
+  }, [vol?.wind, vol?.data ? vol.entry.model : null, vol?.name])
 
   // Satellite imagery under the data: the GOES frame nearest the clock (within 20 minutes), over
   // the hourly global mosaic (within 75 minutes) that fills in north of the GOES layer's edge. One
@@ -767,6 +769,8 @@ const VOL_NOTES: Record<VolVar, string> = {
   wind: "Wind speed as surfaces at set speeds (isotachs), nested like the layers of an onion around the fastest air; the jet stream's core also glows faintly.",
   water: "Liquid water in the air: cloud droplets plus rain, in grams per kilogram of air.",
   ice: "Frozen water in the air: cloud ice, snow and graupel, in grams per kilogram of air.",
+  mflux: "Moisture flow: the water vapour the wind carries (specific humidity times wind speed). An atmospheric river shows as a plume of yellows and reds, deepest low down where the air holds the most water; summed through the column it's the IVT on the map's moisture layer. Particles take the same colours.",
+  w: "Rising (red) and sinking (blue) air, in metres a second. Rising air cools and wrings out its moisture, so lift up the windward slopes of the Olympics and Cascades and along fronts is where precipitation is made; sinking air in their lee dries out (the rain shadow).",
   frz: "The freezing level as a surface, coloured by its height in 1,000 ft bands: below it the air is above freezing, above it below. Snow usually reaches about 1,000 ft below it; where it meets the ground, it's freezing at the surface. More than one layer means a warm layer aloft (freezing rain or sleet risk).",
 }
 /** How to read the 3D field: shell swatches for temperature and wind, a height scale for the freezing
@@ -1778,7 +1782,7 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
   // on by default with the wind speed view, off with the others (until switched)
   const [volWindPick, setVolWindOn] = React.useState<boolean | null>(null)
   const [volPrecip, setVolPrecip] = React.useState(true)
-  const volWindOn = volWindPick ?? volVar === "wind"
+  const volWindOn = volWindPick ?? (volVar === "wind" || volVar === "mflux")
   const hasUV = !!(volEntry?.vars.u && volEntry?.vars.v)
   const [volWind, setVolWind] = React.useState<{ model: string; u: Uint8Array; v: Uint8Array } | null>(null)
   React.useEffect(() => {

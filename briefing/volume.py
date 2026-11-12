@@ -16,6 +16,10 @@ its config, every `step` hours over the first `hours` of the briefing, this read
          so it's estimated from relative humidity (Sundqvist: cloud forms above 80%)
 - water: liquid water (g/kg): cloud water plus rain (GFS only)
 - ice:   ice and snow (g/kg): cloud ice, snow and graupel (GFS only)
+- mflux: moisture flow ((g/kg)(m/s)): specific humidity times wind speed, the plume an
+         atmospheric river carries (its sum through the column is IVT)
+- w:     rising (+) and sinking (-) air (m/s): GFS's geometric vertical velocity; ECMWF's pressure
+         velocity converted with the air's density
 
 Each column is resampled from its pressure levels onto a fixed height grid (0 – 12 km every
 500 m) using the levels' geopotential heights, so the page can draw the volume to scale. Heights
@@ -56,15 +60,20 @@ VARS = {
     "v":     {"min": -100, "max": 100, "scale": "linear", "units": "m/s", "label": "Wind, northward"},
     "water": {"min": 0, "max": 2.0, "scale": "sqrt", "units": "g/kg", "label": "Liquid water"},
     "ice":   {"min": 0, "max": 2.0, "scale": "sqrt", "units": "g/kg", "label": "Ice and snow"},
+    "mflux": {"min": 0, "max": 500, "scale": "sqrt", "units": "g/kg·m/s", "label": "Moisture flow"},
+    "w":     {"min": -2, "max": 2, "scale": "linear", "units": "m/s", "label": "Rising and sinking air"},
 }
 NOTES = {"cloud": {"ecmwf": "Estimated from relative humidity (ECMWF publishes no cloud on pressure levels)."}}
 
 # GRIB records to read, and the cfgrib names (or GRIB names) each lands under
-PATTERN = {"ncep": r":(HGT|TMP|RH|UGRD|VGRD|CLMR|ICMR|RWMR|SNMR|GRLE|TCDC):({levels}) mb:",
-           "ecmwf": r":(gh|t|r|u|v):({levels}):pl:"}
+PATTERN = {"ncep": r":(HGT|TMP|RH|UGRD|VGRD|SPFH|DZDT|CLMR|ICMR|RWMR|SNMR|GRLE|TCDC):({levels}) mb:",
+           "ecmwf": r":(gh|t|r|u|v|q|w):({levels}):pl:"}
 NAMES = {
     "gh": ["gh", "geopotential height"], "t": ["t", "temperature"], "r": ["r", "relative humidity"],
     "u": ["u", "u component of wind"], "v": ["v", "v component of wind"],
+    "q": ["q", "specific humidity"],
+    # vertical motion: GFS's geometric velocity (m/s, DZDT); ECMWF's is pressure velocity (Pa/s)
+    "wz": ["wz", "dzdt", "geometric vertical velocity"], "omega": ["w", "vertical velocity"],
     "clwmr": ["clwmr", "clmr", "cloud mixing ratio"], "icmr": ["icmr", "ice water mixing ratio", "ice mixing ratio"],
     "rwmr": ["rwmr", "rain mixing ratio"], "snmr": ["snmr", "snow mixing ratio"],
     "grle": ["grle", "graupel", "graupel (snow pellets)"], "tcc": ["tcc", "tcdc", "total cloud cover", "cloud cover"],
@@ -103,8 +112,9 @@ def cloud_from_rh(rh, rh_crit=80.0):
     return (100 * (1 - np.sqrt(x))).astype("float32")
 
 
-def derive(got, family):
-    """{var: [level, y, x]} in display units from the raw records on pressure levels."""
+def derive(got, family, levels=None):
+    """{var: [level, y, x]} in display units from the raw records on pressure levels (`levels`,
+    hPa, for turning ECMWF's pressure velocity into m/s)."""
     out = {}
     if "t" in got:
         out["temp"] = (got["t"] - 273.15) * 9 / 5 + 32
@@ -121,6 +131,17 @@ def derive(got, family):
         out["water"] = 1000 * (got["clwmr"] + got.get("rwmr", 0))
     if "icmr" in got:
         out["ice"] = 1000 * (got["icmr"] + got.get("snmr", 0) + got.get("grle", 0))
+    # moisture flow: specific humidity times wind speed, (g/kg)(m/s); its sum through the column
+    # is what IVT measures
+    if "q" in got and "u" in got and "v" in got:
+        out["mflux"] = 1000 * np.clip(got["q"], 0, None) * np.hypot(got["u"], got["v"])
+    # rising (+) and sinking (-) air, m/s
+    if "wz" in got:
+        out["w"] = got["wz"]
+    elif "omega" in got and "t" in got and levels is not None:
+        p = np.asarray(levels, dtype="float32").reshape(-1, *([1] * (got["omega"].ndim - 1))) * 100
+        rho = p / (287.05 * got["t"])
+        out["w"] = -got["omega"] / (rho * 9.81)
     return {k: np.asarray(v, dtype="float32") for k, v in out.items()}
 
 
@@ -186,7 +207,7 @@ def fetch(spec, run, lead0, dom, hours=48, step=3):
                 why[h] = f"no heights or temperature among {', '.join(seen) or 'no fields'}"
                 return h, None
             heights = got.pop("gh")
-            return h, (lat, lon, levs, heights, {k: to_heights(v, heights) for k, v in derive(got, fam).items()})
+            return h, (lat, lon, levs, heights, {k: to_heights(v, heights) for k, v in derive(got, fam, levs).items()})
         except Exception as e:
             why[h] = f"{type(e).__name__}: {e}"
             log.debug("%s volume f%03d: %s", spec["label"], h, e)
@@ -253,7 +274,7 @@ def demo_volume(spec, run, dom, family, hours=48, step=3, seed=0):
     smooth = rng.normal(0, 1, (len(lat), len(lon)))
     for _ in range(4):
         smooth = (smooth + np.roll(smooth, 1, 0) + np.roll(smooth, -1, 0) + np.roll(smooth, 1, 1) + np.roll(smooth, -1, 1)) / 5
-    out = {k: [] for k in ("temp", "wind", "rh", "cloud", "water", "ice", "u", "v")}
+    out = {k: [] for k in ("temp", "wind", "rh", "cloud", "water", "ice", "u", "v", "mflux", "w")}
     for h in hrs:
         cx = dom["lon_min"] + 1.0 + (h / hours) * 7.5               # the front moves east
         band = np.exp(-(((X - cx) - 0.6 * (Y - 47)) / 1.4) ** 2)     # a tilted frontal band
@@ -265,16 +286,24 @@ def demo_volume(spec, run, dom, family, hours=48, step=3, seed=0):
         rh = 100 * np.clip(moist[None] * (1 - 0.05 * z) + 0.05 * np.sin(z * 1.3), 0.05, 1)
         rh = np.where(z > 9.5, rh * 0.5, rh)
         jet = 150 * np.exp(-((z - 9.2) / 1.6) ** 2) * np.exp(-((Y - 46.5 - 0.4 * (X - cx)) / 2.2) ** 2)[None]
-        wind = 15 + 6 * z + jet + 20 * band[None] * np.exp(-((z - 1.2) / 1.0) ** 2)
+        wind = 15 + 6 * z + jet + 45 * band[None] * np.exp(-((z - 1.2) / 1.0) ** 2)     # a low-level jet along the front
         cloud = cloud_from_rh(rh)
         water = np.where(temp > 18, 1.4 * band[None] * np.exp(-((z - 2) / 1.6) ** 2) * (rh / 100) ** 6, 0)
         ice = np.where(temp < 32, 0.9 * np.maximum(band, comma)[None] * np.exp(-((z - 6.5) / 2.2) ** 2) * (rh / 100) ** 4, 0)
         # mostly from the south-west, backing to the west with height
         ang = np.radians(35 + 25 * np.clip(z / 9, 0, 1)) + 0.25 * band[None]
         u, v = wind / 2.23694 * np.cos(ang), wind / 2.23694 * np.sin(ang)
-        for k, v in (("temp", temp), ("wind", wind), ("rh", rh), ("cloud", cloud), ("water", water), ("ice", ice), ("u", u), ("v", v)):
+        # moisture: most near the surface, carried fastest in the low-level jet along the front
+        q = 9.0 * np.exp(-z / 2.4) * (rh / 100) ** 1.5                        # g/kg
+        mflux = q * wind / 2.23694
+        # lift along the front and up the windward Cascades and Olympics, sinking in their lee
+        oro = np.exp(-((X + 121.75) / 0.3) ** 2) - 0.8 * np.exp(-((X + 121.15) / 0.3) ** 2) \
+            + 0.7 * (np.exp(-((X + 123.85) / 0.25) ** 2) - 0.6 * np.exp(-((X + 123.3) / 0.25) ** 2)) * np.exp(-((Y - 47.8) / 0.4) ** 2)
+        w = 0.35 * band[None] * np.sin(np.pi * np.clip(z / 10, 0, 1)) + 0.6 * oro[None] * np.exp(-z / 3) - 0.05 * behind[None]
+        for k, v in (("temp", temp), ("wind", wind), ("rh", rh), ("cloud", cloud), ("water", water), ("ice", ice), ("u", u), ("v", v),
+                     ("mflux", mflux), ("w", w)):
             out[k].append(np.asarray(v, dtype="float32"))
-    keep = ("temp", "wind", "u", "v", "rh", "cloud") + (("water", "ice") if family == "ncep" else ())
+    keep = ("temp", "wind", "u", "v", "rh", "cloud", "mflux", "w") + (("water", "ice") if family == "ncep" else ())
     levs = LEVELS[family]
     std = {1000: 110, 975: 320, 950: 540, 925: 760, 900: 990, 850: 1460, 800: 1950, 750: 2470, 700: 3010, 650: 3590,
            600: 4210, 550: 4870, 500: 5570, 450: 6330, 400: 7180, 350: 8110, 300: 9160, 250: 10360, 200: 11780}

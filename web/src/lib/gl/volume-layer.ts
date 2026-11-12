@@ -35,6 +35,8 @@ export interface VolumeWind {
   range: [number, number]
   /** The heights (km) to release particles at, one layer each. */
   heightsKm: number[]
+  /** Colour particles by the drawn field's value at them (its packed byte) instead of their speed. */
+  tint?: (byte: number) => [number, number, number]
 }
 
 /** Screen positions (CSS px) of the height and pressure ticks, for the page to label. */
@@ -428,6 +430,21 @@ export class VolumeLayer implements CustomLayerInterface {
     this.life[i] = 70 + Math.random() * 90
     this.age[i] = scatter ? Math.random() * this.life[i] : 0
   }
+  /** The drawn field's packed value at a point of the box (nearest step, trilinear). */
+  private fieldByte(x: number, y: number, z: number, latOf: (y: number) => number) {
+    const d = this.draw!, g = d.grid
+    const fx = x * (g.nx - 1), fy = ((latOf(y) - g.lat[0]) / (g.lat[1] - g.lat[0])) * (g.ny - 1), fz = z * (g.nz - 1)
+    const x0 = Math.max(0, Math.min(g.nx - 2, Math.floor(fx))), y0 = Math.max(0, Math.min(g.ny - 2, Math.floor(fy))), z0 = Math.max(0, Math.min(g.nz - 2, Math.floor(fz)))
+    const ax = Math.min(1, Math.max(0, fx - x0)), ay = Math.min(1, Math.max(0, fy - y0)), az = Math.min(1, Math.max(0, fz - z0))
+    const base = Math.min(this.t >= 0.5 ? this.i1 : this.i0, d.steps - 1) * g.nx * g.ny * g.nz
+    let s = 0
+    for (let c = 0; c < 8; c++) {
+      const dx = c & 1, dy = (c >> 1) & 1, dz = (c >> 2) & 1
+      const b = d.data[base + (z0 + dz) * g.nx * g.ny + (y0 + dy) * g.nx + x0 + dx]
+      s += (b === 255 ? 0 : b) * (dx ? ax : 1 - ax) * (dy ? ay : 1 - ay) * (dz ? az : 1 - az)
+    }
+    return Math.round(s)
+  }
   /** u and v (m/s) at a point of the box, trilinear, blended between the two time steps. */
   private sampleWind(x: number, y: number, z: number, latOf: (y: number) => number): [number, number] {
     const d = this.draw!, g = d.grid, w = this.wind!
@@ -472,7 +489,7 @@ export class VolumeLayer implements CustomLayerInterface {
       P[b] = nx; P[b + 1] = ny
       // fade in and out over the particle's life, and along the trail
       const life = Math.min(1, this.age[i] / 12, (this.life[i] - this.age[i]) / 12)
-      const [r, gg, bb] = WIND_RGB(this.speed[i])
+      const [r, gg, bb] = this.wind!.tint ? this.wind!.tint(this.fieldByte(nx, ny, z, latOf)) : WIND_RGB(this.speed[i])
       for (let k = 0; k < TRAIL - 1; k++) {
         const a0 = 0.95 * life * (1 - k / (TRAIL - 1)), a1 = 0.95 * life * (1 - (k + 1) / (TRAIL - 1))
         const p0 = b + k * 3, p1 = b + (k + 1) * 3

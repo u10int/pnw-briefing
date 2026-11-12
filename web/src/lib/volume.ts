@@ -13,10 +13,10 @@ export interface VolumeEntry {
   levels: { hPa: number; km: number }[]
   vars: Record<string, VolumeVar>
 }
-export type VolVar = "cloud" | "rh" | "temp" | "wind" | "water" | "ice" | "frz"
-export const VOL_ORDER: VolVar[] = ["cloud", "water", "ice", "rh", "frz", "temp", "wind"]
+export type VolVar = "cloud" | "rh" | "temp" | "wind" | "water" | "ice" | "frz" | "mflux" | "w"
+export const VOL_ORDER: VolVar[] = ["cloud", "water", "ice", "rh", "mflux", "w", "frz", "temp", "wind"]
 /** The data file each view draws from: the freezing level is the temperature field's 32°F surface. */
-export const SOURCE: Record<VolVar, string> = { cloud: "cloud", rh: "rh", temp: "temp", wind: "wind", water: "water", ice: "ice", frz: "temp" }
+export const SOURCE: Record<VolVar, string> = { cloud: "cloud", rh: "rh", temp: "temp", wind: "wind", water: "water", ice: "ice", frz: "temp", mflux: "mflux", w: "w" }
 export const VIEW_LABEL: Partial<Record<VolVar, string>> = { frz: "Freezing level" }
 
 /** The manifest, fetched the first time the 3D view is turned on. */
@@ -77,6 +77,12 @@ const smooth = (a: number, b: number, x: number) => { const t = Math.min(1, Math
 const RH_STOPS: [number, [number, number, number]][] = [
   [0, [214, 150, 70]], [20, [196, 112, 72]], [40, [205, 205, 205]], [60, [196, 214, 120]], [80, [70, 178, 120]], [100, [118, 186, 245]],
 ]
+// moisture flow: teal through green and yellow to the reds of an atmospheric river's core
+const MFLUX_STOPS: [number, [number, number, number]][] = [
+  [0, [190, 228, 220]], [50, [120, 200, 172]], [100, [64, 168, 96]], [200, [236, 206, 58]], [300, [240, 138, 40]], [400, [208, 52, 42]], [500, [150, 28, 112]],
+]
+const UP: [number, [number, number, number]][] = [[0, [255, 214, 170]], [0.3, [244, 132, 64]], [1, [196, 40, 26]]]
+const DOWN: [number, [number, number, number]][] = [[0, [196, 220, 248]], [0.3, [82, 140, 220]], [1, [26, 72, 178]]]
 const WATER_STOPS: [number, [number, number, number]][] = [[0, [170, 230, 240]], [0.2, [80, 200, 220]], [0.6, [40, 140, 210]], [2, [30, 80, 170]]]
 const ICE_STOPS: [number, [number, number, number]][] = [[0, [245, 245, 255]], [0.2, [225, 215, 255]], [0.6, [190, 170, 250]], [2, [150, 120, 230]]]
 
@@ -95,6 +101,10 @@ export function transfer(name: VolVar, x: number): [number, number, number, numb
     case "frz": return [0, 0, 0, 0]
     case "water": return [...lerp(WATER_STOPS, x), 2.5 * smooth(0.003, 0.5, x) ** 0.8] as [number, number, number, number]
     case "ice": return [...lerp(ICE_STOPS, x), 2.0 * smooth(0.003, 0.5, x) ** 0.8] as [number, number, number, number]
+    // the plume: invisible in dry or still air, thickening through an atmospheric river's core
+    case "mflux": return [...lerp(MFLUX_STOPS, x), 1.6 * smooth(30, 280, x) ** 1.2] as [number, number, number, number]
+    // rising air warm, sinking air cool; still air clear
+    case "w": return [...lerp(x >= 0 ? UP : DOWN, Math.abs(x)), 1.8 * smooth(0.04, 0.6, Math.abs(x)) ** 1.3] as [number, number, number, number]
   }
 }
 
@@ -143,8 +153,15 @@ export function heightLut(topKm: number): Uint8Array {
 
 /** Colours across a variable's useful range, for the legend: [value, css colour, how opaque]. */
 export function legendStops(name: VolVar, v: VolumeVar): { show: [number, number]; ticks: number[] } {
-  const show: Record<VolVar, [number, number]> = { cloud: [0, 100], rh: [0, 100], temp: [-60, 70], wind: [0, 180], water: [0, 1], ice: [0, 1], frz: [0, 12000] }
+  const show: Record<VolVar, [number, number]> = { cloud: [0, 100], rh: [0, 100], temp: [-60, 70], wind: [0, 180], water: [0, 1], ice: [0, 1], frz: [0, 12000],
+    mflux: [0, 500], w: [-1, 1] }
   const ticks: Record<VolVar, number[]> = { cloud: [0, 25, 50, 75, 100], rh: [0, 20, 40, 60, 80, 100], temp: [-60, -40, -20, 0, 20, 32, 50, 70],
-    wind: [0, 40, 80, 120, 160], water: [0, 0.25, 0.5, 0.75, 1], ice: [0, 0.25, 0.5, 0.75, 1], frz: [0, 2000, 4000, 6000, 8000, 10000, 12000] }
+    wind: [0, 40, 80, 120, 160], water: [0, 0.25, 0.5, 0.75, 1], ice: [0, 0.25, 0.5, 0.75, 1], frz: [0, 2000, 4000, 6000, 8000, 10000, 12000],
+    mflux: [0, 100, 200, 300, 400, 500], w: [-1, -0.5, 0, 0.5, 1] }
   return { show: show[name] ?? [v.min, v.max], ticks: ticks[name] }
+}
+
+/** The moisture-flow colour for a value, a little deeper, for particles over a light map. */
+export function mfluxRgb(x: number): [number, number, number] {
+  return lerp(MFLUX_STOPS, x).map((c) => (c / 255) * 0.85) as [number, number, number]
 }
