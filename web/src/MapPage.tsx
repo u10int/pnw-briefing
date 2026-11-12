@@ -33,25 +33,28 @@ export default function MapPage() {
   if (!data) return <p className="p-8 text-muted-foreground">Loading the map…</p>
   return (
     <TooltipProvider delayDuration={100}>
-      <header className="border-b bg-card">
-        <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 px-4 py-2.5 max-sm:px-3">
+      {/* a narrow header, and the map filling the rest of the window */}
+      <div className="flex h-dvh flex-col overflow-hidden">
+      <header className="shrink-0 border-b bg-card">
+        <div className="flex items-center justify-between gap-x-4 px-4 py-2 max-sm:px-3">
           <div className="min-w-0">
             <span className="font-semibold">Forecast map</span>
-            <span className="ml-2.5 text-[13px] text-muted-foreground">{data.meta.title}, issued {issuedLabel(data.meta.issued)}</span>
+            <span className="ml-2.5 text-[13px] text-muted-foreground max-sm:hidden">{data.meta.title}, issued {issuedLabel(data.meta.issued)}</span>
           </div>
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" onClick={copy}>
-              {copied ? <Check aria-hidden /> : <LinkIcon aria-hidden />}{copied ? "Copied" : "Copy link"}
+              {copied ? <Check aria-hidden /> : <LinkIcon aria-hidden />}<span className="max-sm:hidden">{copied ? "Copied" : "Copy link"}</span>
             </Button>
             <Button variant="ghost" size="sm" asChild><a href="./">Full briefing</a></Button>
           </div>
         </div>
       </header>
-      <main>
+      <main className="min-h-0 flex-1">
         <React.Suspense fallback={<p className="p-8 text-muted-foreground">Loading the map…</p>}>
           <InteractiveMap data={data} standalone />
         </React.Suspense>
       </main>
+      </div>
     </TooltipProvider>
   )
 }

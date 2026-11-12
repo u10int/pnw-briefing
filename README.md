@@ -238,13 +238,22 @@ grids to object storage such as Cloudflare R2; only the publish step changes.
 ## The map page
 
 `map.html` is the interactive map on a page of its own (built as a second Vite entry,
-`src/MapPage.tsx`). Its settings live in the address: the mode, layer and model, the window or
+`src/MapPage.tsx`): the map fills the window under a narrow header, the controls sit in a side
+panel that folds away (over the map on a phone), and the legend, timeline, cross-section and
+profile float over the map. Its settings live in the address: the mode, layer and model, the window or
 the time, the overlays, the 3D view and its options, and the camera (`c=lon,lat,zoom,pitch,bearing`),
 updated as you change them, so the address is always a link to the view on screen. "Copy link"
 copies it; the briefing's map card has an "Open map page" link that carries its current settings
 over. On a phone the map and its timeline come first, with the controls under them.
 
 ## The 3D view
+
+Presets set up a field, its options and a camera in one go (atmospheric river, jet stream, snow
+levels, upper low, clouds and precipitation, mountain lift). **Profile** shows the column over a
+clicked point as a simple sounding: temperature and dewpoint (from the humidity) by height with
+the freezing line, cloud down the left edge, wind arrows and speeds down the right and the ground
+at the bottom. The timeline marks each Pacific day and now, steps with its arrows, and on the map
+page and in full screen takes ← → (step) and space (play).
 
 The interactive map's **3D** switch (under "Hourly") tilts the map and draws a model's
 forecast through the depth of the atmosphere over it, following the time slider. The volumes
