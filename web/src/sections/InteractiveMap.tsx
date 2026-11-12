@@ -5,7 +5,7 @@ import "maplibre-gl/dist/maplibre-gl.css"
 // MapLibre runs a web worker for vector/GeoJSON work; have Vite bundle it and tell MapLibre where it is.
 import { summarize } from "@/sections/Hazards"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { ChevronRight, CircleHelp, ExternalLink, Maximize2, Minimize2, Pause, Play, SlidersHorizontal, X } from "lucide-react"
+import { ChevronRight, CircleHelp, ExternalLink, Maximize2, Minimize2, Pause, Play, SlidersHorizontal, X, GripHorizontal } from "lucide-react"
 import { Popover } from "radix-ui"
 
 import { Button } from "@/components/ui/button"
@@ -1884,15 +1884,73 @@ function FloatPanel({ title, onClose, picking, className, children }: {
 }) {
   const [open, setOpen] = React.useState(() => typeof window === "undefined" || window.matchMedia("(min-width: 640px)").matches)
   React.useEffect(() => { if (picking) setOpen(true) }, [picking])        // the instructions show while drawing
+  // dragged by its title bar anywhere over the map (kept inside it); a press that doesn't move is a click
+  const box = React.useRef<HTMLElement>(null)
+  const [off, setOffState] = React.useState<[number, number]>([0, 0])
+  const offRef = React.useRef<[number, number]>([0, 0])
+  const setOff = React.useCallback((o: [number, number] | ((p: [number, number]) => [number, number])) => {
+    const v = typeof o === "function" ? o(offRef.current) : o
+    offRef.current = v
+    setOffState(v)
+  }, [])
+  const drag = React.useRef<{ x: number; y: number; off: [number, number]; moved: boolean } | null>(null)
+  const moved = React.useRef(false)
+  const clamp = React.useCallback((o: [number, number]): [number, number] => {
+    const el = box.current, parent = el?.parentElement
+    if (!el || !parent) return o
+    // the panel's place with no offset, then how far it may go each way within the map
+    const p = parent.getBoundingClientRect(), r = el.getBoundingClientRect()
+    const left = r.left - offRef.current[0], top = r.top - offRef.current[1]
+    return [Math.min(p.right - 4 - (left + r.width), Math.max(p.left + 4 - left, o[0])),
+            Math.min(p.bottom - 4 - (top + Math.min(r.height, 44)), Math.max(p.top + 4 - top, o[1]))]
+  }, [])
+  const onDown = (e: React.PointerEvent) => {
+    if (e.button !== 0 || (e.target as HTMLElement).closest("[data-no-drag]")) return
+    const d = { x: e.clientX, y: e.clientY, off, moved: false }
+    drag.current = d
+    moved.current = false
+    // followed on the window, so a quick drag that leaves the title bar keeps going
+    const move = (ev: PointerEvent) => {
+      const dx = ev.clientX - d.x, dy = ev.clientY - d.y
+      if (!d.moved && Math.hypot(dx, dy) < 4) return
+      d.moved = true
+      ev.preventDefault()
+      setOff(clamp([d.off[0] + dx, d.off[1] + dy]))
+    }
+    const up = () => {
+      moved.current = d.moved                       // a press that didn't move is a click on the title
+      drag.current = null
+      window.removeEventListener("pointermove", move)
+      window.removeEventListener("pointerup", up)
+      window.removeEventListener("pointercancel", up)
+    }
+    window.addEventListener("pointermove", move)
+    window.addEventListener("pointerup", up)
+    window.addEventListener("pointercancel", up)
+  }
+  // keep it on the map when the map changes size (full screen, a phone turned)
+  React.useEffect(() => {
+    const parent = box.current?.parentElement
+    if (!parent) return
+    const ro = new ResizeObserver(() => setOff((o) => (o[0] || o[1] ? clamp(o) : o)))
+    ro.observe(parent)
+    return () => ro.disconnect()
+  }, [clamp, setOff])
   return (
-    <section aria-label={title}
+    <section ref={box} aria-label={title} style={{ transform: `translate(${off[0]}px, ${off[1]}px)` }}
       className={`absolute left-3 z-10 w-[min(600px,calc(100%-24px))] rounded-lg border bg-card/95 shadow-lg backdrop-blur max-sm:right-2 max-sm:left-2 max-sm:w-auto ${className}`}>
-      <div className="flex items-center gap-1 py-1 pr-1 pl-2">
-        <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open}
-          className="flex flex-1 items-center gap-1 rounded-md px-1 py-1 text-left text-[13px] font-semibold outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
+      <div className="flex cursor-grab touch-none items-center gap-1 py-1 pr-1 pl-2 select-none active:cursor-grabbing"
+        onPointerDown={onDown} title="Drag to move">
+        <button type="button" aria-expanded={open}
+          onClick={() => { if (moved.current) { moved.current = false; return } setOpen((o) => !o) }}
+          className="flex items-center gap-1 rounded-md px-1 py-1 text-left text-[13px] font-semibold outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
           <ChevronRight className={`size-3.5 text-muted-foreground transition-transform ${open ? "rotate-90" : ""}`} aria-hidden />{title}
         </button>
-        <Button variant="ghost" size="icon" className="size-7" onClick={onClose} aria-label={`Close the ${title.toLowerCase()}`}><X className="size-4" aria-hidden /></Button>
+        <GripHorizontal className="mx-auto size-4 text-muted-foreground/70" aria-hidden />
+        {(off[0] !== 0 || off[1] !== 0) && (
+          <Button data-no-drag variant="ghost" size="sm" className="h-7 px-2 text-xs text-muted-foreground" onClick={() => setOff([0, 0])}>Reset</Button>
+        )}
+        <Button data-no-drag variant="ghost" size="icon" className="size-7" onClick={onClose} aria-label={`Close the ${title.toLowerCase()}`}><X className="size-4" aria-hidden /></Button>
       </div>
       {open && <div className="max-h-[min(60dvh,420px)] space-y-2 overflow-y-auto px-3 pb-3">{children}</div>}
     </section>
