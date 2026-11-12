@@ -114,8 +114,8 @@ export type RegionPanel = { key: number; label: string; nModels: number; summary
 
 /** Each window as a column: the region headline, then each model's value as a dumbbell (one dot
  *  per region). Phones get one window at a time. */
-export function RegionModelsCard({ data, title, description, panels, unit, byModel, note }: {
-  data: Briefing; title: string; description: React.ReactNode; panels: RegionPanel[]; unit: Unit; byModel: string; note: React.ReactNode
+export function RegionModelsCard({ data, title, description, about, panels, unit, byModel, note }: {
+  data: Briefing; title: string; description: React.ReactNode; about: React.ReactNode; panels: RegionPanel[]; unit: Unit; byModel: string; note: React.ReactNode
 }) {
   const [win, setWin] = React.useState(String(panels[Math.min(1, panels.length - 1)]?.key))
   if (!panels.length) return null
@@ -137,7 +137,7 @@ export function RegionModelsCard({ data, title, description, panels, unit, byMod
     <Card>
       <CardHeader>
         <CardTitle>{title}</CardTitle>
-        <CardDescription>{description}</CardDescription>
+        <CardDescription info={<>{about} {note}</>}>{description}</CardDescription>
       </CardHeader>
       <CardContent>
         {/* wide: every window side by side */}
@@ -167,7 +167,6 @@ export function RegionModelsCard({ data, title, description, panels, unit, byMod
             <DumbbellPanel rows={sel.rows} order={order} regions={data.regions} row={ROW} label={sel.label} unit={unit} />
           </div>
         </div>
-        <p className="mt-4 text-xs text-muted-foreground">{note}</p>
       </CardContent>
     </Card>
   )
@@ -192,7 +191,8 @@ export function RegionTotals({ data }: { data: Briefing }) {
   })
   return (
     <RegionModelsCard data={data} title="Region totals" unit={INCHES} panels={panels}
-      description="The median across models for each region and window, with the range across models, the share of normal and the change since yesterday; below, each model's own total."
+      description="Each region's median and range across models, for each window."
+      about="The median across models for each region and window, with the range across models, the share of normal and the change since yesterday; below, each model's own total."
       byModel="average of the region's forecast locations"
       note={<>Range bars span the models, with the median marked.{chg && " Changes compare the same days in yesterday's briefing."}{data.meta.hasSupplement && " * from Open-Meteo; all other models are read from GRIB."} A model appears only in windows it fully covers.</>} />
   )
@@ -280,10 +280,11 @@ export function ByLocation({ data, switcher }: { data: Briefing; switcher?: Reac
           const pct = normal?.[pts[k]]?.normal ? Math.round((100 * meds[k]!) / normal[pts[k]].normal) : null
           return <Takeaway>Wettest: {pts[k]}, a median {inch(meds[k]!)}″ over {t.label.toLowerCase()}{pct != null && ` (${pct}% of normal)`}; models range {inch(Math.min(...xs))} – {inch(Math.max(...xs))}″.</Takeaway>
         })()}
-        <CardDescription>
+        <CardDescription info={<>
           {showPct ? "Each model's total as a percent of the 1991 – 2020 normal for the same days." : "Totals in inches."} The
           Median row is the median across models{chg ? "; the row below it is the change in that median since yesterday" : ""}.
-          {ens.length > 0 && <> Hover an ensemble median for the 10th – 90th percentile range{ensPts.length < pts.length ? ` (ensembles are computed for ${ensPts.join(", ")})` : ""}.</>}
+          {ens.length > 0 && <> Hover an ensemble median for the 10th – 90th percentile range{ensPts.length < pts.length ? ` (ensembles are computed for ${ensPts.join(", ")})` : ""}.</>}</>}>
+          {showPct ? "Each model's total as a percent of normal." : "Each model's total, in inches."}
         </CardDescription>
         {switcher && <CardAction>{switcher}</CardAction>}
       </CardHeader>

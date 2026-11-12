@@ -102,9 +102,9 @@ export function RiversCard({ data }: { data: Briefing }) {
     <Card>
       <CardHeader>
         <CardTitle>Rivers</CardTitle>
-        <CardDescription>
-          Official river forecasts from the Northwest River Forecast Center at {gs.length} gauges west of the Cascades, worst forecast crest first.
-          Each row shows the stage now, the forecast crest and when, and how it compares with flood stage; click a row for its hydrograph.
+        <CardDescription info={<>Official river forecasts from the Northwest River Forecast Center at {gs.length} gauges west of the Cascades, worst forecast crest first.
+          Each row shows the stage now, the forecast crest and when, and how it compares with flood stage; click a row for its hydrograph.</>}>
+          Forecast crests against flood stage, worst first.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">

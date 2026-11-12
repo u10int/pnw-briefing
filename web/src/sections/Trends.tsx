@@ -282,11 +282,6 @@ export function TrendsCard({ data, onOpen, onLocation }: { data: Briefing; onOpe
           <span className="flex items-center gap-1.5"><svg viewBox="0 0 28 12" className="h-3 w-7" aria-hidden><path d="M2,9 L10,6 L18,7 L26,3" fill="none" stroke="currentColor" strokeWidth={1.5} /><circle cx={26} cy={3} r={2} fill="currentColor" /></svg>
             Last {h?.runs.length ?? "few"} briefings{h ? `, over the ${h.nDays} day${h.nDays === 1 ? "" : "s"} they share` : ""}</span>
         </div>
-        <p className="text-xs text-muted-foreground">
-          Each value is the median across the models that cover the whole window. Region rows combine their locations within each model
-          (precipitation and temperature averaged, snow at the passes, wind as the strongest lowland or coastal gust); their bars span the models,
-          with the mark at the median, on one scale per column. Click a region for its locations, or a location for its details.
-        </p>
       </CardContent>
     </Card>
   )

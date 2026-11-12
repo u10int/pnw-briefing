@@ -70,8 +70,8 @@ export function MarineWarningsCard({ data }: { data: Briefing }) {
     <Card>
       <CardHeader>
         <CardTitle>Marine and coastal warnings</CardTitle>
-        <CardDescription>
-          Active NWS marine alerts for the coastal waters, the Strait, the San Juans and Puget Sound (Seattle and Portland's marine zones){live ? ", as of now" : ", as of this briefing"}, then surf, beach hazard and coastal flood alerts for the coast.
+        <CardDescription info={<>Active NWS marine alerts for the coastal waters, the Strait, the San Juans and Puget Sound (Seattle and Portland's marine zones){live ? ", as of now" : ", as of this briefing"}, then surf, beach hazard and coastal flood alerts for the coast.</>}>
+          Marine, surf and coastal flood alerts.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -112,7 +112,9 @@ export function BuoysCard({ data }: { data: Briefing }) {
         <CardTitle>Buoys now</CardTitle>
         {(() => { const b = bs.filter((x) => x.wave != null).sort((a, c) => c.wave! - a.wave!)[0]
           return b && <Takeaway>Highest waves now: {b.wave} ft at {b.name}{b.period ? `, ${Math.round(b.period)} s` : ""}{b.waveMax24 != null && b.waveMax24 > b.wave! ? ` (${b.waveMax24} ft in the last 24 hours)` : ""}.</Takeaway> })()}
-        <CardDescription>The latest reading at each buoy, the highest waves and strongest gust of the last 24 hours, and the waves over that time (left to right).</CardDescription>
+        <CardDescription info="The latest reading at each buoy, the highest waves and strongest gust of the last 24 hours, and the waves over that time (left to right).">
+          Latest readings and the last 24 hours.
+        </CardDescription>
       </CardHeader>
       <CardContent className="overflow-x-auto">
         <Table className="w-auto min-w-[640px] border-separate border-spacing-x-0 border-spacing-y-[2px] text-[13px] [&_td]:pr-5 [&_th]:pr-5">
@@ -178,7 +180,9 @@ export function WaveForecastCard({ data }: { data: Briefing }) {
         <CardTitle>Wave forecast</CardTitle>
         {(() => { const x = ws.flatMap((w) => w.daily.map((d) => ({ w, d }))).sort((a, b) => b.d.max - a.d.max)[0]
           return x && <Takeaway>Highest seas: {Math.round(x.d.max)} ft at {x.w.name} {dayOf(x.d.date)}{x.d.period ? `, at ${Math.round(x.d.period)} s` : ""}.</Takeaway> })()}
-        <CardDescription>The highest significant wave height each day, in feet, with its period and direction underneath; the chart shows it through the week.</CardDescription>
+        <CardDescription info="The highest significant wave height each day, in feet, with its period and direction underneath; the chart shows it through the week.">
+          Highest waves each day, with period and direction.
+        </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
         <div className="overflow-x-auto">
@@ -270,8 +274,8 @@ export function TidesCard({ data }: { data: Briefing }) {
           return <Takeaway>Closest to flooding: {near.filter((x, i) => x.h.margin! <= 1 && near.findIndex((y) => y.g.id === x.g.id) === i).slice(0, 2).map(({ g, h }, i) => (
             <span key={g.id + h.time}>{i > 0 && "; "}{g.name} {wall(h.time)}, {h.margin! <= 0 ? `${Math.abs(h.margin!).toFixed(1)} ft over` : `${h.margin!.toFixed(1)} ft below`} minor flood</span>))}.</Takeaway>
         })()}
-        <CardDescription>
-          Each day's highest high tide at each gauge (feet above mean lower low water, local time), against the gauge's minor flood level, with the water's current running above or below the tide prediction (a rough storm surge) added on. Tides over the flood level are flagged in red, and those within a foot of it in amber.
+        <CardDescription info="Each day's highest high tide at each gauge (feet above mean lower low water, local time), against the gauge's minor flood level, with the water's current running above or below the tide prediction (a rough storm surge) added on. Tides over the flood level are flagged in red, and those within a foot of it in amber. Flood levels are NOAA's minor (nuisance) flooding thresholds; a dash means the gauge has none. The surge is today's: storms can raise it well beyond that by the time a high tide arrives.">
+          Each day's highest tide against the gauge's flood level.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -312,9 +316,6 @@ export function TidesCard({ data }: { data: Briefing }) {
             </TableBody>
           </Table>
         </div>
-        <p className="text-xs text-muted-foreground">
-          Flood levels are NOAA's minor (nuisance) flooding thresholds; a dash means the gauge has none. The surge is today's: storms can raise it well beyond that by the time a high tide arrives.
-        </p>
       </CardContent>
     </Card>
   )

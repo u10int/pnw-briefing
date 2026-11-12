@@ -106,8 +106,8 @@ export function UnusualCard({ data }: { data: Briefing }) {
       <CardHeader>
         <CardTitle>How unusual is it?</CardTitle>
         <Takeaway>{takeaway}</Takeaway>
-        <CardDescription>
-          The forecast's wettest day, 3 days and 7 days at each location (the model median), and the wettest 3 days observed over the last two weeks (MRMS), against the location's station record: the wettest stretch of the same length in each past year between {c.from.replace("-", "/")} and {c.to.replace("-", "/")}.
+        <CardDescription info={<>The forecast's wettest day, 3 days and 7 days at each location (the model median), and the wettest 3 days observed over the last two weeks (MRMS), against the location's station record: the wettest stretch of the same length in each past year between {c.from.replace("-", "/")} and {c.to.replace("-", "/")}. A station is a single gauge and the forecast a grid-cell median, so treat close calls loosely.</>}>
+          The wettest forecast and observed stretches against each station's record.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -136,7 +136,7 @@ export function UnusualCard({ data }: { data: Briefing }) {
         </div>
         <p className="text-xs text-muted-foreground">
           Unlabelled totals are in the drier half of past years. "Most since" is the latest year with a stretch at least as wet in that part of the year; tinted cells are in the wettest quarter of years, stronger for the wettest tenth and records.
-          A station is a single gauge and the forecast a grid-cell median, so treat close calls loosely. Stations are listed under each location; {c.source}.
+          Stations are listed under each location; {c.source}.
         </p>
       </CardContent>
     </Card>

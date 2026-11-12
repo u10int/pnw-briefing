@@ -46,9 +46,9 @@ export function VerificationCard({ data }: { data: Briefing }) {
     <Card>
       <CardHeader>
         <CardTitle>How the models have been doing</CardTitle>
-        <CardDescription>
-          Each recent briefing's precipitation forecasts at the forecast locations against what MRMS measured, {dateRange(v.from, v.to)} ({v.nDays} days).
-          Typical error is the average miss per location and day; a wet day is {v.wet}″ or more.
+        <CardDescription info={<>Each recent briefing's precipitation forecasts at the forecast locations against what MRMS measured, {dateRange(v.from, v.to)} ({v.nDays} days).
+          Typical error is the average miss per location and day; a wet day is {v.wet}″ or more.</>}>
+          Recent precipitation forecasts against what fell, over {v.nDays} days.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -179,9 +179,9 @@ export function TempVerificationCard({ data }: { data: Briefing }) {
     <Card>
       <CardHeader>
         <CardTitle>How the models have been doing</CardTitle>
-        <CardDescription>
-          Each recent briefing's daily highs and lows at the forecast locations against the {v.source} analysis, {dateRange(v.from, v.to)} ({v.nDays} days).
-          Typical miss is the average difference per location and day; bias is the average forecast minus the analysis.
+        <CardDescription info={<>Each recent briefing's daily highs and lows at the forecast locations against the {v.source} analysis, {dateRange(v.from, v.to)} ({v.nDays} days).
+          Typical miss is the average difference per location and day; bias is the average forecast minus the analysis.</>}>
+          Recent highs and lows against what was measured, over {v.nDays} days.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">

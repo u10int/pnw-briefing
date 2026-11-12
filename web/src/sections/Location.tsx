@@ -231,9 +231,9 @@ export function DayByDay({ data, point }: { data: Briefing; point: string }) {
     <Card>
       <CardHeader>
         <CardTitle>Day by day</CardTitle>
-        <CardDescription>
-          Model median, with the full range across models as whiskers or shading.
-          {all && " Gray lines are individual models; hover one to see which."}
+        <CardDescription info={<>Model median, with the full range across models as whiskers or shading.
+          {all && " Gray lines are individual models; hover one to see which."}</>}>
+          The model median and range.
         </CardDescription>
         <CardAction>
           <div className="flex items-center gap-2">

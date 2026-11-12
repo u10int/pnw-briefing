@@ -289,8 +289,8 @@ export function NwsAlerts({ data }: { data: Briefing }) {
     <Card>
       <CardHeader>
         <CardTitle>{ec ? "Watches, warnings and advisories" : "NWS watches, warnings and advisories"}</CardTitle>
-        <CardDescription>
-          Official alerts covering the forecast locations{ec ? ": the NWS for Washington and Oregon, Environment Canada for the B.C. locations" : ""}, alongside the automated flags below. Times are Pacific; hover a bar for the details and who issued it.
+        <CardDescription info={<>Official alerts covering the forecast locations{ec ? ": the NWS for Washington and Oregon, Environment Canada for the B.C. locations" : ""}, alongside the automated flags below. Times are Pacific; hover a bar for the details and who issued it.</>}>
+          Official alerts for the forecast locations.
         </CardDescription>
         <CardAction className="flex items-center gap-1.5 text-xs text-muted-foreground">
           <RefreshCw className="size-3" aria-hidden />

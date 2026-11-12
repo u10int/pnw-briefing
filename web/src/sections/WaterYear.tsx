@@ -73,8 +73,8 @@ export function WaterYearCard({ data }: { data: Briefing }) {
       <CardHeader>
         <CardTitle>Water year so far</CardTitle>
         <Takeaway>{takeaway}</Takeaway>
-        <CardDescription>
-          Precipitation since October 1 added up day by day, the average of each region's location stations (solid), against those stations' 1991 – 2020 normal (thin). The dashed line carries on with the forecast's model median for the next two weeks.
+        <CardDescription info="Precipitation since October 1 added up day by day, the average of each region's location stations (solid), against those stations' 1991 – 2020 normal (thin). The dashed line carries on with the forecast's model median for the next two weeks. A day counts once half a region's stations have reported it, and stations that stopped reporting are left out.">
+          Precipitation since October 1 against normal, with the forecast added on.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -105,7 +105,7 @@ export function WaterYearCard({ data }: { data: Briefing }) {
           ))}
         </div>
         <p className="text-xs text-muted-foreground">
-          Thin lines are normal, solid observed, dashed the forecast added on. Stations: {regs.map(({ r, names }) => `${r.short} ${names.length}`).join(", ")}; a day counts once half a region's stations have reported it, and stations that stopped reporting are left out. ACIS (NOAA Regional Climate Centers).
+          Thin lines are normal, solid observed, dashed the forecast added on. Stations: {regs.map(({ r, names }) => `${r.short} ${names.length}`).join(", ")}. ACIS (NOAA Regional Climate Centers).
         </p>
       </CardContent>
     </Card>

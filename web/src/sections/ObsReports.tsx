@@ -82,8 +82,8 @@ export function ObsReportsCard({ data, v }: { data: Briefing; v: V }) {
       <CardHeader>
         <CardTitle>{TITLE[v]}</CardTitle>
         <Takeaway>{takeaway}</Takeaway>
-        <CardDescription>
-          {WHAT[v]} over the last {o.days.length - 1} days and today so far (Pacific time){reports.length ? `, then what's been reported to NWS Seattle and Portland in the last ${o.reportHours ?? 48} hours` : ""}.
+        <CardDescription info={<>{WHAT[v]} over the last {o.days.length - 1} days and today so far (Pacific time){reports.length ? `, then what's been reported to NWS Seattle and Portland in the last ${o.reportHours ?? 48} hours` : ""}.</>}>
+          The last {o.days.length - 1} days and today so far{reports.length ? ", and recent reports" : ""}.
         </CardDescription>
         {reports.length > 0 && (
           <CardAction>
@@ -167,8 +167,8 @@ function ObsTempCard({ data }: { data: Briefing }) {
       <CardHeader>
         <CardTitle>{TITLE.temp}</CardTitle>
         <Takeaway>{takeaway}</Takeaway>
-        <CardDescription>
-          {WHAT.temp} over the last {o.days.length - 1} days and today so far (Pacific time){reports.length ? ", then the high and low temperature reports NWS Seattle and Portland have summarised in the last " + (o.reportHours ?? 48) + " hours" : ""}.
+        <CardDescription info={<>{WHAT.temp} over the last {o.days.length - 1} days and today so far (Pacific time){reports.length ? ", then the high and low temperature reports NWS Seattle and Portland have summarised in the last " + (o.reportHours ?? 48) + " hours" : ""}.</>}>
+          The last {o.days.length - 1} days and today so far{reports.length ? ", and recent reports" : ""}.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">

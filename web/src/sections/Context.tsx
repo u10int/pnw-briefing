@@ -136,9 +136,11 @@ export function ObservedCard({ data }: { data: Briefing }) {
     <Card>
       <CardHeader>
         <CardTitle>How wet it's been</CardTitle>
-        <CardDescription>
-          Observed precipitation through {dateRange(w30.to, w30.to)}, from NOAA's radar-and-gauge analysis (MRMS),
-          against 1991 – 2020 normals. Wet ground turns the same rain into more runoff.
+        <CardDescription info={<>From NOAA's radar-and-gauge analysis (MRMS), against 1991 – 2020 normals. Wet ground turns the same rain into more runoff.
+          {" "}Region rows average every grid cell in the region. MRMS tends to run low in the mountains, where terrain blocks the radar beam and gauges are sparse, so mountain and region totals are likely underestimates.
+          Percent of normal is blank outside the US (no PRISM normals).
+          {missing.length > 0 && ` MRMS had no data for ${missing.map((d) => dayShort(d)).join(", ")}; those days are left out of the totals and the normals.`}</>}>
+          Observed precipitation through {dateRange(w30.to, w30.to)}, against normal.
         </CardDescription>
         <CardAction className="flex flex-wrap gap-2"><MapButton req={{ mode: "totals", variable: "obs", days: 7 }} label="Observed rain on the map" /></CardAction>
       </CardHeader>
@@ -177,12 +179,6 @@ export function ObservedCard({ data }: { data: Briefing }) {
               </TableBody>
             </Table>
           </div>
-          <p className="text-xs text-muted-foreground">
-            Region rows average every grid cell in the region. MRMS tends to run low in the mountains, where terrain
-            blocks the radar beam and gauges are sparse, so mountain and region totals are likely underestimates.
-            Percent of normal is blank outside the US (no PRISM normals).
-            {missing.length > 0 && ` MRMS had no data for ${missing.map((d) => dayShort(d)).join(", ")}; those days are left out of the totals and the normals.`}
-          </p>
         </div>
         {src && (
           <a href={src} target="_blank" rel="noopener" title="Open full size" className="block self-start">
@@ -261,10 +257,11 @@ export function LandslideCard({ data }: { data: Briefing }) {
     <Card>
       <CardHeader>
         <CardTitle>Landslide threshold</CardTitle>
-        <CardDescription>
-          The USGS rainfall threshold for the Seattle area: landslides become likely once the last 3 days' rain reaches
+        <CardDescription info={<>The USGS rainfall threshold for the Seattle area: landslides become likely once the last 3 days' rain reaches
           {" "}{thr}″ minus {ls.p15Factor} × the 15 days before. The index (3-day rain + {ls.p15Factor} × the 15 days before)
-          runs from observed rain into each model's forecast and reaches the threshold at {thr}.
+          runs from observed rain into each model's forecast and reaches the threshold at {thr}. Calibrated on landslides in Seattle and along the nearby Puget Sound bluffs,
+          it says when landslides become likely across the area, not where. Observed rain is MRMS; days it's missing count as dry.</>}>
+          How close recent and forecast rain come to the Seattle-area landslide threshold.
         </CardDescription>
         <CardAction className="flex flex-wrap gap-2"><MapButton req={{ mode: "totals", variable: "obs", days: 3 }} label="Recent rain on the map" /></CardAction>
       </CardHeader>
@@ -304,8 +301,7 @@ export function LandslideCard({ data }: { data: Briefing }) {
         <p className="text-xs text-muted-foreground">
           From Chleborad, Baum and Godt (2006),{" "}
           <a className="underline underline-offset-2 hover:text-foreground" href="https://pubs.usgs.gov/of/2006/1064/" target="_blank" rel="noopener">USGS Open-File Report 2006-1064</a>,
-          calibrated on landslides in Seattle and along the nearby Puget Sound bluffs. The threshold says when landslides become
-          likely across the area, not where. Observed rain is MRMS; days it's missing count as dry.
+.
         </p>
       </CardContent>
     </Card>
@@ -599,9 +595,9 @@ export function ArCard({ data }: { data: Briefing }) {
     <Card>
       <CardHeader>
         <CardTitle>Atmospheric rivers</CardTitle>
-        <CardDescription>
-          Water vapor transport (IVT) at the coast from {ar.models.map((m) => m.model).join(" and ")}, ranked on the
-          CW3E AR scale: peak IVT sets the category, lasting 48 hours or more raises it one step and under 24 hours lowers it one.
+        <CardDescription info={<>Water vapor transport (IVT) at the coast from {ar.models.map((m) => m.model).join(" and ")}, ranked on the
+          CW3E AR scale: peak IVT sets the category, lasting 48 hours or more raises it one step and under 24 hours lowers it one.</>}>
+          Moisture transport at the coast, on the AR scale.
         </CardDescription>
         <CardAction className="flex flex-wrap gap-2"><MapButton req={{ mode: "totals", variable: "ar", days: 7 }} label="AR outlook on the map" /><MapButton req={{ mode: "hourly", layer: "ivt", isobars: true }} label="Moisture transport (IVT) on the map" /></CardAction>
       </CardHeader>
@@ -871,9 +867,8 @@ export function GradientsCard({ data }: { data: Briefing }) {
     <Card>
       <CardHeader>
         <CardTitle>Pressure gradients</CardTitle>
-        <CardDescription>
-          Sea-level pressure difference between station pairs (hPa), from each model's grid. Dashed lines are rules of thumb
-          for where impacts usually start.
+        <CardDescription info="Sea-level pressure difference between station pairs (hPa), from each model's grid. Dashed lines are rules of thumb for where impacts usually start.">
+          Pressure differences behind the region's wind events.
         </CardDescription>
         <CardAction className="flex flex-wrap gap-2"><MapButton req={{ mode: "hourly", layer: "pgrad", isobars: true, pairs: true }} label="Pressure gradients on the map" /></CardAction>
       </CardHeader>
@@ -932,9 +927,10 @@ export function SnowLevelCard({ data }: { data: Briefing }) {
     <Card>
       <CardHeader>
         <CardTitle>Snow level at the passes</CardTitle>
-        <CardDescription>
-          Each model's freezing level minus {sl.offset_ft.toLocaleString("en-US")} ft, where snow usually starts reaching the
-          ground. Below the pass elevation (shaded), precipitation at the pass falls as snow.
+        <CardDescription info={<>Each model's freezing level minus {sl.offset_ft.toLocaleString("en-US")} ft, where snow usually starts reaching the
+          ground. Below the pass elevation (shaded), precipitation at the pass falls as snow. From models with a freezing-level field (HRRR, RRFS, NAM and GFS).
+          The offset is a rule of thumb; in heavy precipitation or with cold air trapped in the passes, snow can fall lower.</>}>
+          Each model's snow level against the passes.
         </CardDescription>
         <CardAction className="flex flex-wrap gap-2"><MapButton req={{ mode: "hourly", layer: "frz" }} label="Freezing level on the map" /></CardAction>
       </CardHeader>
@@ -951,10 +947,6 @@ export function SnowLevelCard({ data }: { data: Briefing }) {
                          label={{ value: `${p.name} ${p.elev_ft.toLocaleString("en-US")} ft`, position: "insideTopLeft", fontSize: 11, fill: "#1b1f24" }} />
         </SeriesChart>
         <ModelLegend models={p.series.map((s) => s.model)} />
-        <p className="text-xs text-muted-foreground">
-          From models with a freezing-level field (HRRR, RRFS, NAM and GFS). The 1,000 ft offset is a rule of thumb; in
-          heavy precipitation or with cold air trapped in the passes, snow can fall lower.
-        </p>
       </CardContent>
     </Card>
   )
@@ -1006,8 +998,8 @@ export function AvalancheCard({ data }: { data: Briefing }) {
     <Card>
       <CardHeader>
         <CardTitle>Avalanche danger</CardTitle>
-        <CardDescription>
-          Northwest Avalanche Center forecasts by zone, by elevation band for today and tomorrow. Check the full forecast before heading into avalanche terrain.
+        <CardDescription info="Northwest Avalanche Center forecasts by zone, by elevation band for today and tomorrow. Check the full forecast before heading into avalanche terrain.">
+          Avalanche danger by zone, today and tomorrow.
         </CardDescription>
         <CardAction>
           <a className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground" href={av.url} target="_blank" rel="noopener">NWAC forecasts</a>
@@ -1136,9 +1128,11 @@ export function SnowpackCard({ data }: { data: Briefing }) {
       <CardHeader>
         <CardTitle>Snowpack</CardTitle>
         <Takeaway>{takeaway}</Takeaway>
-        <CardDescription>
-          Snow water equivalent (SWE) at SNOTEL stations near each area{sp.asOf ? `, as of ${dateRange(sp.asOf, sp.asOf)}` : ""}:
+        <CardDescription info={<>Snow water equivalent (SWE) at SNOTEL stations near each area{sp.asOf ? `, as of ${dateRange(sp.asOf, sp.asOf)}` : ""}:
           the bar is today's SWE and the tick the station's median for the date, with snow depth over the last 30 days. Select an area to see its stations.
+          {" "}Area values are averages across their stations; area percent of median is total SWE over total median SWE, as NRCS builds basin indices. It's left
+          blank until the median reaches {sp.minMedian}″, since early-season medians near zero make percentages meaningless.</>}>
+          Snow water at SNOTEL stations against the median.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -1165,8 +1159,7 @@ export function SnowpackCard({ data }: { data: Briefing }) {
           {hasHist && <span>Depth lines share one scale, up to {Math.round(depthMax)}″</span>}
         </p>
         <p className="text-xs text-muted-foreground">
-          {sp.source}. Area values are averages across their stations; area percent of median is total SWE over total median SWE, as NRCS builds basin indices. It's left
-          blank until the median reaches {sp.minMedian}″, since early-season medians near zero make percentages meaningless.
+          {sp.source}.
         </p>
       </CardContent>
     </Card>
@@ -1198,9 +1191,9 @@ export function DiscussionsCard({ data, defaultFull = false }: { data: Briefing;
     <Card>
       <CardHeader>
         <CardTitle>From the forecast discussions</CardTitle>
-        <CardDescription>
-          The key messages from each NWS office's latest Area Forecast Discussion, or the main points of its synopsis when it has none
-          {more && "; the rest of the synopsis and the hydrology notes are a click away"}.
+        <CardDescription info={<>The key messages from each NWS office's latest Area Forecast Discussion, or the main points of its synopsis when it has none
+          {more && "; the rest of the synopsis and the hydrology notes are a click away"}.</>}>
+          The key messages from each NWS office.
         </CardDescription>
         {more && (
           <CardAction>
@@ -1431,8 +1424,8 @@ export function OutlooksCard({ data }: { data: Briefing }) {
     <Card>
       <CardHeader>
         <CardTitle>National outlooks</CardTitle>
-        <CardDescription>
-          WPC's Excessive Rainfall Outlook (days 1 – 5) and CPC's 6 – 10 and 8 – 14 day outlooks at the forecast locations.
+        <CardDescription info="WPC's Excessive Rainfall Outlook (days 1 – 5) and CPC's 6 – 10 and 8 – 14 day outlooks at the forecast locations.">
+          Excessive rainfall and extended outlooks.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-8">
