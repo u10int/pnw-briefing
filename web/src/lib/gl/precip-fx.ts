@@ -67,6 +67,7 @@ export class PrecipFx {
   private top = new Float32Array(MAX); private kind = new Uint8Array(MAX); private inten = new Float32Array(MAX)
   private phase = new Float32Array(MAX)
   private n = 0
+  private ground: ((x: number, y: number) => number) | null = null
   private last = 0
   private lines = new Float32Array(MAX * 2 * 7)
   private points = new Float32Array(MAX * 7)
@@ -98,6 +99,8 @@ export class PrecipFx {
     this.t = t
   }
   setT(t: number) { this.t = t }
+  /** Terrain height at a point of the box (fraction of its height): drops land on it, not at sea level. */
+  setGround(f: ((x: number, y: number) => number) | null) { this.ground = f }
   get active() { return !!this.draw }
 
   /** Where precipitation falls in the box, weighted by intensity, at the nearer of the two times. */
@@ -186,7 +189,7 @@ export class PrecipFx {
       const k = kinds[this.kind[i]], f = FALL[k]
       this.pz[i] -= (this.top[i] / f.secs) * dt
       if (f.wobble) { this.phase[i] += dt * 2.2; this.px[i] += Math.cos(this.phase[i]) * f.wobble * dt }
-      if (this.pz[i] <= 0) { this.spawn(i, box); continue }
+      if (this.pz[i] <= (this.ground ? this.ground(this.px[i], this.py[i]) : 0)) { this.spawn(i, box); continue }
       const z = this.pz[i]
       if (z < zr[0] || z > zr[1]) continue
       const c = COL[k] ?? COL.rain
