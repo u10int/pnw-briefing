@@ -1728,6 +1728,23 @@ function useStoredFlag(key: string, initial: boolean): [boolean, (v: boolean) =>
 const SEC_PER_STEP = 0.7
 
 /** Play button, time slider and label; the only part of the card that re-renders during playback. */
+/** The legends over the full screen map: open on wider screens, a "Legend" button on phones. */
+function MapKey({ children }: { children: React.ReactNode }) {
+  const [open, setOpen] = React.useState(() => typeof window === "undefined" || window.matchMedia("(min-width: 640px)").matches)
+  return (
+    <div className="absolute top-[84px] right-2 z-10 flex max-w-[calc(100%-16px)] flex-col items-end gap-1.5">
+      <Button variant="outline" size="sm" className="h-7 gap-1 bg-card px-2 text-xs shadow-sm" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
+        Legend<ChevronRight className={`size-3.5 transition-transform ${open ? "-rotate-90" : "rotate-90"}`} aria-hidden />
+      </Button>
+      {open && (
+        <div className="max-h-[calc(100dvh-220px)] w-[340px] max-w-full space-y-2.5 overflow-y-auto rounded-lg border bg-card/95 p-3 shadow-lg backdrop-blur">
+          {children}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function TimeBar({ times, clock, playing, setPlaying, className = "border bg-muted/40" }: { times: string[]; clock: Clock; playing: boolean; setPlaying: (p: boolean) => void; className?: string }) {
   React.useSyncExternalStore(clock.subscribe, clock.snapshot)
   const ms = msOf(times)
@@ -2049,6 +2066,40 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
   const showParticles = particles && hasWind && active      // no animation while the Map tab is hidden
   const ink = layer === "wind" ? WIND_INK : DARK_INK
 
+  // the legends, under the map and (compact) over it in full screen
+  const legends = (
+    <>
+      {frontsOn && <FrontLegend />}
+      {reportsOn && <ReportLegend reports={reportsOn} hours={data.obsReports?.reportHours ?? 48} />}
+      {firesOn && (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+          <span className="flex items-center gap-1.5"><span className="inline-block size-2.5 rounded-full ring-1 ring-white" style={{ background: "#e8590c" }} aria-hidden />Wildfire</span>
+          <span className="flex items-center gap-1.5"><span className="inline-block size-2.5 rounded-full ring-1 ring-white" style={{ background: "#8a6d3b" }} aria-hidden />Prescribed fire</span>
+          <span className="flex items-center gap-1.5"><span className="inline-block h-2.5 w-4 rounded-[2px] border border-[#b3261e] bg-[#b3261e]/25" aria-hidden />Perimeter</span>
+          <span>Dots sized by acres.</span>
+        </div>
+      )}
+      {mode === "totals" ? (variable === "ar" ? <ArLegend /> : variable === "rivers" ? <RiverLegend /> : variable === "storms" ? <StormLegend day={d} /> : <RampLegend ramp={totRamp} every={totRamp.ticks ? 1 : totRamp.levels.length > 16 ? 2 : 1} />) : (
+        <div className="space-y-2">
+          {volOn && vols && !vols.length && <p className="text-xs text-muted-foreground">No 3D data in this briefing.</p>}
+          {volOn && volError && <p className="text-xs text-muted-foreground">The 3D data could not be loaded.</p>}
+          {paneVol && <VolumeLegend entry={paneVol.entry} name={paneVol.name} />}
+          {layer === "radar" && <RadarLegend withRefc={!!entriesA.refc} />}
+          {layer === "apcp" && <RampLegend ramp={APCP} note={`Running total since ${accStart}.`} />}
+          {layer === "asnow" && <RampLegend ramp={ASNOW} note={`Running total since ${accStart}.`} />}
+          {layer === "rh" && <RampLegend ramp={RH} note="Under about 25% with wind, fires spread fastest." />}
+          {layer === "smoke" && <RampLegend ramp={SMOKE} note="Above about 35 µg/m³ is unhealthy for sensitive groups." />}
+          {layer === "t2m" && <RampLegend ramp={TEMP} note="Dashed blue line: 32°F." />}
+          {layer === "gust" && <RampLegend ramp={GUST} />}
+          {layer === "wind" && <RampLegend ramp={WIND} />}
+          {layer === "frz" && <RampLegend ramp={FRZ} every={2} />}
+          {layer === "pgrad" && <RampLegend ramp={PGRAD} note="1 – 2 is typical; 3 and up is windstorm-class." />}
+          {layer === "ivt" && <RampLegend ramp={IVT} note="250 and up is atmospheric-river strength." />}
+        </div>
+      )}
+    </>
+  )
+
   return (
     <Card>
       <CardHeader>
@@ -2215,6 +2266,7 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
             className="absolute top-[10px] right-12 z-10 size-[29px] bg-card shadow-sm">
             {full ? <Minimize2 className="size-4" aria-hidden /> : <Maximize2 className="size-4" aria-hidden />}
           </Button>
+          {full && <MapKey>{legends}</MapKey>}
           {full && mode === "hourly" && times.length > 0 && (
             <div className="pointer-events-none absolute inset-x-3 bottom-[calc(3rem+env(safe-area-inset-bottom))] z-10 flex justify-center sm:bottom-10">
               <TimeBar times={times} clock={clock} playing={playing} setPlaying={setPlaying}
@@ -2247,34 +2299,7 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
           </div>
         )}
 
-        {frontsOn && <FrontLegend />}
-        {reportsOn && <ReportLegend reports={reportsOn} hours={data.obsReports?.reportHours ?? 48} />}
-        {firesOn && (
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
-            <span className="flex items-center gap-1.5"><span className="inline-block size-2.5 rounded-full ring-1 ring-white" style={{ background: "#e8590c" }} aria-hidden />Wildfire</span>
-            <span className="flex items-center gap-1.5"><span className="inline-block size-2.5 rounded-full ring-1 ring-white" style={{ background: "#8a6d3b" }} aria-hidden />Prescribed fire</span>
-            <span className="flex items-center gap-1.5"><span className="inline-block h-2.5 w-4 rounded-[2px] border border-[#b3261e] bg-[#b3261e]/25" aria-hidden />Perimeter</span>
-            <span>Dots sized by acres.</span>
-          </div>
-        )}
-        {mode === "totals" ? (variable === "ar" ? <ArLegend /> : variable === "rivers" ? <RiverLegend /> : variable === "storms" ? <StormLegend day={d} /> : <RampLegend ramp={totRamp} every={totRamp.ticks ? 1 : totRamp.levels.length > 16 ? 2 : 1} />) : (
-          <div className="space-y-2">
-            {volOn && vols && !vols.length && <p className="text-xs text-muted-foreground">No 3D data in this briefing.</p>}
-            {volOn && volError && <p className="text-xs text-muted-foreground">The 3D data could not be loaded.</p>}
-            {paneVol && <VolumeLegend entry={paneVol.entry} name={paneVol.name} />}
-            {layer === "radar" && <RadarLegend withRefc={!!entriesA.refc} />}
-            {layer === "apcp" && <RampLegend ramp={APCP} note={`Running total since ${accStart}.`} />}
-            {layer === "asnow" && <RampLegend ramp={ASNOW} note={`Running total since ${accStart}.`} />}
-            {layer === "rh" && <RampLegend ramp={RH} note="Under about 25% with wind, fires spread fastest." />}
-            {layer === "smoke" && <RampLegend ramp={SMOKE} note="Above about 35 µg/m³ is unhealthy for sensitive groups." />}
-            {layer === "t2m" && <RampLegend ramp={TEMP} note="Dashed blue line: 32°F." />}
-            {layer === "gust" && <RampLegend ramp={GUST} />}
-            {layer === "wind" && <RampLegend ramp={WIND} />}
-            {layer === "frz" && <RampLegend ramp={FRZ} every={2} />}
-            {layer === "pgrad" && <RampLegend ramp={PGRAD} note="1 – 2 is typical; 3 and up is windstorm-class." />}
-            {layer === "ivt" && <RampLegend ramp={IVT} note="250 and up is atmospheric-river strength." />}
-          </div>
-        )}
+        {legends}
 
         <AboutView
           groups={[
