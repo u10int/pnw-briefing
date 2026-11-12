@@ -235,9 +235,12 @@ export function DayMatrix({ dates, rows, leadHead, leadSub, style, fmt, tip, dim
   const narrow = useNarrow()
   const [open, setOpen] = React.useState<Set<string>>(new Set())
   const grouped = narrow && rows.some((r) => r.group && r.region) && rows.some((r) => !r.group && r.region)
-  // on a phone: each region row, then its locations once opened; elsewhere as given
-  const shown = !grouped ? rows : rows.filter((r) => r.group).flatMap((g) =>
-    [g, ...(open.has(g.region!) ? rows.filter((r) => !r.group && r.region === g.region) : [])])
+  // on a phone: each region row, then its locations once opened; elsewhere as given. Locations in no
+  // region (the B.C. ones) have no row to open, so they follow the regions, always shown.
+  const shown = !grouped ? rows : [
+    ...rows.filter((r) => r.group).flatMap((g) => [g, ...(open.has(g.region!) ? rows.filter((r) => !r.group && r.region === g.region) : [])]),
+    ...rows.filter((r) => !r.group && !r.region),
+  ]
   const toggle = (id: string) => setOpen((o) => { const n = new Set(o); if (n.has(id)) n.delete(id); else n.add(id); return n })
   return (
     <div className="overflow-x-auto rounded-md border">
