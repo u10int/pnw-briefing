@@ -5,11 +5,11 @@ import "maplibre-gl/dist/maplibre-gl.css"
 // MapLibre runs a web worker for vector/GeoJSON work; have Vite bundle it and tell MapLibre where it is.
 import { summarize } from "@/sections/Hazards"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { ChevronRight, CircleHelp, Maximize2, Minimize2, Pause, Play, SlidersHorizontal } from "lucide-react"
+import { ChevronRight, CircleHelp, ExternalLink, Maximize2, Minimize2, Pause, Play, SlidersHorizontal } from "lucide-react"
 import { Popover } from "radix-ui"
 
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Slider } from "@/components/ui/slider"
@@ -77,21 +77,47 @@ function addDemProtocol() {
 const cogUrl = (c: Cog) => (c.path.startsWith("data:") ? c.path : `data/${c.path}`)
 
 /** Keeps several maps' cameras together. */
-function useCameraSync() {
+/** A camera: centre, zoom, tilt and turn. */
+export interface Camera { lon: number; lat: number; zoom: number; pitch: number; bearing: number }
+/** Keeps the panes' cameras together; opens the first on `initial` (a shared link's view) and tells
+ *  `onMove` listeners when the view changes. */
+function useCameraSync(initial: Camera | null = null) {
   const maps = React.useRef(new Set<maplibregl.Map>())
   const busy = React.useRef(false)
+  const restore = React.useRef(initial)
+  const keep3d = React.useRef(!!initial && (initial.pitch > 0 || initial.bearing !== 0))
+  const listeners = React.useRef(new Set<() => void>())
   return React.useMemo(() => ({
     add(m: maplibregl.Map) {
       maps.current.add(m)
       m.on("move", () => {
+        listeners.current.forEach((f) => f())
         if (busy.current) return
         busy.current = true
         for (const o of maps.current) if (o !== m) o.jumpTo({ center: m.getCenter(), zoom: m.getZoom(), bearing: m.getBearing(), pitch: m.getPitch() })
         busy.current = false
       })
+      const c = restore.current
+      if (c) {
+        // again once it's loaded (the opening fit to the region lands after the first jump); kept
+        // until then, in case this map is replaced before it loads
+        const go = () => m.jumpTo({ center: [c.lon, c.lat], zoom: c.zoom, pitch: c.pitch, bearing: c.bearing })
+        go(); m.once("load", () => { if (restore.current === c) { restore.current = null; go() } })
+        return
+      }
       for (const o of maps.current) if (o !== m) { m.jumpTo({ center: o.getCenter(), zoom: o.getZoom() }); break }
     },
     remove(m: maplibregl.Map) { maps.current.delete(m) },
+    /** The first pane's camera, or null before there's a map. */
+    camera(): Camera | null {
+      const m = maps.current.values().next().value
+      if (!m) return null
+      const c = m.getCenter()
+      return { lon: c.lng, lat: c.lat, zoom: m.getZoom(), pitch: m.getPitch(), bearing: m.getBearing() }
+    },
+    onMove(f: () => void) { listeners.current.add(f); return () => { listeners.current.delete(f) } },
+    /** True once, when a restored view was tilted: the 3D view then keeps it rather than tilting itself. */
+    keepRestored3d() { const k = keep3d.current; keep3d.current = false; return k },
   }), [])
 }
 
@@ -299,7 +325,7 @@ export interface PaneTerrain { exaggeration: number; snow: { entry: VolumeEntry;
 /** The cross-section on the map: its line (and the points picked so far while drawing one). */
 interface PaneSection { line: SectionLine | null; picked: LonLat[] | null; sink: React.MutableRefObject<{ set?: (img: HTMLCanvasElement) => void }> }
 
-function MapPane({ data, view, clock, opacity, smooth, particles, particleColor, sync, terrain, sat, fronts, reports, fires, vol = null, xsec = null, onPick = null, terrain3d = null, tall = false }: {
+function MapPane({ data, view, clock, opacity, smooth, particles, particleColor, sync, terrain, sat, fronts, reports, fires, vol = null, xsec = null, onPick = null, terrain3d = null, tall = false, page = false }: {
   data: Briefing; view: View | null; clock: Clock; opacity: number; smooth: boolean
   particles: boolean; particleColor: [number, number, number, number]; sync: ReturnType<typeof useCameraSync>
   terrain: boolean; sat: { kind: SatKind; times: SatTimes } | null; fronts: Fronts | null; reports: ObsReport[] | null
@@ -308,6 +334,8 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
   terrain3d?: PaneTerrain | null
   /** full screen: the map takes most of the window's height */
   tall?: boolean
+  /** the map page: the map fills most of the window under its controls */
+  page?: boolean
 }) {
   const el = React.useRef<HTMLDivElement>(null)
   const axisEl = React.useRef<HTMLDivElement>(null)
@@ -624,7 +652,10 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
   // ---- 3D: the volume over the map, tilting the camera in and out
   const volOn = !!vol
   const compass = React.useRef<maplibregl.NavigationControl | null>(null)
+  const wasVol = React.useRef(false)
   React.useEffect(() => {
+    const leaving = wasVol.current && !volOn
+    wasVol.current = volOn
     ready.current?.then((m) => {
       if (volOn) {
         // free tilt and turn: right-drag (or Ctrl-drag) on a mouse, two fingers on a touch screen,
@@ -634,10 +665,12 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
           compass.current = new maplibregl.NavigationControl({ showZoom: false, showCompass: true, visualizePitch: true })
           m.addControl(compass.current, "top-right")
         }
-        m.easeTo({ pitch: 60, bearing: -18, zoom: Math.max(m.getZoom() - 0.2, 3), duration: 900 })
+        if (!sync.keepRestored3d()) m.easeTo({ pitch: 60, bearing: -18, zoom: Math.max(m.getZoom() - 0.2, 3), duration: 900 })
       } else {
         if (compass.current) { m.removeControl(compass.current); compass.current = null }
-        if (!(m.getPitch() > 0 || m.getBearing() !== 0)) return
+        // flat again only on leaving the 3D view (not on opening, where a shared link's tilted view
+        // waits for its volumes to load)
+        if (!leaving || !(m.getPitch() > 0 || m.getBearing() !== 0)) return
         m.dragRotate.disable(); m.touchPitch.disable(); m.touchZoomRotate.disableRotation()
         const d = data.domain
         m.easeTo({ pitch: 0, bearing: 0, duration: 700 })
@@ -835,7 +868,7 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
 
   return (
     <div className={tall ? "relative h-full overflow-hidden" : "relative overflow-hidden rounded-lg border"}>
-      <div ref={el} className={tall ? "h-full w-full" : "h-[520px] w-full max-sm:h-[420px]"} role="region" aria-label={`Map: ${view?.title ?? ""}`} />
+      <div ref={el} className={tall ? "h-full w-full" : page ? "h-[calc(100dvh-210px)] min-h-[420px] w-full max-sm:h-[70dvh]" : "h-[520px] w-full max-sm:h-[420px]"} role="region" aria-label={`Map: ${view?.title ?? ""}`} />
       <div ref={axisEl} className={`pointer-events-none absolute inset-0 overflow-hidden ${vol?.data ? "" : "hidden"}`} aria-hidden />
       <div className="pointer-events-none absolute top-2 left-2 max-w-[70%] rounded-md bg-card/95 px-2.5 py-1.5 text-xs shadow-sm ring-1 ring-border">
         <div className="font-medium">{view?.title}</div>
@@ -1824,8 +1857,9 @@ function MapOptions({ overlays, display, active }: { overlays: React.ReactNode[]
 }
 
 /** A boolean setting remembered in this browser (when storage is available). */
-function useStoredFlag(key: string, initial: boolean): [boolean, (v: boolean) => void] {
+function useStoredFlag(key: string, initial: boolean, forced?: boolean): [boolean, (v: boolean) => void] {
   const [v, setV] = React.useState(() => {
+    if (forced != null) return forced                     // a shared link's setting wins
     try {
       const s = localStorage.getItem(key)
       return s == null ? initial : s === "1"
@@ -1883,8 +1917,21 @@ const WIND_INK: [number, number, number, number] = [24, 28, 34, 0.5]
 
 // ------------------------------------------------------------------ the card
 
-export function InteractiveMap({ data, request, active = true }: { data: Briefing; request?: (MapRequest & { nonce: number }) | null; active?: boolean }) {
-  const sync = useCameraSync()
+export function InteractiveMap({ data, request, active = true, standalone = false }: {
+  data: Briefing; request?: (MapRequest & { nonce: number }) | null; active?: boolean
+  /** The map page on its own: settings come from and go to the URL, and the map fills the window. */
+  standalone?: boolean
+}) {
+  // a shared link's settings (the map page only)
+  const q = React.useMemo(() => new URLSearchParams(standalone ? location.search : ""), [standalone])
+  const qs = <T extends string = string>(k: string, d: T): T => (q.get(k) as T | null) ?? d
+  const qn = (k: string, d: number) => { const x = q.get(k); return x != null && x !== "" && Number.isFinite(+x) ? +x : d }
+  const qb = (k: string, d: boolean) => (q.has(k) ? q.get(k) === "1" : d)
+  const qcam = ((): Camera | null => {
+    const c = (q.get("c") ?? "").split(",").map(Number)
+    return c.length === 5 && c.every(Number.isFinite) ? { lon: c[0], lat: c[1], zoom: c[2], pitch: c[3], bearing: c[4] } : null
+  })()
+  const sync = useCameraSync(qcam)
   const cogs = data.cogs ?? []
   // full screen: just the map (or the two compared) covers the window, with the timeline over it.
   // Fixed rather than the Fullscreen API, so tooltips, which open on the page's body, still show,
@@ -1904,31 +1951,31 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
   }, [full])
   React.useEffect(() => { if (!active) setFull(false) }, [active])
   const fields = useFields(data)
-  const [mode, setMode] = React.useState<"totals" | "hourly">("totals")
-  const [opacity, setOpacity] = React.useState(0.85)
-  const [smooth, setSmooth] = useStoredFlag("pnw-briefing.map.smooth", false)
-  const [particles, setParticles] = useStoredFlag("pnw-briefing.map.particles", true)
-  const [terrain, setTerrain] = useStoredFlag("pnw-briefing.map.terrain", true)
-  const [satKind, setSatKind] = React.useState<SatKind | "off">("off")
-  const [showPairs, setShowPairs] = useStoredFlag("pnw-briefing.map.pairs", true)
-  const [showFronts, setShowFronts] = useStoredFlag("pnw-briefing.map.fronts", false)
+  const [mode, setMode] = React.useState<"totals" | "hourly">(() => (q.get("m") === "hourly" ? "hourly" : "totals"))
+  const [opacity, setOpacity] = React.useState(() => Math.min(1, Math.max(0.2, qn("op", 0.85))))
+  const [smooth, setSmooth] = useStoredFlag("pnw-briefing.map.smooth", false, q.has("sm") ? qb("sm", false) : undefined)
+  const [particles, setParticles] = useStoredFlag("pnw-briefing.map.particles", true, q.has("pa") ? qb("pa", true) : undefined)
+  const [terrain, setTerrain] = useStoredFlag("pnw-briefing.map.terrain", true, q.has("tr") ? qb("tr", true) : undefined)
+  const [satKind, setSatKind] = React.useState<SatKind | "off">(() => (q.get("sat") && q.get("sat")! in SAT_KINDS ? q.get("sat") as SatKind : "off"))
+  const [showPairs, setShowPairs] = useStoredFlag("pnw-briefing.map.pairs", true, q.has("pr") ? qb("pr", true) : undefined)
+  const [showFronts, setShowFronts] = useStoredFlag("pnw-briefing.map.fronts", false, q.has("fr") ? qb("fr", false) : undefined)
   const frontsOn = showFronts && data.fronts?.frames.length ? data.fronts : null
-  const [showReports, setShowReports] = useStoredFlag("pnw-briefing.map.nwsReports", false)
+  const [showReports, setShowReports] = useStoredFlag("pnw-briefing.map.nwsReports", false, q.has("rp") ? qb("rp", false) : undefined)
   // storm reports with a position (temperature summaries stay in the Temperature tab's table)
   const live = React.useMemo(() => liveReports(data.obsReports).filter((r) => r.lat != null && r.lon != null && r.kind !== "high" && r.kind !== "low"), [data.obsReports])
   const reportsOn = showReports && live.length ? live : null
-  const [showFires, setShowFires] = useStoredFlag("pnw-briefing.map.fires", false)
+  const [showFires, setShowFires] = useStoredFlag("pnw-briefing.map.fires", false, q.has("fi") ? qb("fi", false) : undefined)
   const hasFires = !!(data.wildfire?.incidents?.length || data.wildfire?.perimeters?.features.length)
   const firesOn = showFires && hasFires ? data.wildfire! : null
   const pairList = React.useMemo(() => (data.gradients ?? []).filter((g) => g.locs && g.series.length), [data])
-  const [compare, setCompare] = React.useState(false)
+  const [compare, setCompare] = React.useState(() => qb("cmp", false))
   const clock = React.useMemo(() => new Clock(), [])
 
   // totals state
-  const [variable, setVariable] = React.useState<TotVar>("precip")
-  const [days, setDays] = React.useState(2)
-  const [model, setModel] = React.useState(MEAN)
-  const [other, setOther] = React.useState("GFS")
+  const [variable, setVariable] = React.useState<TotVar>(() => qs<TotVar>("v", "precip"))
+  const [days, setDays] = React.useState(() => qn("d", 2))
+  const [model, setModel] = React.useState<string>(() => qs<string>("mo", MEAN))
+  const [other, setOther] = React.useState<string>(() => qs<string>("o", "GFS"))
 
   // hourly state
   const mrms = useMrms(data, mode === "hourly" && active)
@@ -1947,26 +1994,29 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
     }
     return m
   }, [fields, mrms])
-  const [layer, setLayer] = React.useState<HLayer>("radar")
-  const [hModel, setHModel] = React.useState("HRRR")
-  const [hOther, setHOther] = React.useState("GFS")
-  const [isobars, setIsobars] = React.useState(true)
+  const [layer, setLayer] = React.useState<HLayer>(() => qs<HLayer>("l", "radar"))
+  const [hModel, setHModel] = React.useState<string>(() => qs<string>("hm", "HRRR"))
+  const [hOther, setHOther] = React.useState<string>(() => qs<string>("ho", "GFS"))
+  const [isobars, setIsobars] = React.useState(() => qb("iso", true))
   const [playing, setPlaying] = React.useState(false)
 
   // 3D state: a model's pressure-level volume over the map, following the clock
-  const [threeD, setThreeD] = React.useState(false)
-  const [volVar, setVolVar] = React.useState<VolVar | "none">("cloud")
+  const [threeD, setThreeD] = React.useState(() => qb("3d", false))
+  const [volVar, setVolVar] = React.useState<VolVar | "none">(() => qs<VolVar | "none">("vf", "cloud"))
   const volNone = volVar === "none"
-  const [volModel, setVolModel] = React.useState<string | null>(null)
-  const [exag, setExag] = React.useState(25)
-  const [zRange, setZRange] = React.useState<[number, number] | null>(null)     // null: the full height
+  const [volModel, setVolModel] = React.useState<string | null>(() => q.get("vm"))
+  const [exag, setExag] = React.useState(() => Math.min(60, Math.max(5, qn("ex", 25))))
+  const [zRange, setZRange] = React.useState<[number, number] | null>(() => {     // null: the full height
+    const z = (q.get("zr") ?? "").split(",").map(Number)
+    return z.length === 2 && z.every(Number.isFinite) && z[1] > z[0] ? [z[0], z[1]] : null
+  })
   const vols = useVolumes(threeD)
 
   React.useEffect(() => { if (!active) setPlaying(false) }, [active])
 
   // an "Open on map" link from another tab sets the mode and layer, and can ask for a moment:
   // the layer (or a fallback) from a model that reaches it, preferring the regional models
-  const pendingTime = React.useRef<number | null>(null)
+  const pendingTime = React.useRef<number | null>(q.get("t") && Number.isFinite(Date.parse(q.get("t")!)) ? Date.parse(q.get("t")!) : null)
   const handled = React.useRef<number | null>(null)
   const ready = byModel.size > 0
   React.useEffect(() => {
@@ -2110,18 +2160,19 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
   }, [volPath])
   // wind particles at each height (u and v load the first time they're asked for)
   // on by default with the wind speed view, off with the others (until switched)
-  const [volWindPick, setVolWindOn] = React.useState<boolean | null>(null)
-  const [volPrecip, setVolPrecip] = React.useState(true)
+  const [volWindPick, setVolWindOn] = React.useState<boolean | null>(() => (q.has("vw") ? qb("vw", false) : null))
+  const [volPrecip, setVolPrecip] = React.useState(() => qb("vp", true))
   const volWindOn = volWindPick ?? (volVar === "wind" || volVar === "mflux")
   const hasUV = !!(volEntry?.vars.u && volEntry?.vars.v)
   const [volWind, setVolWind] = React.useState<{ model: string; u: Uint8Array; v: Uint8Array } | null>(null)
   // surfaces and colour: a solid at a value (per view), colour by height or another field, shadows
-  const [solidPick, setSolidPick] = React.useState<Partial<Record<VolVar, number | null>>>({ pv: null })
-  const [colorPick, setColorPick] = React.useState<"own" | "height" | VolVar>("own")
-  const [shadowOn, setShadowOn] = React.useState(true)
+  const [solidPick, setSolidPick] = React.useState<Partial<Record<VolVar, number | null>>>(() =>
+    q.has("sol") && q.get("vf") ? { pv: null, [q.get("vf")!]: qn("sol", NaN) || null } : { pv: null })
+  const [colorPick, setColorPick] = React.useState<"own" | "height" | VolVar>(() => qs<"own" | "height" | VolVar>("col", "own"))
+  const [shadowOn, setShadowOn] = React.useState(() => qb("sh", true))
   // a pressure level as a map (contours and arrows), and trajectories
-  const [levelHPa, setLevelHPa] = React.useState<number | null>(null)
-  const [trajOn, setTrajOn] = React.useState(false)
+  const [levelHPa, setLevelHPa] = React.useState<number | null>(() => (q.has("lvl") ? qn("lvl", NaN) || null : null))
+  const [trajOn, setTrajOn] = React.useState(() => qb("trj", false))
   const solidAt = volName && !volNone && SOLID_AT[volName] ? solidPick[volName] ?? null : null
   const colorOpts: ("own" | "height" | VolVar)[] = !volEntry || !volName || volNone ? [] : (VOLUME_VIEWS.includes(volName) || solidAt != null)
     ? ["own", "height", ...COLOR_BY.filter((c) => c !== volName && SOURCE[c] !== SOURCE[volName] && volEntry.vars[SOURCE[c]])] : []
@@ -2176,8 +2227,13 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
         solid: solidAt, color: colorView && colorData?.path !== colorPath ? "own" : colorBy, colorData: colorView && colorData?.path === colorPath ? colorData.data : null,
         shadow: shadowOn, level: paneLevel, uv, traj: paneTraj } : null
   // the cross-section: a preset line or one drawn on the map, sliced through the 3D field
-  const [xsecOn, setXsecOn] = React.useState(false)
-  const [xsecLine, setXsecLine] = React.useState<SectionLine>(SECTION_PRESETS[0])
+  const [xsecOn, setXsecOn] = React.useState(() => qb("xs", false))
+  const [xsecLine, setXsecLine] = React.useState<SectionLine>(() => {
+    const id = q.get("xl"), c = (q.get("xc") ?? "").split(",").map(Number)
+    if (id === "custom" && c.length === 4 && c.every(Number.isFinite))
+      return { id: "custom", label: "Your line", a: [c[0], c[1]], b: [c[2], c[3]], aName: "A", bName: "B" }
+    return SECTION_PRESETS.find((x) => x.id === id) ?? SECTION_PRESETS[0]
+  })
   const [picking, setPicking] = React.useState<LonLat[] | null>(null)
   const xsecSink = React.useRef<{ set?: (img: HTMLCanvasElement) => void }>({})
   const xsecShown = !!(volOn && xsecOn && !volNone && paneVol?.data)
@@ -2203,8 +2259,8 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
     setPicking(null)
   }
   // 3D terrain, and the snow level shaded on it (from the temperature and humidity volumes)
-  const [terr3d, setTerr3d] = React.useState(false)
-  const [snowOn, setSnowOn] = React.useState(true)
+  const [terr3d, setTerr3d] = React.useState(() => qb("t3", false))
+  const [snowOn, setSnowOn] = React.useState(() => qb("sn", true))
   const terrShown = volOn && terr3d
   const snowEntry = terrShown && snowOn && volEntry?.vars.temp && volEntry?.vars.rh ? volEntry : null
   const [snowData, setSnowData] = React.useState<{ model: string; levels: Float32Array[] } | null>(null)
@@ -2229,6 +2285,57 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
   const hasWind = mode === "hourly" && [hA, showB ? hB : undefined].some((m) => m && flowOf(layer, byModel.get(m)!.entries))
   const showParticles = particles && hasWind && active      // no animation while the Map tab is hidden
   const ink = layer === "wind" ? WIND_INK : DARK_INK
+
+  // ---- the settings as a query string: kept in the map page's URL (so a link opens the same view)
+  // and handed to the briefing for its link to the map page
+  const shareQuery = React.useRef<() => string>(() => "")
+  shareQuery.current = () => {
+    const p = new URLSearchParams()
+    const put = (k: string, v: string | number | boolean | null | undefined, d?: string | number | boolean | null) => {
+      if (v == null || v === d) return
+      p.set(k, typeof v === "boolean" ? (v ? "1" : "0") : String(v))
+    }
+    put("m", mode, "totals")
+    if (mode === "totals") { put("v", variable, "precip"); put("d", days, 2); put("mo", model, MEAN) }
+    else {
+      put("l", layer, "radar"); put("hm", hModel, "HRRR"); put("iso", isobars, true); put("sat", satKind, "off")
+      if (clock.time != null) p.set("t", new Date(clock.time).toISOString().slice(0, 16) + "Z")
+    }
+    if (compare) { p.set("cmp", "1"); if (mode === "totals") put("o", other); else put("ho", hOther) }
+    put("op", Math.round(opacity * 100) / 100, 0.85)
+    // switches that are remembered per browser go in either way, so the link opens as it looks here
+    put("sm", smooth); put("pa", particles); put("tr", terrain); put("pr", showPairs); put("fr", showFronts); put("rp", showReports); put("fi", showFires)
+    if (mode === "hourly" && threeD) {
+      p.set("3d", "1"); put("vf", volVar, "cloud"); put("vm", volModel); put("ex", exag, 25)
+      if (zRange) p.set("zr", zRange.join(","))
+      put("vw", volWindPick); put("vp", volPrecip, true)
+      if (solidAt != null) p.set("sol", String(solidAt))
+      put("col", colorPick, "own"); put("sh", shadowOn, true); put("lvl", level); put("trj", trajOn, false)
+      put("t3", terr3d, false); put("sn", snowOn, true)
+      if (xsecOn) {
+        p.set("xs", "1"); p.set("xl", xsecLine.id)
+        if (xsecLine.id === "custom") p.set("xc", [...xsecLine.a, ...xsecLine.b].map((x) => x.toFixed(3)).join(","))
+      }
+    }
+    const c = sync.camera()
+    if (c) p.set("c", [c.lon.toFixed(3), c.lat.toFixed(3), c.zoom.toFixed(2), Math.round(c.pitch), Math.round(c.bearing)].join(","))
+    return p.toString().replace(/%2C/g, ",").replace(/%3A/g, ":")
+  }
+  const shareTimer = React.useRef<number | undefined>(undefined)
+  const [shareQ, setShareQ] = React.useState("")
+  const scheduleShare = React.useCallback(() => {
+    window.clearTimeout(shareTimer.current)
+    shareTimer.current = window.setTimeout(() => {
+      const query = shareQuery.current()
+      if (standalone) { if (location.search.slice(1) !== query) history.replaceState(null, "", `${location.pathname}?${query}${location.hash}`) }
+      else setShareQ(query)
+    }, 300)
+  }, [standalone])
+  React.useEffect(() => { scheduleShare() })                     // after any change of settings
+  React.useEffect(() => {
+    const a = clock.subscribe(() => { if (!clock.playing) scheduleShare() }), b = sync.onMove(scheduleShare)
+    return () => { a(); b(); window.clearTimeout(shareTimer.current) }
+  }, [clock, sync, scheduleShare])
 
   // the legends, under the map and (compact) over it in full screen
   const legends = (
@@ -2265,8 +2372,8 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
   )
 
   return (
-    <Card>
-      <CardHeader>
+    <Card className={standalone ? "gap-4 rounded-none border-0 py-3 shadow-none" : ""}>
+      <CardHeader className={standalone ? "hidden" : ""}>
         <CardTitle>Explore the grids</CardTitle>
         <CardDescription info={<>{mode === "totals"
             ? "Totals, extremes, ensemble odds and observed rainfall for each window, from each model's own grid. Model spread and percent of normal use the multi-model mean; ensemble odds pool GEFS and ECMWF ENS members."
@@ -2274,8 +2381,16 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
           {" "}Drawn from the same GeoTIFFs this briefing publishes.</>}>
           {mode === "totals" ? "Totals and extremes for each window." : "The forecast hour by hour."} Hover for values; drag and zoom to look closer.
         </CardDescription>
+        <CardAction>
+          {/* the map on its own page, opening with these settings (and keeping them in its address) */}
+          <Button variant="outline" size="sm" asChild>
+            <a href={`map.html${shareQ ? `?${shareQ}` : ""}`} target="_blank" rel="noopener">
+              <ExternalLink aria-hidden />Open map page
+            </a>
+          </Button>
+        </CardAction>
       </CardHeader>
-      <CardContent className="space-y-4">
+      <CardContent className={standalone ? "flex flex-col gap-3 px-4 max-sm:px-3" : "space-y-4"}>
         <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
           {hasHourly && (
             <Tabs value={mode} onValueChange={(v) => { setMode(v as "totals" | "hourly"); setPlaying(false) }} className="max-sm:w-full">
@@ -2424,7 +2539,7 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
                     // the lobes folding down show, as they hang (the heights slider can lift it)
                     if (volName === "pv" && x !== "off" && zRange == null) setZRange([0, 9])
                   }}>
-                    <SelectTrigger className="min-w-0 flex-1 sm:w-[150px] sm:flex-none" aria-label="Solid surface"><SelectValue /></SelectTrigger>
+                    <SelectTrigger className="min-w-0 flex-1 sm:w-[175px] sm:flex-none" aria-label="Solid surface"><SelectValue /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="off">Off</SelectItem>
                       {[...SOLID_AT[volName]!].sort((a, b) => a - b).map((x) => <SelectItem key={x} value={String(x)}>{solidLabel(volName, x, volVarOf(volEntry, volName)!.units)}</SelectItem>)}
@@ -2460,13 +2575,15 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
           </div>
         )}
 
-        {mode === "hourly" && times.length > 0 && <TimeBar times={times} clock={clock} playing={playing} setPlaying={setPlaying} />}
+        {/* on the map page on a phone, the map and its timeline come first and the controls follow */}
+        {mode === "hourly" && times.length > 0 && <TimeBar times={times} clock={clock} playing={playing} setPlaying={setPlaying}
+          className={`border bg-muted/40 ${standalone ? "max-sm:order-[-1]" : ""}`} />}
 
-        <div className={full ? `fixed inset-0 z-50 m-0! grid bg-background ${showB ? "grid-rows-2 gap-px lg:grid-cols-2 lg:grid-rows-1" : ""}` : `relative grid gap-3 ${showB ? "lg:grid-cols-2" : ""}`}
+        <div className={full ? `fixed inset-0 z-50 m-0! grid bg-background ${showB ? "grid-rows-2 gap-px lg:grid-cols-2 lg:grid-rows-1" : ""}` : `relative grid gap-3 ${showB ? "lg:grid-cols-2" : ""} ${standalone ? "max-sm:order-[-2]" : ""}`}
           role={full ? "dialog" : undefined} aria-modal={full || undefined} aria-label={full ? "Map, full screen" : undefined}>
           <MapPane data={data} view={viewA} clock={clock} opacity={opacity} smooth={smooth} particles={showParticles} particleColor={ink} sync={sync} terrain={terrain} sat={sat} fronts={frontsOn} reports={reportsOn} fires={firesOn} vol={paneVol}
-            xsec={volOn && xsecOn ? { line: xsecLine, picked: picking, sink: xsecSink } : null} onPick={volOn && xsecOn && picking ? onPick : null} terrain3d={paneTerrain} tall={full} />
-          {showB && <MapPane data={data} view={viewB} clock={clock} opacity={opacity} smooth={smooth} particles={showParticles} particleColor={ink} sync={sync} terrain={terrain} sat={sat} fronts={frontsOn} reports={reportsOn} fires={firesOn} tall={full} />}
+            xsec={volOn && xsecOn ? { line: xsecLine, picked: picking, sink: xsecSink } : null} onPick={volOn && xsecOn && picking ? onPick : null} terrain3d={paneTerrain} tall={full} page={standalone} />
+          {showB && <MapPane data={data} view={viewB} clock={clock} opacity={opacity} smooth={smooth} particles={showParticles} particleColor={ink} sync={sync} terrain={terrain} sat={sat} fronts={frontsOn} reports={reportsOn} fires={firesOn} tall={full} page={standalone} />}
           {/* left of the zoom buttons, so it doesn't cover them */}
           <Button variant="outline" size="icon" onClick={() => setFull((f) => !f)} aria-pressed={full}
             aria-label={full ? "Exit full screen" : "Full screen map"} title={full ? "Exit full screen (Esc)" : "Full screen"}
