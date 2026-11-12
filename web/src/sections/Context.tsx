@@ -138,7 +138,7 @@ export function ObservedCard({ data }: { data: Briefing }) {
         <CardTitle>How wet it's been</CardTitle>
         <CardDescription info={<>From NOAA's radar-and-gauge analysis (MRMS), against 1991 – 2020 normals. Wet ground turns the same rain into more runoff.
           {" "}Region rows average every grid cell in the region. MRMS tends to run low in the mountains, where terrain blocks the radar beam and gauges are sparse, so mountain and region totals are likely underestimates.
-          Percent of normal is blank outside the US (no PRISM normals).
+          In B.C. MRMS is radar only (no gauges), so treat percent of normal there loosely.
           {missing.length > 0 && ` MRMS had no data for ${missing.map((d) => dayShort(d)).join(", ")}; those days are left out of the totals and the normals.`}</>}>
           Observed precipitation through {dateRange(w30.to, w30.to)}, against normal.
         </CardDescription>

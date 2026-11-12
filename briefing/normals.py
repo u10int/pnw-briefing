@@ -4,8 +4,13 @@ PRISM publishes monthly normals as one grid per month (4 km here). Monthly total
 spread into daily normals by interpolating between mid-month daily rates, so a window
 that crosses a month boundary is handled smoothly.
 
-Grids are cached on disk (the workflow keeps the cache between runs), so PRISM is only
-contacted when a new month is needed.
+PRISM's US grids stop at the border. B.C. comes from ClimateNA's 1991 – 2020 monthly normals
+(1 km, AdaptWest), which are built on PCIC's B.C. PRISM: each 4 km cell the US grid leaves
+empty gets the average of the ClimateNA cells in it. Only a window over the domain is read,
+straight out of the published zip with HTTP range requests.
+
+Grids are cached on disk (the workflow keeps the cache between runs), so PRISM and ClimateNA
+are only contacted when a new month is needed.
 """
 from __future__ import annotations
 
@@ -28,6 +33,11 @@ PRISM_URLS = [
     "https://services.nacse.org/prism/data/public/normals/4km/{var}/{month:02d}",
 ]
 MM_TO_IN = 1 / 25.4
+# ClimateNA 1991 – 2020 monthly normals (mm and °C), Lambert azimuthal equal-area, 1 km
+CNA_ZIP = "https://s3-us-west-2.amazonaws.com/www.cacpd.org/CMIP6v73/normals/Normal_1991_2020_monthly.zip"
+CNA_NAME = "Normal_1991_2020/Normal_1991_2020_monthly/Normal_1991_2020_{var}{month:02d}.tif"
+CNA_VAR = {"ppt": "PPT", "tmax": "Tmax", "tmin": "Tmin"}
+SOURCE = "PRISM 1991 – 2020 monthly normals, 4 km (B.C.: ClimateNA, from PCIC's B.C. PRISM)"
 
 
 def _download(month: int, cache: Path, var: str = "ppt") -> Path:
@@ -76,6 +86,57 @@ def _read(zip_path: Path, dom):
     return lat[::-1], lon, a[::-1]
 
 
+def _extend(lat, lon, a, dom):
+    """The grid padded with NaN to cover the whole domain on the same 4 km lattice (PRISM's US grid
+    stops at 49.94° N and 125.02° W)."""
+    dy, dx = lat[1] - lat[0], lon[1] - lon[0]
+    j0, j1 = int(np.floor((dom["lon_min"] - lon[0]) / dx)), int(np.ceil((dom["lon_max"] - lon[0]) / dx)) + 1
+    i0, i1 = int(np.floor((dom["lat_min"] - lat[0]) / dy)), int(np.ceil((dom["lat_max"] - lat[0]) / dy)) + 1
+    j0, i0 = min(j0, 0), min(i0, 0)
+    j1, i1 = max(j1, len(lon)), max(i1, len(lat))
+    out = np.full((i1 - i0, j1 - j0), np.nan, dtype="float32")
+    out[-i0:-i0 + len(lat), -j0:-j0 + len(lon)] = a
+    return (lat[0] + dy * np.arange(i0, i1)).astype(lat.dtype), (lon[0] + dx * np.arange(j0, j1)).astype(lon.dtype), out
+
+
+def _climatena(var: str, month: int, lat, lon, cache: Path) -> np.ndarray:
+    """ClimateNA's normal (mm or °C) averaged onto the (lat, lon) cells: NaN where it has none."""
+    path = cache / f"climatena_{var}_{month:02d}_{len(lat)}x{len(lon)}_{lat[0]:.3f}_{lon[0]:.3f}.npy"
+    if path.exists():
+        return np.load(path)
+    import rasterio
+    from rasterio.transform import from_origin
+    from rasterio.warp import Resampling, reproject, transform_bounds
+    from rasterio.windows import Window, from_bounds
+
+    dy, dx = float(lat[1] - lat[0]), float(lon[1] - lon[0])
+    west, east, south, north = lon[0] - dx / 2, lon[-1] + dx / 2, lat[0] - dy / 2, lat[-1] + dy / 2
+    out = np.full((len(lat), len(lon)), np.nan, dtype="float32")
+    with rasterio.Env(GDAL_HTTP_MAX_RETRY="3", GDAL_HTTP_RETRY_DELAY="5", CPL_VSIL_CURL_ALLOWED_EXTENSIONS=".zip"):
+        with rasterio.open(f"/vsizip//vsicurl/{CNA_ZIP}/{CNA_NAME.format(var=CNA_VAR[var], month=month)}") as src:
+            win = from_bounds(*transform_bounds("EPSG:4326", src.crs, west, south, east, north, densify_pts=41), src.transform)
+            win = win.round_offsets().round_lengths().intersection(Window(0, 0, src.width, src.height))
+            a = src.read(1, window=win).astype("float32")
+            reproject(a, out, src_transform=src.window_transform(win), src_crs=src.crs, src_nodata=np.nan,
+                      dst_transform=from_origin(west, north, dx, dy), dst_crs="EPSG:4326", dst_nodata=np.nan,
+                      resampling=Resampling.average)
+    out = out[::-1]                                     # rows north to south → lat ascending
+    cache.mkdir(parents=True, exist_ok=True)
+    np.save(path, out)
+    return out
+
+
+def _month(var: str, month: int, dom, cache: Path):
+    """One month's normal over the whole domain: PRISM in the US, ClimateNA in B.C."""
+    lat, lon, a = _extend(*_read(_download(month, cache, var), dom), dom)
+    try:
+        c = _climatena(var, month, lat, lon, cache)
+        a = np.where(np.isfinite(a), a, c)
+    except Exception as e:  # B.C. is left without a normal, as before
+        log.warning("ClimateNA %s normal for month %d unavailable (%s); B.C. has no normal", var, month, type(e).__name__)
+    return lat, lon, a
+
+
 def _daily_rate(months: dict[int, np.ndarray], d: date) -> np.ndarray:
     """Daily normal for date d, interpolated between mid-month daily rates."""
     def rate(y, m):
@@ -102,7 +163,7 @@ def daily_normals(dates: list[date], cfg, cache: Path, demo: bool = False):
         if demo:
             lat, lon, months[m] = _demo_month(m, dom)
         else:
-            lat, lon, months[m] = _read(_download(m, cache), dom)
+            lat, lon, months[m] = _month("ppt", m, dom, cache)
     return lat, lon, np.stack([_daily_rate(months, d) for d in dates]) * MM_TO_IN
 
 
@@ -131,7 +192,7 @@ def daily_temp_normals(dates: list[date], cfg, cache: Path, demo: bool = False):
             if demo:
                 lat, lon, months[m] = _demo_temp_month(m, dom, var)
             else:
-                lat, lon, months[m] = _read(_download(m, cache, var), dom)
+                lat, lon, months[m] = _month(var, m, dom, cache)
         out[var] = np.stack([_mid_month(months, d) for d in dates]) * 9 / 5 + 32
     return lat, lon, out
 
@@ -190,5 +251,5 @@ def summarize(models, cfg, cache: Path, demo: bool = False, first: float = 1.0):
         windows.append({"days": n, "label": w["label"], "regions": region, "points": points})
 
     grid = {"lat": lat, "lon": lon, "daily": daily}
-    return {"source": "PRISM 1991 – 2020 monthly normals, 4 km" + (" (synthetic in demo)" if demo else ""),
+    return {"source": SOURCE + (" (synthetic in demo)" if demo else ""),
             "points": pts, "windows": windows}, grid

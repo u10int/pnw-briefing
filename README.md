@@ -273,8 +273,11 @@ volumes, like the hourly fields.
   by interpolating between mid-month rates, so windows that cross a month boundary are handled.
   Region normals are averaged over the same forecast locations as the region totals, so the
   percentages compare like with like. Normal daily highs and lows come from PRISM's monthly
-  `tmax` and `tmin` normals, interpolated linearly between mid-month values. PRISM covers the US
-  only, so B.C. locations have no normal. Grids are cached (`.cache/prism`, kept by the workflow).
+  `tmax` and `tmin` normals, interpolated linearly between mid-month values. PRISM's grids stop
+  at the border, so B.C. uses ClimateNA's 1991–2020 monthly normals (1 km, from AdaptWest), which
+  are built on PCIC's B.C. PRISM: each 4 km cell the US grid leaves empty gets the average of the
+  ClimateNA cells in it, read as a small window straight out of the published zip. Grids are
+  cached (`.cache/prism`, kept by the workflow).
 - **Alerts.** Each location is resolved once to its NWS forecast zone, county and fire-weather
   zone (`api.weather.gov/points`). One `alerts/active?area=WA,OR` request is then matched by
   zone. NWS asks for an identifying User-Agent; it defaults to your GitHub repository name, or
@@ -402,7 +405,7 @@ briefing/analysis.py        windows, region masks, regridding, summary
 briefing/impacts.py         hazard rules, model agreement, event grouping
 briefing/maps.py            cartopy small-multiple maps (PNG)
 briefing/cogs.py            Cloud-Optimized GeoTIFF export
-briefing/normals.py         PRISM normals, daily interpolation, percent of normal
+briefing/normals.py         PRISM (and B.C. ClimateNA) normals, daily interpolation, percent of normal
 briefing/tempdep.py         departure of daily highs and lows from normal (table and maps)
 briefing/alerts.py          NWS zones and active alerts
 briefing/eccc_alerts.py     Environment Canada alerts for the B.C. locations

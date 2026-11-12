@@ -102,10 +102,10 @@ export function TempDepartureCard({ data }: { data: Briefing }) {
         <Takeaway>{takeaway}</Takeaway>
         <CardDescription info={<>
           {model ? `${model.label}'s` : skill ? "Each location's skill-weighted median" : only ? `Each location's median of ${listNames(only)}` : "Each location's multi-model median"} daily {WORD[v]}{" "}
-          {show === "dep" ? "against its 1991 – 2020 normal for the date (PRISM)" : "temperature"}{model && `, out to day ${model.days}`}.
+          {show === "dep" ? "against its 1991 – 2020 normal for the date (PRISM; ClimateNA in B.C.)" : "temperature"}{model && `, out to day ${model.days}`}.
           {" "}Region rows average their locations. {skill && <>{skillNote(skill)} </>}Days past the selected window are shown too; the average covers only the window. Each day runs 4 AM to 4 AM
           Pacific, which holds the day's afternoon high and early-morning low.
-          {show === "dep" && noNormal.length > 0 && ` PRISM normals cover the US only, so ${noNormal.join(", ")} ${noNormal.length > 1 ? "have" : "has"} no departure.`}
+          {show === "dep" && noNormal.length > 0 && ` ${noNormal.join(", ")} ${noNormal.length > 1 ? "have" : "has"} no normal in this briefing, so no departure.`}
           {" "}The interactive map's Summary mode has the gridded version under “Temperature vs normal”.</>}>
           Daily {WORD[v]} {show === "dep" ? "against normal" : "temperature"}.
         </CardDescription>
