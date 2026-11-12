@@ -272,6 +272,8 @@ export interface PaneVolume {
   uv: { u: Uint8Array; v: Uint8Array } | null
   /** Backward trajectories from the forecast locations, with w when the model has it. */
   traj: { w: Uint8Array | null } | null
+  /** No field: just the box, for the terrain, particles, falling precipitation and the rest. */
+  none?: boolean
 }
 /** Values a view's solid surface can sit at (display units); the first is the default. */
 const SOLID_AT: Partial<Record<VolVar, number[]>> = {
@@ -643,7 +645,7 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
       }
     })
   }, [volOn])
-  const volKey = vol ? `${vol.entry.model}|${vol.name}|${vol.solid}|${vol.color}|${vol.colorData ? 1 : 0}|${vol.shadow}` : ""
+  const volKey = vol ? `${vol.entry.model}|${vol.none ? "none" : vol.name}|${vol.solid}|${vol.color}|${vol.colorData ? 1 : 0}|${vol.shadow}` : ""
   React.useEffect(() => {
     const L = layers.current!.volume
     L.onAxis = (pts) => {
@@ -663,7 +665,9 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
       return { at: frac(vol.solid, v), rgb: [lut[b * 4] / 255, lut[b * 4 + 1] / 255, lut[b * 4 + 2] / 255] as [number, number, number] }
     })()
     const lit = LIT_VIEWS.includes(vol.name)
-    L.setDraw({ grid: vol.entry, data: vol.data, steps: vol.entry.times.length, key: volKey,
+    if (vol.none) {
+      L.setDraw({ grid: vol.entry, data: vol.data, steps: vol.entry.times.length, key: volKey, lut: new Uint8Array(1024), lit: false, isos: [], empty: true }, vol.entry.levels)
+    } else L.setDraw({ grid: vol.entry, data: vol.data, steps: vol.entry.times.length, key: volKey,
       // with a solid surface, only the surface draws
       lut: solid ? new Uint8Array(1024) : lutFor(vol.name, v), lit, isos: solid ? [] : isos,
       heightLut: heightLut(vol.entry.topKm, byH === "frz" ? "frz" : "km"), isoByHeight: !!byH,
@@ -731,7 +735,7 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
       u: w.u, v: w.v, range: [e.vars.u.min, e.vars.u.max],
       heightsKm: PARTICLE_HPA.map((p) => e.levels.find((l) => l.hPa === p)?.km).filter((k): k is number => k != null && k < e.topKm),
       // in the moisture-flow view, particles take the plume's colours: the river shows in them too
-      tint: vol?.name === "mflux" && e.vars.mflux ? (b) => mfluxRgb(unpack(b, e.vars.mflux)) : undefined,
+      tint: vol?.name === "mflux" && !vol.none && e.vars.mflux ? (b) => mfluxRgb(unpack(b, e.vars.mflux)) : undefined,
     } : null)
   }, [vol?.wind, vol?.data ? vol.entry.model : null, vol?.name])
 
@@ -835,7 +839,7 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
       <div ref={axisEl} className={`pointer-events-none absolute inset-0 overflow-hidden ${vol?.data ? "" : "hidden"}`} aria-hidden />
       <div className="pointer-events-none absolute top-2 left-2 max-w-[70%] rounded-md bg-card/95 px-2.5 py-1.5 text-xs shadow-sm ring-1 ring-border">
         <div className="font-medium">{view?.title}</div>
-        {vol && <div className="text-muted-foreground">3D: {vol.entry.model} {volLabel(vol.entry, vol.name).toLowerCase()}{vol.wind ? " and wind" : ""}, {vol.entry.run} run{vol.data ? "" : " (loading…)"}</div>}
+        {vol && <div className="text-muted-foreground">3D: {vol.entry.model} {vol.none ? (vol.wind ? "wind" : "box") : volLabel(vol.entry, vol.name).toLowerCase()}{vol.wind && !vol.none ? " and wind" : ""}, {vol.entry.run} run{vol.data ? "" : " (loading…)"}</div>}
         {sub && <div className="text-muted-foreground">{sub}</div>}
         {satLabel && <div className="text-muted-foreground">{satLabel}</div>}
         {frontLabel && <div className="text-muted-foreground">{frontLabel}</div>}
@@ -1028,7 +1032,7 @@ function volumeNotes({ entry, name, exaggeration, particles, precip, terrain, sn
   const pk = PARTICLE_HPA.map((p) => entry.levels.find((l) => l.hPa === p)).filter((l): l is { hPa: number; km: number } => !!l)
   return [
     // the note without its own "Moisture flow: " lead-in, since the label says it
-    { label: VIEW_LABEL[name] ?? v?.label ?? "3D field", text: <>{VOL_NOTES[name].replace(/^[A-Z][a-z ]+: (.)/, (_, c: string) => c.toUpperCase())}{name !== "frz" && v?.note ? ` ${v.note}` : ""}</> },
+    !vol?.none && { label: VIEW_LABEL[name] ?? v?.label ?? "3D field", text: <>{VOL_NOTES[name].replace(/^[A-Z][a-z ]+: (.)/, (_, c: string) => c.toUpperCase())}{name !== "frz" && v?.note ? ` ${v.note}` : ""}</> },
     { label: "The box", text: <>{entry.model} on pressure levels from the ground to {entry.topKm} km, heights stretched ×{exaggeration}: kilometres up one edge, the model's average pressure-level heights up the other. Steps every {hours} hours through {timeLabel(entry.times[steps - 1])}, blended in between.</> },
     { label: "Tilt and turn", text: <>Right-drag (or Ctrl-drag), or two fingers on a phone. Drag the compass to tilt; click it to face north.</> },
     particles && pk.length > 0 && { label: "Wind particles", text: <>The wind at {pk.map((l) => `${l.hPa}`).join(", ")} mb (about {pk.map((l) => l.km.toFixed(1)).join(", ")} km), coloured by {name === "mflux" ? "moisture flow" : "speed"}.</> },
@@ -1951,7 +1955,8 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
 
   // 3D state: a model's pressure-level volume over the map, following the clock
   const [threeD, setThreeD] = React.useState(false)
-  const [volVar, setVolVar] = React.useState<VolVar>("cloud")
+  const [volVar, setVolVar] = React.useState<VolVar | "none">("cloud")
+  const volNone = volVar === "none"
   const [volModel, setVolModel] = React.useState<string | null>(null)
   const [exag, setExag] = React.useState(25)
   const [zRange, setZRange] = React.useState<[number, number] | null>(null)     // null: the full height
@@ -2090,12 +2095,13 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
   const volOn = threeD && mode === "hourly"
   const volEntry = !volOn || !vols?.length ? undefined
     : vols.find((v) => v.model === volModel) ?? vols.find((v) => v.model === hA) ?? vols.find((v) => v.model === "GFS") ?? vols[0]
-  const volName: VolVar | undefined = volEntry ? (volVarOf(volEntry, volVar) ? volVar : VOL_ORDER.find((v) => volVarOf(volEntry, v))) : undefined
-  const volPath = volEntry && volName ? volVarOf(volEntry, volName)!.path : null
+  // with no field, the rest still needs a view to hang off (it's never drawn or loaded)
+  const volName: VolVar | undefined = volEntry ? (volVar !== "none" && volVarOf(volEntry, volVar) ? volVar : VOL_ORDER.find((v) => volVarOf(volEntry, v))) : undefined
+  const volPath = volEntry && volName && !volNone ? volVarOf(volEntry, volName)!.path : null
   const [volData, setVolData] = React.useState<{ path: string; data: Uint8Array } | null>(null)
   const [volError, setVolError] = React.useState(false)
   React.useEffect(() => {
-    if (!volEntry || !volName) return
+    if (!volEntry || !volName || volNone) return
     let live = true
     setVolError(false)
     loadVolume(volVarOf(volEntry, volName)!).then((d) => { if (live) setVolData({ path: volVarOf(volEntry, volName)!.path, data: d }) })
@@ -2116,8 +2122,8 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
   // a pressure level as a map (contours and arrows), and trajectories
   const [levelHPa, setLevelHPa] = React.useState<number | null>(null)
   const [trajOn, setTrajOn] = React.useState(false)
-  const solidAt = volName && SOLID_AT[volName] ? solidPick[volName] ?? null : null
-  const colorOpts: ("own" | "height" | VolVar)[] = !volEntry || !volName ? [] : (VOLUME_VIEWS.includes(volName) || solidAt != null)
+  const solidAt = volName && !volNone && SOLID_AT[volName] ? solidPick[volName] ?? null : null
+  const colorOpts: ("own" | "height" | VolVar)[] = !volEntry || !volName || volNone ? [] : (VOLUME_VIEWS.includes(volName) || solidAt != null)
     ? ["own", "height", ...COLOR_BY.filter((c) => c !== volName && SOURCE[c] !== SOURCE[volName] && volEntry.vars[SOURCE[c]])] : []
   const colorBy = colorOpts.includes(colorPick) ? colorPick : "own"
   const colorView = colorBy !== "own" && colorBy !== "height" ? colorBy : null
@@ -2162,8 +2168,11 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
   const paneLevel = React.useMemo(() => (level != null && levelData ? { hPa: level, hgt: levelData } : null), [level, levelData])
   const wNow = wVar && wData?.path === wVar.path ? wData.data : null
   const paneTraj = React.useMemo(() => (trajShown ? { w: wNow } : null), [trajShown, wNow])
+  // no field: an empty grid of the model's size stands in, so the box, particles and the rest still draw
+  const emptyVol = React.useMemo(() => (volNone && volEntry ? new Uint8Array(volEntry.nx * volEntry.ny * volEntry.nz * volEntry.times.length) : null),
+    [volNone, volEntry?.model, volEntry?.run])
   const paneVol: PaneVolume | null = volEntry && volName
-    ? { entry: volEntry, name: volName, data: volData?.path === volPath ? volData.data : null, exaggeration: exag, wind: paneWind, range: zRange ?? [0, volEntry.topKm], precip: layer === "radar" && volPrecip,
+    ? { entry: volEntry, name: volName, none: volNone, data: volNone ? emptyVol : volData?.path === volPath ? volData.data : null, exaggeration: exag, wind: paneWind, range: zRange ?? [0, volEntry.topKm], precip: layer === "radar" && volPrecip,
         solid: solidAt, color: colorView && colorData?.path !== colorPath ? "own" : colorBy, colorData: colorView && colorData?.path === colorPath ? colorData.data : null,
         shadow: shadowOn, level: paneLevel, uv, traj: paneTraj } : null
   // the cross-section: a preset line or one drawn on the map, sliced through the 3D field
@@ -2171,7 +2180,7 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
   const [xsecLine, setXsecLine] = React.useState<SectionLine>(SECTION_PRESETS[0])
   const [picking, setPicking] = React.useState<LonLat[] | null>(null)
   const xsecSink = React.useRef<{ set?: (img: HTMLCanvasElement) => void }>({})
-  const xsecShown = !!(volOn && xsecOn && paneVol?.data)
+  const xsecShown = !!(volOn && xsecOn && !volNone && paneVol?.data)
   const needTemp = xsecShown && volEntry && volName && SOURCE[volName] !== "temp" && volEntry.vars.temp ? volEntry : null
   const [volTemp, setVolTemp] = React.useState<{ model: string; data: Uint8Array } | null>(null)
   React.useEffect(() => {
@@ -2238,7 +2247,7 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
         <div className="space-y-2">
           {volOn && vols && !vols.length && <p className="text-xs text-muted-foreground">No 3D data in this briefing.</p>}
           {volOn && volError && <p className="text-xs text-muted-foreground">The 3D data could not be loaded.</p>}
-          {paneVol && <VolumeLegend vol={paneVol} />}
+          {paneVol && !paneVol.none && <VolumeLegend vol={paneVol} />}
           {layer === "radar" && <RadarLegend withRefc={!!entriesA.refc} />}
           {layer === "apcp" && <RampLegend ramp={APCP} note={`Running total since ${accStart}.`} />}
           {layer === "asnow" && <RampLegend ramp={ASNOW} note={`Running total since ${accStart}.`} />}
@@ -2370,9 +2379,10 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
             <div className="text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">3D view</div>
             <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
               <Control label="Field">
-                <Select value={volName} onValueChange={(v) => setVolVar(v as VolVar)}>
+                <Select value={volNone ? "none" : volName} onValueChange={(v) => setVolVar(v as VolVar | "none")}>
                   <SelectTrigger className="min-w-0 flex-1 sm:w-[190px] sm:flex-none" aria-label="3D field"><SelectValue /></SelectTrigger>
                   <SelectContent>
+                    <SelectItem value="none">None</SelectItem>
                     {VOL_ORDER.filter((v) => volVarOf(volEntry, v)).map((v) => <SelectItem key={v} value={v}>{volLabel(volEntry, v)}</SelectItem>)}
                   </SelectContent>
                 </Select>
@@ -2399,14 +2409,14 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
               {hasUV && <Toggle id="vol-wind" label="Wind particles" checked={volWindOn} onChange={setVolWindOn}
                 help="Particles moving with the wind at 850, 700, 500, 300 and 250 mb, coloured by speed (or by moisture flow in that view)." />}
               {layer === "radar" && <Toggle id="vol-precip" label="Falling precip" checked={volPrecip} onChange={setVolPrecip} />}
-              <Toggle id="vol-xsec" label="Cross-section" checked={xsecOn} onChange={(v) => { setXsecOn(v); if (!v) setPicking(null) }}
-                help="Slice the 3D field along a line, drawn under the map and as a curtain in 3D. Pick a preset line or draw your own." />
+              {!volNone && <Toggle id="vol-xsec" label="Cross-section" checked={xsecOn} onChange={(v) => { setXsecOn(v); if (!v) setPicking(null) }}
+                help="Slice the 3D field along a line, drawn under the map and as a curtain in 3D. Pick a preset line or draw your own." />}
               <Toggle id="vol-terrain" label="3D terrain" checked={terr3d} onChange={(v) => { setTerr3d(v); if (v && exag > 10) setExag(8) }} />
               {terr3d && <Toggle id="vol-snow" label="Snow level" checked={snowOn} onChange={setSnowOn}
                 help="Shade the terrain white above the model's snow level, about 1,000 ft below the wet-bulb freezing level." />}
             </div>
             <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
-              {SOLID_AT[volName] && (
+              {!volNone && SOLID_AT[volName] && (
                 <Control label="Solid" help="Draw the field as an opaque, lit surface where it reaches a value (the jet stream at 100 kt, say), instead of a see-through volume. Its shadow falls on the map.">
                   <Select value={solidAt == null ? "off" : String(solidAt)} onValueChange={(x) => {
                     setSolidPick((p) => ({ ...p, [volName]: x === "off" ? null : Number(x) }))
@@ -2443,7 +2453,7 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
                   </Select>
                 </Control>
               )}
-              {(solidAt != null || LIT_VIEWS.includes(volName)) && <Toggle id="vol-shadow" label="Shadows" checked={shadowOn} onChange={setShadowOn} />}
+              {!volNone && (solidAt != null || LIT_VIEWS.includes(volName)) && <Toggle id="vol-shadow" label="Shadows" checked={shadowOn} onChange={setShadowOn} />}
               {hasUV && <Toggle id="vol-traj" label="Trajectories" checked={trajOn} onChange={setTrajOn}
                 help="Where the air arriving over each forecast location at about 1.5 and 3 km came from over the previous 24 hours (or since the model's first step), coloured by height: lines climbing toward a location show air being lifted." />}
             </div>
@@ -2472,7 +2482,7 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
           )}
         </div>
 
-        {volOn && xsecOn && volEntry && volName && (
+        {volOn && xsecOn && !volNone && volEntry && volName && (
           <div className="space-y-2">
             <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
               <Select value={xsecLine.id} onValueChange={(id) => { const p = SECTION_PRESETS.find((x) => x.id === id); if (p) { setXsecLine(p); setPicking(null) } }}>

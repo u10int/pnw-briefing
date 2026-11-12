@@ -36,6 +36,8 @@ export interface VolumeDraw {
   solid?: { at: number; rgb: [number, number, number] } | null
   /** Shadows on the ground from the solid, or from the lit field. */
   shadow?: boolean
+  /** No field to draw: only the box and what goes in it (particles, precipitation, overlays). */
+  empty?: boolean
 }
 
 /** Wind for the particles: u and v (m/s) packed like the other fields, every time step. */
@@ -799,7 +801,7 @@ export class VolumeLayer implements CustomLayerInterface {
       gl.viewport(0, 0, fw, fh)
       gl.clearColor(0, 0, 0, 0)
       gl.clear(gl.COLOR_BUFFER_BIT)
-      this.march(gl, d, mvp, inv, fw, fh, x1 - x0, yS - yN, zTop, yN, yS)
+      if (!d.empty) this.march(gl, d, mvp, inv, fw, fh, x1 - x0, yS - yN, zTop, yN, yS)
       gl.bindFramebuffer(gl.FRAMEBUFFER, prevFb)
       gl.viewport(prevVp[0], prevVp[1], prevVp[2], prevVp[3])
     }
