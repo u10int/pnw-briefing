@@ -252,6 +252,8 @@ export interface PaneVolume {
   range: [number, number]
   /** u and v for the wind particles, when they're on */
   wind: { u: Uint8Array; v: Uint8Array } | null
+  /** Rain and snow falling from the radar layer. */
+  precip: boolean
 }
 /** A 3D view's data file and label (the freezing level draws from temperature). */
 const volVarOf = (e: VolumeEntry, n: VolVar): VolumeVar | undefined => e.vars[SOURCE[n]]
@@ -441,9 +443,10 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
         first = false
         loaded.current = { v, t }
         grid.setDraw(v?.draw ?? null, t)
+        layers.current!.volume.setPrecip(v?.draw ?? null, t)
         setStatus(v?.draw || v?.bare ? { kind: "ready" } : { kind: "empty", note: v?.note })
       },
-      (t) => { loaded.current.t = t; grid.setT(t) },
+      (t) => { loaded.current.t = t; grid.setT(t); layers.current!.volume.setPrecipT(t) },
       () => { first = false; setStatus({ kind: "error" }) },
       (on) => clock.hold(gridCh, on),
     )
@@ -536,6 +539,7 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
     return clock.subscribe(update)
   }, [volKey, vol?.data])
   React.useEffect(() => { layers.current!.volume.setExaggeration(vol?.exaggeration ?? 25) }, [vol?.exaggeration])
+  React.useEffect(() => { layers.current!.volume.setPrecipOn(!!vol?.precip) }, [vol?.precip])
   React.useEffect(() => { layers.current!.volume.setHeightRange(vol?.range[0] ?? 0, vol?.range[1] ?? 99) }, [vol?.range[0], vol?.range[1], vol?.data])
   React.useEffect(() => {
     const e = vol?.entry, w = vol?.wind
@@ -728,7 +732,7 @@ const VOL_NOTES: Record<VolVar, string> = {
 }
 /** How to read the 3D field: shell swatches for temperature and wind, a height scale for the freezing
  *  level, otherwise the colours over the useful range (paler where nearly see-through); then the box. */
-function VolumeLegend({ entry, name, exaggeration, particles }: { entry: VolumeEntry; name: VolVar; exaggeration: number; particles: boolean }) {
+function VolumeLegend({ entry, name, exaggeration, particles, precip }: { entry: VolumeEntry; name: VolVar; exaggeration: number; particles: boolean; precip: boolean }) {
   const v = volVarOf(entry, name)!
   const { show, ticks } = legendStops(name, v)
   const N = 48
@@ -768,6 +772,7 @@ function VolumeLegend({ entry, name, exaggeration, particles }: { entry: VolumeE
       <p className="text-xs text-muted-foreground">
         {VOL_NOTES[name]} {name === "frz" ? "" : v.note ?? ""}
         {particles && pk.length > 0 && <> Particles trace the wind at {pk.map((l) => `${l.hPa} mb`).join(", ")} (about {pk.map((l) => l.km.toFixed(1)).join(", ")} km), coloured by speed like the map's wind.</>}
+        {precip && <> Falling precipitation comes from the radar layer below: rain in streaks, snow drifting down, sleet and freezing rain in between, wherever the simulated radar shows about 15 dBZ or more (thicker where it's heavier), in the radar legend's colours for each type. It falls from about 3 km.</>}
         {" "}{entry.model} on pressure levels, 0 – {entry.topKm} km, heights stretched ×{exaggeration}: kilometres up one edge of the box, the
         model's average pressure-level heights up the other. Steps every {hours} hours through {timeLabel(entry.times[steps - 1])}, blended in between. Right-drag (or Ctrl-drag) to tilt and turn, two fingers on a phone; drag the compass to tilt, click it to face north.
       </p>
@@ -1721,6 +1726,7 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
   // wind particles at each height (u and v load the first time they're asked for)
   // on by default with the wind speed view, off with the others (until switched)
   const [volWindPick, setVolWindOn] = React.useState<boolean | null>(null)
+  const [volPrecip, setVolPrecip] = React.useState(true)
   const volWindOn = volWindPick ?? volVar === "wind"
   const hasUV = !!(volEntry?.vars.u && volEntry?.vars.v)
   const [volWind, setVolWind] = React.useState<{ model: string; u: Uint8Array; v: Uint8Array } | null>(null)
@@ -1733,7 +1739,7 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
   }, [volEntry?.model, hasUV, volWindOn])
   const paneWind = volWindOn && volEntry && volWind?.model === volEntry.model ? { u: volWind.u, v: volWind.v } : null
   const paneVol: PaneVolume | null = volEntry && volName
-    ? { entry: volEntry, name: volName, data: volData?.path === volPath ? volData.data : null, exaggeration: exag, wind: paneWind, range: zRange ?? [0, volEntry.topKm] } : null
+    ? { entry: volEntry, name: volName, data: volData?.path === volPath ? volData.data : null, exaggeration: exag, wind: paneWind, range: zRange ?? [0, volEntry.topKm], precip: layer === "radar" && volPrecip } : null
   const showB = compare && !volOn && (mode === "hourly" || perModel)
   const viewB = !showB ? null : mode === "totals"
     ? variable === "ar" ? (data.arCoast ? arView(data.arCoast, pickOther(other), winLabel(d)) : null)
@@ -1834,6 +1840,7 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
                     </Select>
                   )}
                   {hasUV && <Toggle id="vol-wind" label="Wind particles" checked={volWindOn} onChange={setVolWindOn} />}
+                  {layer === "radar" && <Toggle id="vol-precip" label="Falling precip" checked={volPrecip} onChange={setVolPrecip} />}
                   <div className="flex items-center gap-2.5 text-sm max-sm:w-full">
                     <Label className="font-normal whitespace-nowrap">Height ×{exag}</Label>
                     <Slider className="w-[120px] max-sm:flex-1" value={[exag]} min={5} max={60} step={5} onValueChange={([v]) => setExag(v)} aria-label="Vertical stretch" />
@@ -1907,7 +1914,7 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
           <div className="space-y-2">
             {volOn && vols && !vols.length && <p className="text-xs text-muted-foreground">This briefing has no 3D data (it was built before the 3D view, or the models' pressure levels couldn't be read).</p>}
             {volOn && volError && <p className="text-xs text-muted-foreground">The 3D data could not be loaded.</p>}
-            {paneVol && <VolumeLegend entry={paneVol.entry} name={paneVol.name} exaggeration={exag} particles={!!paneVol.wind} />}
+            {paneVol && <VolumeLegend entry={paneVol.entry} name={paneVol.name} exaggeration={exag} particles={!!paneVol.wind} precip={paneVol.precip} />}
             {layer === "radar" && <RadarLegend withRefc={!!entriesA.refc} />}
             {smooth && layer === "radar" && !entriesA.refc && <p className="text-xs text-muted-foreground">Precipitation type is a category, so it isn't smoothed.</p>}
             {smooth && layer === "radar" && entriesA.refc && entriesA.ptype && <p className="text-xs text-muted-foreground">Reflectivity is smoothed; precipitation type keeps each model cell's category.</p>}
