@@ -5,7 +5,7 @@ import "maplibre-gl/dist/maplibre-gl.css"
 // MapLibre runs a web worker for vector/GeoJSON work; have Vite bundle it and tell MapLibre where it is.
 import { summarize } from "@/sections/Hazards"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { ChevronRight, CircleHelp, Pause, Play, SlidersHorizontal } from "lucide-react"
+import { ChevronRight, CircleHelp, Maximize2, Minimize2, Pause, Play, SlidersHorizontal } from "lucide-react"
 import { Popover } from "radix-ui"
 
 import { Button } from "@/components/ui/button"
@@ -271,13 +271,15 @@ export interface PaneTerrain { exaggeration: number; snow: { entry: VolumeEntry;
 /** The cross-section on the map: its line (and the points picked so far while drawing one). */
 interface PaneSection { line: SectionLine | null; picked: LonLat[] | null; sink: React.MutableRefObject<{ set?: (img: HTMLCanvasElement) => void }> }
 
-function MapPane({ data, view, clock, opacity, smooth, particles, particleColor, sync, terrain, sat, fronts, reports, fires, vol = null, xsec = null, onPick = null, terrain3d = null }: {
+function MapPane({ data, view, clock, opacity, smooth, particles, particleColor, sync, terrain, sat, fronts, reports, fires, vol = null, xsec = null, onPick = null, terrain3d = null, tall = false }: {
   data: Briefing; view: View | null; clock: Clock; opacity: number; smooth: boolean
   particles: boolean; particleColor: [number, number, number, number]; sync: ReturnType<typeof useCameraSync>
   terrain: boolean; sat: { kind: SatKind; times: SatTimes } | null; fronts: Fronts | null; reports: ObsReport[] | null
   fires: Wildfire | null; vol?: PaneVolume | null
   xsec?: PaneSection | null; onPick?: ((ll: LonLat) => void) | null
   terrain3d?: PaneTerrain | null
+  /** full screen: the map takes most of the window's height */
+  tall?: boolean
 }) {
   const el = React.useRef<HTMLDivElement>(null)
   const axisEl = React.useRef<HTMLDivElement>(null)
@@ -769,8 +771,8 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
   }, [fronts])
 
   return (
-    <div className="relative overflow-hidden rounded-lg border">
-      <div ref={el} className="h-[520px] w-full max-sm:h-[420px]" role="region" aria-label={`Map: ${view?.title ?? ""}`} />
+    <div className={tall ? "relative h-full overflow-hidden" : "relative overflow-hidden rounded-lg border"}>
+      <div ref={el} className={tall ? "h-full w-full" : "h-[520px] w-full max-sm:h-[420px]"} role="region" aria-label={`Map: ${view?.title ?? ""}`} />
       <div ref={axisEl} className={`pointer-events-none absolute inset-0 overflow-hidden ${vol?.data ? "" : "hidden"}`} aria-hidden />
       <div className="pointer-events-none absolute top-2 left-2 max-w-[70%] rounded-md bg-card/95 px-2.5 py-1.5 text-xs shadow-sm ring-1 ring-border">
         <div className="font-medium">{view?.title}</div>
@@ -1726,13 +1728,30 @@ function useStoredFlag(key: string, initial: boolean): [boolean, (v: boolean) =>
 const SEC_PER_STEP = 0.7
 
 /** Play button, time slider and label; the only part of the card that re-renders during playback. */
-function TimeBar({ times, clock, playing, setPlaying }: { times: string[]; clock: Clock; playing: boolean; setPlaying: (p: boolean) => void }) {
+/** The legends over the full screen map: open on wider screens, a "Legend" button on phones. */
+function MapKey({ children }: { children: React.ReactNode }) {
+  const [open, setOpen] = React.useState(() => typeof window === "undefined" || window.matchMedia("(min-width: 640px)").matches)
+  return (
+    <div className="absolute top-[84px] right-2 z-10 flex max-w-[calc(100%-16px)] flex-col items-end gap-1.5">
+      <Button variant="outline" size="sm" className="h-7 gap-1 bg-card px-2 text-xs shadow-sm" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
+        Legend<ChevronRight className={`size-3.5 transition-transform ${open ? "-rotate-90" : "rotate-90"}`} aria-hidden />
+      </Button>
+      {open && (
+        <div className="max-h-[calc(100dvh-220px)] w-[340px] max-w-full space-y-2.5 overflow-y-auto rounded-lg border bg-card/95 p-3 shadow-lg backdrop-blur">
+          {children}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function TimeBar({ times, clock, playing, setPlaying, className = "border bg-muted/40" }: { times: string[]; clock: Clock; playing: boolean; setPlaying: (p: boolean) => void; className?: string }) {
   React.useSyncExternalStore(clock.subscribe, clock.snapshot)
   const ms = msOf(times)
   const pos = clock.time == null ? 0 : posOf(ms, clock.time)
   const label = times[Math.round(pos)]
   return (
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border bg-muted/40 px-3 py-2.5">
+    <div className={`flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg px-3 py-2.5 ${className}`}>
       <Button size="icon" variant="outline" className="size-8 shrink-0" onClick={() => setPlaying(!playing)}
               aria-label={playing ? "Pause" : "Play through time"}>
         {playing ? <Pause className="size-4" /> : <Play className="size-4" />}
@@ -1755,6 +1774,23 @@ const WIND_INK: [number, number, number, number] = [24, 28, 34, 0.5]
 export function InteractiveMap({ data, request, active = true }: { data: Briefing; request?: (MapRequest & { nonce: number }) | null; active?: boolean }) {
   const sync = useCameraSync()
   const cogs = data.cogs ?? []
+  // full screen: just the map (or the two compared) covers the window, with the timeline over it.
+  // Fixed rather than the Fullscreen API, so tooltips, which open on the page's body, still show,
+  // and so it works on iPhone; Escape or the button closes it
+  const [full, setFull] = React.useState(false)
+  React.useEffect(() => {
+    if (!full) return
+    // the page behind stays put (on the root too, or its scrollbars take a strip of the window)
+    const root = document.documentElement, prev = [root.style.overflow, document.body.style.overflow]
+    root.style.overflow = document.body.style.overflow = "hidden"
+    const key = (e: KeyboardEvent) => {
+      // leave Escape to an open menu or popover first
+      if (e.key === "Escape" && !document.querySelector("[data-radix-popper-content-wrapper]")) setFull(false)
+    }
+    window.addEventListener("keydown", key)
+    return () => { [root.style.overflow, document.body.style.overflow] = prev; window.removeEventListener("keydown", key) }
+  }, [full])
+  React.useEffect(() => { if (!active) setFull(false) }, [active])
   const fields = useFields(data)
   const [mode, setMode] = React.useState<"totals" | "hourly">("totals")
   const [opacity, setOpacity] = React.useState(0.85)
@@ -2030,6 +2066,40 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
   const showParticles = particles && hasWind && active      // no animation while the Map tab is hidden
   const ink = layer === "wind" ? WIND_INK : DARK_INK
 
+  // the legends, under the map and (compact) over it in full screen
+  const legends = (
+    <>
+      {frontsOn && <FrontLegend />}
+      {reportsOn && <ReportLegend reports={reportsOn} hours={data.obsReports?.reportHours ?? 48} />}
+      {firesOn && (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+          <span className="flex items-center gap-1.5"><span className="inline-block size-2.5 rounded-full ring-1 ring-white" style={{ background: "#e8590c" }} aria-hidden />Wildfire</span>
+          <span className="flex items-center gap-1.5"><span className="inline-block size-2.5 rounded-full ring-1 ring-white" style={{ background: "#8a6d3b" }} aria-hidden />Prescribed fire</span>
+          <span className="flex items-center gap-1.5"><span className="inline-block h-2.5 w-4 rounded-[2px] border border-[#b3261e] bg-[#b3261e]/25" aria-hidden />Perimeter</span>
+          <span>Dots sized by acres.</span>
+        </div>
+      )}
+      {mode === "totals" ? (variable === "ar" ? <ArLegend /> : variable === "rivers" ? <RiverLegend /> : variable === "storms" ? <StormLegend day={d} /> : <RampLegend ramp={totRamp} every={totRamp.ticks ? 1 : totRamp.levels.length > 16 ? 2 : 1} />) : (
+        <div className="space-y-2">
+          {volOn && vols && !vols.length && <p className="text-xs text-muted-foreground">No 3D data in this briefing.</p>}
+          {volOn && volError && <p className="text-xs text-muted-foreground">The 3D data could not be loaded.</p>}
+          {paneVol && <VolumeLegend entry={paneVol.entry} name={paneVol.name} />}
+          {layer === "radar" && <RadarLegend withRefc={!!entriesA.refc} />}
+          {layer === "apcp" && <RampLegend ramp={APCP} note={`Running total since ${accStart}.`} />}
+          {layer === "asnow" && <RampLegend ramp={ASNOW} note={`Running total since ${accStart}.`} />}
+          {layer === "rh" && <RampLegend ramp={RH} note="Under about 25% with wind, fires spread fastest." />}
+          {layer === "smoke" && <RampLegend ramp={SMOKE} note="Above about 35 µg/m³ is unhealthy for sensitive groups." />}
+          {layer === "t2m" && <RampLegend ramp={TEMP} note="Dashed blue line: 32°F." />}
+          {layer === "gust" && <RampLegend ramp={GUST} />}
+          {layer === "wind" && <RampLegend ramp={WIND} />}
+          {layer === "frz" && <RampLegend ramp={FRZ} every={2} />}
+          {layer === "pgrad" && <RampLegend ramp={PGRAD} note="1 – 2 is typical; 3 and up is windstorm-class." />}
+          {layer === "ivt" && <RampLegend ramp={IVT} note="250 and up is atmospheric-river strength." />}
+        </div>
+      )}
+    </>
+  )
+
   return (
     <Card>
       <CardHeader>
@@ -2185,10 +2255,24 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
 
         {mode === "hourly" && times.length > 0 && <TimeBar times={times} clock={clock} playing={playing} setPlaying={setPlaying} />}
 
-        <div className={`grid gap-3 ${showB ? "lg:grid-cols-2" : ""}`}>
+        <div className={full ? `fixed inset-0 z-50 m-0! grid bg-background ${showB ? "grid-rows-2 gap-px lg:grid-cols-2 lg:grid-rows-1" : ""}` : `relative grid gap-3 ${showB ? "lg:grid-cols-2" : ""}`}
+          role={full ? "dialog" : undefined} aria-modal={full || undefined} aria-label={full ? "Map, full screen" : undefined}>
           <MapPane data={data} view={viewA} clock={clock} opacity={opacity} smooth={smooth} particles={showParticles} particleColor={ink} sync={sync} terrain={terrain} sat={sat} fronts={frontsOn} reports={reportsOn} fires={firesOn} vol={paneVol}
-            xsec={volOn && xsecOn ? { line: xsecLine, picked: picking, sink: xsecSink } : null} onPick={volOn && xsecOn && picking ? onPick : null} terrain3d={paneTerrain} />
-          {showB && <MapPane data={data} view={viewB} clock={clock} opacity={opacity} smooth={smooth} particles={showParticles} particleColor={ink} sync={sync} terrain={terrain} sat={sat} fronts={frontsOn} reports={reportsOn} fires={firesOn} />}
+            xsec={volOn && xsecOn ? { line: xsecLine, picked: picking, sink: xsecSink } : null} onPick={volOn && xsecOn && picking ? onPick : null} terrain3d={paneTerrain} tall={full} />
+          {showB && <MapPane data={data} view={viewB} clock={clock} opacity={opacity} smooth={smooth} particles={showParticles} particleColor={ink} sync={sync} terrain={terrain} sat={sat} fronts={frontsOn} reports={reportsOn} fires={firesOn} tall={full} />}
+          {/* left of the zoom buttons, so it doesn't cover them */}
+          <Button variant="outline" size="icon" onClick={() => setFull((f) => !f)} aria-pressed={full}
+            aria-label={full ? "Exit full screen" : "Full screen map"} title={full ? "Exit full screen (Esc)" : "Full screen"}
+            className="absolute top-[10px] right-12 z-10 size-[29px] bg-card shadow-sm">
+            {full ? <Minimize2 className="size-4" aria-hidden /> : <Maximize2 className="size-4" aria-hidden />}
+          </Button>
+          {full && <MapKey>{legends}</MapKey>}
+          {full && mode === "hourly" && times.length > 0 && (
+            <div className="pointer-events-none absolute inset-x-3 bottom-[calc(3rem+env(safe-area-inset-bottom))] z-10 flex justify-center sm:bottom-10">
+              <TimeBar times={times} clock={clock} playing={playing} setPlaying={setPlaying}
+                className="pointer-events-auto w-full max-w-3xl border bg-card/95 shadow-lg backdrop-blur" />
+            </div>
+          )}
         </div>
 
         {volOn && xsecOn && volEntry && volName && (
@@ -2215,34 +2299,7 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
           </div>
         )}
 
-        {frontsOn && <FrontLegend />}
-        {reportsOn && <ReportLegend reports={reportsOn} hours={data.obsReports?.reportHours ?? 48} />}
-        {firesOn && (
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
-            <span className="flex items-center gap-1.5"><span className="inline-block size-2.5 rounded-full ring-1 ring-white" style={{ background: "#e8590c" }} aria-hidden />Wildfire</span>
-            <span className="flex items-center gap-1.5"><span className="inline-block size-2.5 rounded-full ring-1 ring-white" style={{ background: "#8a6d3b" }} aria-hidden />Prescribed fire</span>
-            <span className="flex items-center gap-1.5"><span className="inline-block h-2.5 w-4 rounded-[2px] border border-[#b3261e] bg-[#b3261e]/25" aria-hidden />Perimeter</span>
-            <span>Dots sized by acres.</span>
-          </div>
-        )}
-        {mode === "totals" ? (variable === "ar" ? <ArLegend /> : variable === "rivers" ? <RiverLegend /> : variable === "storms" ? <StormLegend day={d} /> : <RampLegend ramp={totRamp} every={totRamp.ticks ? 1 : totRamp.levels.length > 16 ? 2 : 1} />) : (
-          <div className="space-y-2">
-            {volOn && vols && !vols.length && <p className="text-xs text-muted-foreground">No 3D data in this briefing.</p>}
-            {volOn && volError && <p className="text-xs text-muted-foreground">The 3D data could not be loaded.</p>}
-            {paneVol && <VolumeLegend entry={paneVol.entry} name={paneVol.name} />}
-            {layer === "radar" && <RadarLegend withRefc={!!entriesA.refc} />}
-            {layer === "apcp" && <RampLegend ramp={APCP} note={`Running total since ${accStart}.`} />}
-            {layer === "asnow" && <RampLegend ramp={ASNOW} note={`Running total since ${accStart}.`} />}
-            {layer === "rh" && <RampLegend ramp={RH} note="Under about 25% with wind, fires spread fastest." />}
-            {layer === "smoke" && <RampLegend ramp={SMOKE} note="Above about 35 µg/m³ is unhealthy for sensitive groups." />}
-            {layer === "t2m" && <RampLegend ramp={TEMP} note="Dashed blue line: 32°F." />}
-            {layer === "gust" && <RampLegend ramp={GUST} />}
-            {layer === "wind" && <RampLegend ramp={WIND} />}
-            {layer === "frz" && <RampLegend ramp={FRZ} every={2} />}
-            {layer === "pgrad" && <RampLegend ramp={PGRAD} note="1 – 2 is typical; 3 and up is windstorm-class." />}
-            {layer === "ivt" && <RampLegend ramp={IVT} note="250 and up is atmospheric-river strength." />}
-          </div>
-        )}
+        {legends}
 
         <AboutView
           groups={[
