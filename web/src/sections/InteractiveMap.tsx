@@ -9,7 +9,7 @@ import { ChevronRight, CircleHelp, Maximize2, Minimize2, Pause, Play, SlidersHor
 import { Popover } from "radix-ui"
 
 import { Button } from "@/components/ui/button"
-import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Slider } from "@/components/ui/slider"
@@ -771,8 +771,8 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
   }, [fronts])
 
   return (
-    <div className="relative overflow-hidden rounded-lg border">
-      <div ref={el} className={tall ? "h-[calc(100dvh-210px)] min-h-[380px] w-full max-sm:h-[68dvh]" : "h-[520px] w-full max-sm:h-[420px]"} role="region" aria-label={`Map: ${view?.title ?? ""}`} />
+    <div className={tall ? "relative h-full overflow-hidden" : "relative overflow-hidden rounded-lg border"}>
+      <div ref={el} className={tall ? "h-full w-full" : "h-[520px] w-full max-sm:h-[420px]"} role="region" aria-label={`Map: ${view?.title ?? ""}`} />
       <div ref={axisEl} className={`pointer-events-none absolute inset-0 overflow-hidden ${vol?.data ? "" : "hidden"}`} aria-hidden />
       <div className="pointer-events-none absolute top-2 left-2 max-w-[70%] rounded-md bg-card/95 px-2.5 py-1.5 text-xs shadow-sm ring-1 ring-border">
         <div className="font-medium">{view?.title}</div>
@@ -1728,13 +1728,13 @@ function useStoredFlag(key: string, initial: boolean): [boolean, (v: boolean) =>
 const SEC_PER_STEP = 0.7
 
 /** Play button, time slider and label; the only part of the card that re-renders during playback. */
-function TimeBar({ times, clock, playing, setPlaying }: { times: string[]; clock: Clock; playing: boolean; setPlaying: (p: boolean) => void }) {
+function TimeBar({ times, clock, playing, setPlaying, className = "border bg-muted/40" }: { times: string[]; clock: Clock; playing: boolean; setPlaying: (p: boolean) => void; className?: string }) {
   React.useSyncExternalStore(clock.subscribe, clock.snapshot)
   const ms = msOf(times)
   const pos = clock.time == null ? 0 : posOf(ms, clock.time)
   const label = times[Math.round(pos)]
   return (
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border bg-muted/40 px-3 py-2.5">
+    <div className={`flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg px-3 py-2.5 ${className}`}>
       <Button size="icon" variant="outline" className="size-8 shrink-0" onClick={() => setPlaying(!playing)}
               aria-label={playing ? "Pause" : "Play through time"}>
         {playing ? <Pause className="size-4" /> : <Play className="size-4" />}
@@ -1757,19 +1757,21 @@ const WIND_INK: [number, number, number, number] = [24, 28, 34, 0.5]
 export function InteractiveMap({ data, request, active = true }: { data: Briefing; request?: (MapRequest & { nonce: number }) | null; active?: boolean }) {
   const sync = useCameraSync()
   const cogs = data.cogs ?? []
-  // full screen: the card covers the window (fixed, rather than the Fullscreen API, so menus and
-  // tooltips, which open on the page's body, still show over it); Escape or the button closes it
+  // full screen: just the map (or the two compared) covers the window, with the timeline over it.
+  // Fixed rather than the Fullscreen API, so tooltips, which open on the page's body, still show,
+  // and so it works on iPhone; Escape or the button closes it
   const [full, setFull] = React.useState(false)
   React.useEffect(() => {
     if (!full) return
-    const prev = document.body.style.overflow
-    document.body.style.overflow = "hidden"
+    // the page behind stays put (on the root too, or its scrollbars take a strip of the window)
+    const root = document.documentElement, prev = [root.style.overflow, document.body.style.overflow]
+    root.style.overflow = document.body.style.overflow = "hidden"
     const key = (e: KeyboardEvent) => {
       // leave Escape to an open menu or popover first
       if (e.key === "Escape" && !document.querySelector("[data-radix-popper-content-wrapper]")) setFull(false)
     }
     window.addEventListener("keydown", key)
-    return () => { document.body.style.overflow = prev; window.removeEventListener("keydown", key) }
+    return () => { [root.style.overflow, document.body.style.overflow] = prev; window.removeEventListener("keydown", key) }
   }, [full])
   React.useEffect(() => { if (!active) setFull(false) }, [active])
   const fields = useFields(data)
@@ -2048,23 +2050,15 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
   const ink = layer === "wind" ? WIND_INK : DARK_INK
 
   return (
-    <Card className={full ? "fixed inset-0 z-50 overflow-y-auto overscroll-contain rounded-none border-0 py-4 shadow-none" : ""}
-      role={full ? "dialog" : undefined} aria-modal={full || undefined} aria-label={full ? "Map, full screen" : undefined}>
-      {/* full screen keeps the header (and its exit button) in view while the rest scrolls */}
-      <CardHeader className={full ? "sticky -top-4 z-20 -mt-4 grid-cols-[minmax(0,1fr)_auto] border-b bg-card/95 pt-4 pb-3 backdrop-blur" : ""}>
+    <Card>
+      <CardHeader>
         <CardTitle>Explore the grids</CardTitle>
-        <CardDescription className={full ? "max-sm:hidden" : ""} info={<>{mode === "totals"
+        <CardDescription info={<>{mode === "totals"
             ? "Totals, extremes, ensemble odds and observed rainfall for each window, from each model's own grid. Model spread and percent of normal use the multi-model mean; ensemble odds pool GEFS and ECMWF ENS members."
             : "Forecast maps through time. HRRR, RRFS and NAM step hourly for the first 48 hours (RRFS every 3 hours after that); NBM and the global models every 6 hours. Playback blends smoothly between forecast steps. MRMS radar (under Observed) is NOAA's multi-radar composite reflectivity, loaded live: hourly since the briefing's start and every 10 minutes for the last 3 hours, so you can compare it with the forecast radar for the same times."}
           {" "}Drawn from the same GeoTIFFs this briefing publishes.</>}>
           {mode === "totals" ? "Totals and extremes for each window." : "The forecast hour by hour."} Hover for values; drag and zoom to look closer.
         </CardDescription>
-        {/* in full screen the button sits beside the title at any width, so it stays at hand */}
-        <CardAction className={full ? "col-start-2 row-span-2 row-start-1 mt-0 justify-self-end" : ""}>
-          <Button variant="outline" size="sm" onClick={() => setFull((f) => !f)} aria-pressed={full}>
-            {full ? <Minimize2 aria-hidden /> : <Maximize2 aria-hidden />}{full ? <>Exit<span className="max-sm:hidden"> full screen</span></> : "Full screen"}
-          </Button>
-        </CardAction>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
@@ -2210,10 +2204,23 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
 
         {mode === "hourly" && times.length > 0 && <TimeBar times={times} clock={clock} playing={playing} setPlaying={setPlaying} />}
 
-        <div className={`grid gap-3 ${showB ? "lg:grid-cols-2" : ""}`}>
+        <div className={full ? `fixed inset-0 z-50 m-0! grid bg-background ${showB ? "grid-rows-2 gap-px lg:grid-cols-2 lg:grid-rows-1" : ""}` : `relative grid gap-3 ${showB ? "lg:grid-cols-2" : ""}`}
+          role={full ? "dialog" : undefined} aria-modal={full || undefined} aria-label={full ? "Map, full screen" : undefined}>
           <MapPane data={data} view={viewA} clock={clock} opacity={opacity} smooth={smooth} particles={showParticles} particleColor={ink} sync={sync} terrain={terrain} sat={sat} fronts={frontsOn} reports={reportsOn} fires={firesOn} vol={paneVol}
             xsec={volOn && xsecOn ? { line: xsecLine, picked: picking, sink: xsecSink } : null} onPick={volOn && xsecOn && picking ? onPick : null} terrain3d={paneTerrain} tall={full} />
           {showB && <MapPane data={data} view={viewB} clock={clock} opacity={opacity} smooth={smooth} particles={showParticles} particleColor={ink} sync={sync} terrain={terrain} sat={sat} fronts={frontsOn} reports={reportsOn} fires={firesOn} tall={full} />}
+          {/* left of the zoom buttons, so it doesn't cover them */}
+          <Button variant="outline" size="icon" onClick={() => setFull((f) => !f)} aria-pressed={full}
+            aria-label={full ? "Exit full screen" : "Full screen map"} title={full ? "Exit full screen (Esc)" : "Full screen"}
+            className="absolute top-[10px] right-12 z-10 size-[29px] bg-card shadow-sm">
+            {full ? <Minimize2 className="size-4" aria-hidden /> : <Maximize2 className="size-4" aria-hidden />}
+          </Button>
+          {full && mode === "hourly" && times.length > 0 && (
+            <div className="pointer-events-none absolute inset-x-3 bottom-[calc(3rem+env(safe-area-inset-bottom))] z-10 flex justify-center sm:bottom-10">
+              <TimeBar times={times} clock={clock} playing={playing} setPlaying={setPlaying}
+                className="pointer-events-auto w-full max-w-3xl border bg-card/95 shadow-lg backdrop-blur" />
+            </div>
+          )}
         </div>
 
         {volOn && xsecOn && volEntry && volName && (
