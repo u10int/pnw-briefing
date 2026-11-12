@@ -144,13 +144,13 @@ grib_models:
   - {id: hrrr, label: HRRR, tier: regional, family: ncep, herbie: {model: hrrr, product: sfc},
      cycles: [0, 6, 12, 18], max_hours: 48, range_days: 2, sample_hours: 3, chain_step: 1,
      extremes: {step: 1, wind: max},                          # no 2 m max/min: hourly temperature
-     fields: {hourly: [refc, ptype, t2m, gust, wind, mslp, frz, rh, smoke], hourly_hours: 48, stepped: [wind, mslp, frz, rh]}}
+     fields: {hourly: [refc, ptype, prate, t2m, gust, wind, mslp, frz, rh, smoke], hourly_hours: 48, stepped: [wind, mslp, frz, rh]}}
   - {id: rrfs, label: RRFS, tier: regional, family: ncep,
      herbie: {model: rrfs, product: 2dfld, domain: conus},   # operational RRFS: deterministic = no member
      cycles: [0, 6, 12, 18], max_hours: 84, range_days: 3, sample_hours: 3, chain_step: 1,
      extremes: {step: 1, temp: maxmin, wind: max},
-     fields: {hourly: [refc, ptype, t2m, gust, wind, mslp, frz, rh, smoke], hourly_hours: 48,
-              stepped: [wind, mslp, frz, rh, refc, ptype, smoke]}}           # every 3 h from 48 h to 84 h
+     fields: {hourly: [refc, ptype, prate, t2m, gust, wind, mslp, frz, rh, smoke], hourly_hours: 48,
+              stepped: [wind, mslp, frz, rh, refc, ptype, prate, smoke]}}           # every 3 h from 48 h to 84 h
   # NAM 3 km (namnest) was retired by NWS on 2026-11-03 12Z (SCN 26-47), replaced by RRFS.
   # blend
   # AWS first: Herbie's NBM template lists NOMADS first, and NOMADS refuses the runners' index reads
@@ -163,12 +163,14 @@ grib_models:
      extremes: {step: 3, temp: maxmin},                       # 6-h (3-h after day 5) max/min
      ivt: true,                                               # water vapour transport (AR scale)
      volume: {hours: 48, step: 3},                            # pressure levels for the map's 3D view
-     fields: {stepped: [wind, mslp, frz, ptype, rh]}}
+     fields: {stepped: [wind, mslp, frz, ptype, prate, rh]}}
   - {id: ifs, label: ECMWF IFS, tier: global, family: ecmwf, herbie: {model: ifs, product: oper},
      cycles: [0, 12], max_hours: 240, range_days: 14, sample_hours: 6,
      extremes: {steps: [[144, 3], [360, 6]], temp: maxmin},  # mx2t3/mn2t3, then mx2t6/mn2t6
-     volume: {hours: 48, step: 3},
-     fields: {stepped: [wind, mslp, ptype, rh]}}
+     # Herbie reads the IFS at 0.1° since 20 Oct 2026, where pressure levels are a separate file;
+     # the 0.25° file still carries both, and is plenty for the 3D view
+     volume: {hours: 48, step: 3, herbie: {resolution: 0p25}},
+     fields: {stepped: [wind, mslp, ptype, prate, rh]}}
   - {id: aifs, label: ECMWF AIFS, tier: global, family: ecmwf, herbie: {model: aifs, product: oper},
      cycles: [0, 12], max_hours: 360, range_days: 14, sample_hours: 6, gust: false,
      ivt: true,

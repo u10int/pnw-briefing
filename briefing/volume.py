@@ -307,7 +307,10 @@ def build(cfg, out: Path, demo=False):
     start = day0(cfg)
     models = []
     for i, spec in enumerate(s for s in cfg["grib_models"] if s.get("volume") and s.get("enabled", True)):
-        opts = spec["volume"] if isinstance(spec["volume"], dict) else {}
+        opts = dict(spec["volume"]) if isinstance(spec["volume"], dict) else {}
+        # Herbie options for the pressure levels only (e.g. the IFS's 0.25° file, which holds them)
+        if opts.get("herbie"):
+            spec = {**spec, "herbie": {**spec["herbie"], **opts.pop("herbie")}}
         if demo:
             run = start - timedelta(hours=6)
             models.append({"id": spec["id"], "label": spec["label"], "run": run,

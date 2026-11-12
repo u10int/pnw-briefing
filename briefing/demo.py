@@ -205,7 +205,9 @@ def _fields(spec, la, lo, lead0, nd, sites=()):
         smoke = 60 * np.exp(-(((lo + 121.9) / 0.35) ** 2 + ((la - 45.7 - 0.08 * ((h - lead0) % 24)) / 0.5) ** 2)) * (lo < -121.2) \
             + 4 * np.exp(-((lo + 121.9) ** 2 + (la - 45.7) ** 2) / 4)
         return {"t2m": t2m, "gust": np.hypot(u, v) * 1.45 + 6, "u10": u, "v10": v, "mslp": mslp,
-                "frz": frz, "refc": np.where(refc >= 5, refc, np.nan), "ptype": pt, "rh": rh, "smoke": smoke}
+                "frz": frz, "refc": np.where(refc >= 5, refc, np.nan), "ptype": pt, "rh": rh, "smoke": smoke,
+                # rate (in/h) from the reflectivity, Marshall – Palmer
+                "prate": np.where(refc >= 12, (10 ** (np.clip(refc, 0, 60) / 10) / 200) ** (1 / 1.6) / 25.4, 0)}
 
     out = {}
     names = ["t2m"] + (["gust"] if spec.get("gust", True) else []) + stepped
