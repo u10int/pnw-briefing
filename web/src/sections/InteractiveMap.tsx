@@ -5,11 +5,11 @@ import "maplibre-gl/dist/maplibre-gl.css"
 // MapLibre runs a web worker for vector/GeoJSON work; have Vite bundle it and tell MapLibre where it is.
 import { summarize } from "@/sections/Hazards"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { ChevronRight, CircleHelp, Pause, Play, SlidersHorizontal } from "lucide-react"
+import { ChevronRight, CircleHelp, Maximize2, Minimize2, Pause, Play, SlidersHorizontal } from "lucide-react"
 import { Popover } from "radix-ui"
 
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Slider } from "@/components/ui/slider"
@@ -271,13 +271,15 @@ export interface PaneTerrain { exaggeration: number; snow: { entry: VolumeEntry;
 /** The cross-section on the map: its line (and the points picked so far while drawing one). */
 interface PaneSection { line: SectionLine | null; picked: LonLat[] | null; sink: React.MutableRefObject<{ set?: (img: HTMLCanvasElement) => void }> }
 
-function MapPane({ data, view, clock, opacity, smooth, particles, particleColor, sync, terrain, sat, fronts, reports, fires, vol = null, xsec = null, onPick = null, terrain3d = null }: {
+function MapPane({ data, view, clock, opacity, smooth, particles, particleColor, sync, terrain, sat, fronts, reports, fires, vol = null, xsec = null, onPick = null, terrain3d = null, tall = false }: {
   data: Briefing; view: View | null; clock: Clock; opacity: number; smooth: boolean
   particles: boolean; particleColor: [number, number, number, number]; sync: ReturnType<typeof useCameraSync>
   terrain: boolean; sat: { kind: SatKind; times: SatTimes } | null; fronts: Fronts | null; reports: ObsReport[] | null
   fires: Wildfire | null; vol?: PaneVolume | null
   xsec?: PaneSection | null; onPick?: ((ll: LonLat) => void) | null
   terrain3d?: PaneTerrain | null
+  /** full screen: the map takes most of the window's height */
+  tall?: boolean
 }) {
   const el = React.useRef<HTMLDivElement>(null)
   const axisEl = React.useRef<HTMLDivElement>(null)
@@ -770,7 +772,7 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
 
   return (
     <div className="relative overflow-hidden rounded-lg border">
-      <div ref={el} className="h-[520px] w-full max-sm:h-[420px]" role="region" aria-label={`Map: ${view?.title ?? ""}`} />
+      <div ref={el} className={tall ? "h-[calc(100dvh-210px)] min-h-[380px] w-full max-sm:h-[68dvh]" : "h-[520px] w-full max-sm:h-[420px]"} role="region" aria-label={`Map: ${view?.title ?? ""}`} />
       <div ref={axisEl} className={`pointer-events-none absolute inset-0 overflow-hidden ${vol?.data ? "" : "hidden"}`} aria-hidden />
       <div className="pointer-events-none absolute top-2 left-2 max-w-[70%] rounded-md bg-card/95 px-2.5 py-1.5 text-xs shadow-sm ring-1 ring-border">
         <div className="font-medium">{view?.title}</div>
@@ -1755,6 +1757,21 @@ const WIND_INK: [number, number, number, number] = [24, 28, 34, 0.5]
 export function InteractiveMap({ data, request, active = true }: { data: Briefing; request?: (MapRequest & { nonce: number }) | null; active?: boolean }) {
   const sync = useCameraSync()
   const cogs = data.cogs ?? []
+  // full screen: the card covers the window (fixed, rather than the Fullscreen API, so menus and
+  // tooltips, which open on the page's body, still show over it); Escape or the button closes it
+  const [full, setFull] = React.useState(false)
+  React.useEffect(() => {
+    if (!full) return
+    const prev = document.body.style.overflow
+    document.body.style.overflow = "hidden"
+    const key = (e: KeyboardEvent) => {
+      // leave Escape to an open menu or popover first
+      if (e.key === "Escape" && !document.querySelector("[data-radix-popper-content-wrapper]")) setFull(false)
+    }
+    window.addEventListener("keydown", key)
+    return () => { document.body.style.overflow = prev; window.removeEventListener("keydown", key) }
+  }, [full])
+  React.useEffect(() => { if (!active) setFull(false) }, [active])
   const fields = useFields(data)
   const [mode, setMode] = React.useState<"totals" | "hourly">("totals")
   const [opacity, setOpacity] = React.useState(0.85)
@@ -2031,15 +2048,23 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
   const ink = layer === "wind" ? WIND_INK : DARK_INK
 
   return (
-    <Card>
-      <CardHeader>
+    <Card className={full ? "fixed inset-0 z-50 overflow-y-auto overscroll-contain rounded-none border-0 py-4 shadow-none" : ""}
+      role={full ? "dialog" : undefined} aria-modal={full || undefined} aria-label={full ? "Map, full screen" : undefined}>
+      {/* full screen keeps the header (and its exit button) in view while the rest scrolls */}
+      <CardHeader className={full ? "sticky -top-4 z-20 -mt-4 grid-cols-[minmax(0,1fr)_auto] border-b bg-card/95 pt-4 pb-3 backdrop-blur" : ""}>
         <CardTitle>Explore the grids</CardTitle>
-        <CardDescription info={<>{mode === "totals"
+        <CardDescription className={full ? "max-sm:hidden" : ""} info={<>{mode === "totals"
             ? "Totals, extremes, ensemble odds and observed rainfall for each window, from each model's own grid. Model spread and percent of normal use the multi-model mean; ensemble odds pool GEFS and ECMWF ENS members."
             : "Forecast maps through time. HRRR, RRFS and NAM step hourly for the first 48 hours (RRFS every 3 hours after that); NBM and the global models every 6 hours. Playback blends smoothly between forecast steps. MRMS radar (under Observed) is NOAA's multi-radar composite reflectivity, loaded live: hourly since the briefing's start and every 10 minutes for the last 3 hours, so you can compare it with the forecast radar for the same times."}
           {" "}Drawn from the same GeoTIFFs this briefing publishes.</>}>
           {mode === "totals" ? "Totals and extremes for each window." : "The forecast hour by hour."} Hover for values; drag and zoom to look closer.
         </CardDescription>
+        {/* in full screen the button sits beside the title at any width, so it stays at hand */}
+        <CardAction className={full ? "col-start-2 row-span-2 row-start-1 mt-0 justify-self-end" : ""}>
+          <Button variant="outline" size="sm" onClick={() => setFull((f) => !f)} aria-pressed={full}>
+            {full ? <Minimize2 aria-hidden /> : <Maximize2 aria-hidden />}{full ? <>Exit<span className="max-sm:hidden"> full screen</span></> : "Full screen"}
+          </Button>
+        </CardAction>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
@@ -2187,8 +2212,8 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
 
         <div className={`grid gap-3 ${showB ? "lg:grid-cols-2" : ""}`}>
           <MapPane data={data} view={viewA} clock={clock} opacity={opacity} smooth={smooth} particles={showParticles} particleColor={ink} sync={sync} terrain={terrain} sat={sat} fronts={frontsOn} reports={reportsOn} fires={firesOn} vol={paneVol}
-            xsec={volOn && xsecOn ? { line: xsecLine, picked: picking, sink: xsecSink } : null} onPick={volOn && xsecOn && picking ? onPick : null} terrain3d={paneTerrain} />
-          {showB && <MapPane data={data} view={viewB} clock={clock} opacity={opacity} smooth={smooth} particles={showParticles} particleColor={ink} sync={sync} terrain={terrain} sat={sat} fronts={frontsOn} reports={reportsOn} fires={firesOn} />}
+            xsec={volOn && xsecOn ? { line: xsecLine, picked: picking, sink: xsecSink } : null} onPick={volOn && xsecOn && picking ? onPick : null} terrain3d={paneTerrain} tall={full} />
+          {showB && <MapPane data={data} view={viewB} clock={clock} opacity={opacity} smooth={smooth} particles={showParticles} particleColor={ink} sync={sync} terrain={terrain} sat={sat} fronts={frontsOn} reports={reportsOn} fires={firesOn} tall={full} />}
         </div>
 
         {volOn && xsecOn && volEntry && volName && (
