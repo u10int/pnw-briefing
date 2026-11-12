@@ -2,6 +2,8 @@ import type { CustomLayerInterface, CustomRenderMethodInput, Map as MlMap } from
 
 import { WIND } from "@/lib/ramps"
 
+import type { GridDraw } from "./grid-layer"
+import { PrecipFx } from "./precip-fx"
 import { mercatorMatrix, mercX, mercY, program, type Program, resetUnpack, unitQuad } from "./util"
 
 /** One model's volume grid, as described in data/volume.json. */
@@ -271,6 +273,10 @@ export class VolumeLayer implements CustomLayerInterface {
   private t = 0
   private exaggeration = 25
   private zr: [number, number] = [0, 1]
+  private precip?: PrecipFx
+  private precipDraw: GridDraw | null = null
+  private precipT = 0
+  private precipOn = false
   private opacity = 1
   private moving = false
   private dataChanged = false
@@ -302,6 +308,8 @@ export class VolumeLayer implements CustomLayerInterface {
     gl.bindTexture(gl.TEXTURE_2D, this.heightTex)
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([255, 255, 255, 255]))
     this.trailProg = program(gl, TRAIL_VS, TRAIL_FS)
+    this.precip = new PrecipFx(gl)
+    this.precip.setSource(this.precipDraw, this.precipT)
     this.trailVao = gl.createVertexArray()!
     gl.bindVertexArray(this.trailVao)
     this.trailBuf = gl.createBuffer()!
@@ -336,6 +344,7 @@ export class VolumeLayer implements CustomLayerInterface {
   }
 
   onRemove(_map: MlMap, gl: WebGL2RenderingContext) {
+    this.precip?.dispose(gl)
     this.clearTextures()
     if (this.prog) gl.deleteProgram(this.prog.program)
     if (this.lineProg) gl.deleteProgram(this.lineProg.program)
@@ -463,6 +472,14 @@ export class VolumeLayer implements CustomLayerInterface {
     this.zr = zr
     this.map?.triggerRepaint()
   }
+  /** Falling precipitation from the map's radar layer (its grid, or null), and whether to show it. */
+  setPrecip(d: GridDraw | null, t = 0) {
+    this.precipDraw = d; this.precipT = t
+    this.precip?.setSource(d, t)
+    this.map?.triggerRepaint()
+  }
+  setPrecipT(t: number) { this.precipT = t; this.precip?.setT(t) }
+  setPrecipOn(on: boolean) { this.precipOn = on; this.map?.triggerRepaint() }
   setExaggeration(x: number) {
     this.exaggeration = x
     this.map?.triggerRepaint()
@@ -553,6 +570,8 @@ export class VolumeLayer implements CustomLayerInterface {
     gl.drawArrays(gl.TRIANGLES, 0, 6)
 
     this.drawParticles(gl, mvp)
+    if (this.precipOn && this.precip?.render(gl, Float32Array.from(mvp), { lon: g.lon, lat: g.lat, topKm: g.topKm }, this.zr, window.devicePixelRatio || 1))
+      this.map?.triggerRepaint()                             // keep it falling
 
     if (this.lineProg && this.lineVao) {
       gl.useProgram(this.lineProg.program)

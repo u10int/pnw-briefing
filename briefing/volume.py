@@ -154,6 +154,7 @@ def fetch(spec, run, lead0, dom, hours=48, step=3):
     levels = LEVELS[fam]
     pattern = PATTERN[fam].format(levels="|".join(map(str, levels)))
     want = [h for h in range(lead0, lead0 + hours + 1) if h > 0 and h % step == 0 and h <= spec["max_hours"]]
+    why = {}                                    # forecast hour -> why it couldn't be read
 
     def one(h):
         try:
@@ -181,15 +182,21 @@ def fetch(spec, run, lead0, dom, hours=48, step=3):
                         vals = full
                     got[k] = vals
             if "gh" not in got or "t" not in got:
+                seen = sorted({f"{n}{tuple(d[n].dims)}" for d in ds for n in d.data_vars})
+                why[h] = f"no heights or temperature among {', '.join(seen) or 'no fields'}"
                 return h, None
             heights = got.pop("gh")
             return h, (lat, lon, levs, heights, {k: to_heights(v, heights) for k, v in derive(got, fam).items()})
         except Exception as e:
+            why[h] = f"{type(e).__name__}: {e}"
             log.debug("%s volume f%03d: %s", spec["label"], h, e)
             return h, None
 
     with ThreadPoolExecutor(4) as ex:
         res = [(h, r) for h, r in ex.map(one, want) if r is not None]
+    if why:
+        first = min(why)
+        log.warning("%s volume: %d of %d steps unreadable (f%03d: %s)", spec["label"], len(why), len(want), first, str(why[first])[:300])
     if not res:
         return None
     lat, lon, levs = res[0][1][0], res[0][1][1], res[0][1][2]
@@ -317,6 +324,8 @@ def build(cfg, out: Path, demo=False):
             vol = None
         if vol:
             models.append({"id": spec["id"], "label": spec["label"], "run": run, "volume": vol})
+        else:
+            log.warning("%s: no 3D volume from the %s run", spec["label"], run.strftime("%HZ %d %b"))
     manifest = export(models, out / "volume")
     (out / "volume.json").write_text(json.dumps({"cycle": start.strftime("%Y-%m-%dT%HZ"), "volumes": manifest}), encoding="utf-8")
     return manifest
