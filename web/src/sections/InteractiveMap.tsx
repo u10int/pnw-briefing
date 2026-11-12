@@ -908,29 +908,36 @@ function VolumeLegend({ entry, name }: { entry: VolumeEntry; name: VolVar }) {
   )
 }
 
-/** The 3D view's longer notes, for About this view. */
+/** One explanation in About this view: a short label and its text. */
+interface Note { label: string; text: React.ReactNode }
+type NoteGroup = { title: string; items: (Note | false | null | undefined)[] }
+
+/** The 3D view's notes, for About this view. */
 function volumeNotes({ entry, name, exaggeration, particles, precip, terrain, snow }: {
   entry: VolumeEntry; name: VolVar; exaggeration: number; particles: boolean; precip: boolean; terrain: boolean; snow: boolean
-}): React.ReactNode[] {
+}): (Note | false)[] {
   const v = volVarOf(entry, name)
   const steps = entry.times.length
   const hours = steps > 1 ? Math.round((Date.parse(entry.times[1]) - Date.parse(entry.times[0])) / 3600e3) : 3
   const pk = PARTICLE_HPA.map((p) => entry.levels.find((l) => l.hPa === p)).filter((l): l is { hPa: number; km: number } => !!l)
   return [
-    <>{VOL_NOTES[name]}{name !== "frz" && v?.note ? ` ${v.note}` : ""}</>,
-    <>3D: {entry.model} on pressure levels from the ground to {entry.topKm} km, heights stretched ×{exaggeration}, with kilometres up one edge of the box and the model's average pressure-level heights up the other. Steps every {hours} hours through {timeLabel(entry.times[steps - 1])}, blended in between.</>,
-    <>Right-drag (or Ctrl-drag) to tilt and turn; two fingers on a phone. Drag the compass to tilt; click it to face north.</>,
-    particles && pk.length > 0 && <>Particles trace the wind at {pk.map((l) => `${l.hPa} mb`).join(", ")} (about {pk.map((l) => l.km.toFixed(1)).join(", ")} km), coloured by speed{name === "mflux" ? " (in the moisture-flow view, by moisture flow)" : ""}.</>,
-    precip && <>Falling precipitation comes from the radar layer: rain in streaks, snow drifting, sleet and freezing rain in between, wherever the model's precipitation rate is 0.01 in/h or more (or its simulated radar about 15 dBZ, without a rate), thicker where it's heavier and coloured by type. It falls from about 3 km.</>,
-    terrain && <>3D terrain is stretched as much as the 3D data (×{exaggeration}), so heights in the air and on the ground line up. The map's colours are draped over it; the 3D data, particles and falling precipitation stop at the ground.</>,
-    snow && <>Snow level: terrain above the model's snow level, about 1,000 ft below where the wet-bulb temperature reaches freezing, is shaded white.</>,
-  ].filter(Boolean) as React.ReactNode[]
+    // the note without its own "Moisture flow: " lead-in, since the label says it
+    { label: VIEW_LABEL[name] ?? v?.label ?? "3D field", text: <>{VOL_NOTES[name].replace(/^[A-Z][a-z ]+: (.)/, (_, c: string) => c.toUpperCase())}{name !== "frz" && v?.note ? ` ${v.note}` : ""}</> },
+    { label: "The box", text: <>{entry.model} on pressure levels from the ground to {entry.topKm} km, heights stretched ×{exaggeration}: kilometres up one edge, the model's average pressure-level heights up the other. Steps every {hours} hours through {timeLabel(entry.times[steps - 1])}, blended in between.</> },
+    { label: "Tilt and turn", text: <>Right-drag (or Ctrl-drag), or two fingers on a phone. Drag the compass to tilt; click it to face north.</> },
+    particles && pk.length > 0 && { label: "Wind particles", text: <>The wind at {pk.map((l) => `${l.hPa}`).join(", ")} mb (about {pk.map((l) => l.km.toFixed(1)).join(", ")} km), coloured by {name === "mflux" ? "moisture flow" : "speed"}.</> },
+    precip && { label: "Falling precipitation", text: <>From the radar layer, wherever the model's rate is 0.01 in/h or more (or its simulated radar about 15 dBZ, without a rate), thicker where it's heavier. Rain falls in streaks, snow drifts, sleet and freezing rain in between, coloured by type, from about 3 km.</> },
+    terrain && { label: "3D terrain", text: <>Stretched as much as the 3D data (×{exaggeration}), so heights in the air and on the ground line up. The map's colours are draped over it; the 3D data, particles and falling precipitation stop at the ground.</> },
+    snow && { label: "Snow level", text: <>Terrain above the model's snow level, about 1,000 ft below where the wet-bulb temperature reaches freezing, is shaded white.</> },
+  ]
 }
 
-/** The longer notes for what's on the map, and the downloads, behind one link (closed at first). */
-function AboutView({ notes, downloads }: { notes: React.ReactNode[]; downloads: React.ReactNode }) {
+/** The notes for what's on the map, grouped, and the downloads, behind one link (closed at first):
+ *  two balanced columns on wider screens, each group a heading over its labelled items. */
+function AboutView({ groups, downloads }: { groups: NoteGroup[]; downloads: React.ReactNode }) {
   const [open, setOpen] = React.useState(false)
-  if (!notes.length && !downloads) return null
+  const shown = groups.map((g) => ({ ...g, items: g.items.filter((n): n is Note => !!n) })).filter((g) => g.items.length)
+  if (!shown.length && !downloads) return null
   return (
     <div className="text-xs text-muted-foreground">
       <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open}
@@ -938,9 +945,26 @@ function AboutView({ notes, downloads }: { notes: React.ReactNode[]; downloads: 
         <ChevronRight className={`size-3.5 transition-transform ${open ? "rotate-90" : ""}`} aria-hidden />About this view
       </button>
       {open && (
-        <div className="mt-1.5 max-w-3xl space-y-1.5 pl-[18px]">
-          {notes.length > 0 && <ul className="list-disc space-y-1 pl-4">{notes.map((n, i) => <li key={i}>{n}</li>)}</ul>}
-          {downloads}
+        <div className="mt-3 gap-x-10 md:columns-2">
+          {shown.map((g) => (
+            <section key={g.title} className="break-inside-avoid pb-4">
+              <h4 className="mb-1.5 text-[11px] font-semibold tracking-wide text-foreground uppercase">{g.title}</h4>
+              <dl className="space-y-1.5">
+                {g.items.map((n) => (
+                  <div key={n.label}>
+                    <dt className="font-medium text-foreground">{n.label}</dt>
+                    <dd className="leading-relaxed">{n.text}</dd>
+                  </div>
+                ))}
+              </dl>
+            </section>
+          ))}
+          {downloads && (
+            <section className="break-inside-avoid pb-4">
+              <h4 className="mb-1.5 text-[11px] font-semibold tracking-wide text-foreground uppercase">Download</h4>
+              <div className="leading-relaxed">{downloads}</div>
+            </section>
+          )}
         </div>
       )}
     </div>
@@ -2179,30 +2203,38 @@ export function InteractiveMap({ data, request, active = true }: { data: Briefin
         )}
 
         <AboutView
-          notes={[...(mode === "totals" ? [] : [
-            ...(paneVol ? volumeNotes({ entry: paneVol.entry, name: paneVol.name, exaggeration: exag, particles: !!paneVol.wind, precip: paneVol.precip, terrain: !!paneTerrain, snow: !!paneTerrain?.snow }) : []),
-            volOn && xsecOn && volEntry && <>Cross-section: the 3D field along the line from the ground to {volEntry.topKm} km, at the map's time, with contours, the freezing level (heavy blue) and the terrain along the line (brown; smoother in the model). It also stands in the 3D view as a curtain.</>,
-            volOn && vols && !vols.length && <>This briefing was built before the 3D view, or the models' pressure levels couldn't be read.</>,
-            layer === "radar" && smooth && (entriesA.refc && entriesA.ptype ? <>Reflectivity is smoothed; precipitation type keeps each model cell's category.</> : !entriesA.refc ? <>Precipitation type is a category, so it isn't smoothed.</> : null),
-            layer === "apcp" && <>Accumulated precipitation since {accStart}, the start of the briefing.</>,
-            layer === "asnow" && <>Accumulated snowfall since {accStart}. NCEP models report their own snowfall; ECMWF's is water equivalent at 10:1.</>,
-            layer === "rh" && <>Relative humidity at 2 m; ECMWF's from its dewpoint.</>,
-            layer === "smoke" && <>HRRR and RRFS near-surface smoke (8 m). 55 µg/m³ and up is unhealthy for everyone.</>,
-            layer === "wind" && <>{showParticles ? "Particles trace the 10 m wind; faster particles mean stronger wind." : "Arrows point the way the wind is blowing; longer arrows are stronger winds."}</>,
-            layer === "frz" && <>Snow usually reaches the ground about 1,000 ft below the freezing level.</>,
-            layer === "pgrad" && <>How fast sea-level pressure changes with distance, from the smoothed field; gap flows (Gorge, Fraser, Strait) pack tighter. Mountain cells (mean height above 600 m, or peaks above 1,400 m) are blank: sea-level pressure there is an extrapolation, and its gradient would mostly trace the terrain.</>,
-            layer === "ivt" && <>Vertically integrated water vapour transport (GFS and ECMWF AIFS), the measure behind the atmospheric-river scale{showParticles ? "; particles follow the moisture flow" : ""}.</>,
-            showPairs && pairList.length > 0 && <>Lines join each gradient station pair, labelled with this model's pressure difference (hPa, first station minus second); arrowheads point from high to low pressure, the way the gap flow blows; amber and red mark the pair's first and second thresholds, as on the pressure gradient card.</>,
-            showParticles && layer !== "wind" && layer !== "ivt" && <>Moving particles trace the 10 m wind.</>,
-            isobars && entriesA.mslp && <>Gray lines are sea-level pressure every 2 hPa; heavier, labelled lines every 4 hPa. H and L mark pressure centres.</>,
-          ]),
-            frontsOn && <>Fronts are the Weather Prediction Center's: its surface analyses every 3 hours for the last day, then its forecast chart once a day for days 1 – 3, so they move in steps rather than with each model hour. Symbols point the way the front is moving.</>,
-            reportsOn && <>NWS storm reports and report summaries from the last {data.obsReports?.reportHours ?? 48} hours; gusts in mph, amounts in inches.</>,
-            firesOn && <>Current wildfire and prescribed-fire incidents and perimeters, from the Wildfire tab's sources.</>,
-          ].filter(Boolean) as React.ReactNode[]}
+          groups={[
+            { title: "3D view", items: mode === "totals" || !paneVol ? [] : volumeNotes({ entry: paneVol.entry, name: paneVol.name, exaggeration: exag, particles: !!paneVol.wind, precip: paneVol.precip, terrain: !!paneTerrain, snow: !!paneTerrain?.snow }) },
+            { title: "Cross-section", items: [
+              mode !== "totals" && volOn && xsecOn && volEntry && { label: "What it shows", text: <>The 3D field along the line from the ground to {volEntry.topKm} km, at the map's time, with contours. It also stands in the 3D view as a curtain.</> },
+              mode !== "totals" && volOn && xsecOn && { label: "Lines", text: <>Heavy blue is the freezing level (32°F); brown is the terrain along the line, smoother in the model than in reality.</> },
+            ] },
+            { title: "Map layer", items: mode === "totals" ? [] : [
+              volOn && vols && !vols.length && { label: "No 3D data", text: <>This briefing was built before the 3D view, or the models' pressure levels couldn't be read.</> },
+              layer === "radar" && smooth && (entriesA.refc && entriesA.ptype
+                ? { label: "Smoothing", text: <>Reflectivity is smoothed; precipitation type keeps each model cell's category.</> }
+                : !entriesA.refc ? { label: "Smoothing", text: <>Precipitation type is a category, so it isn't smoothed.</> } : null),
+              layer === "apcp" && { label: "Accumulated precipitation", text: <>Since {accStart}, the start of the briefing.</> },
+              layer === "asnow" && { label: "Accumulated snowfall", text: <>Since {accStart}. NCEP models report their own snowfall; ECMWF's is water equivalent at 10:1.</> },
+              layer === "rh" && { label: "Relative humidity", text: <>At 2 m; ECMWF's from its dewpoint.</> },
+              layer === "smoke" && { label: "Smoke", text: <>HRRR and RRFS near-surface smoke (8 m). 55 µg/m³ and up is unhealthy for everyone.</> },
+              layer === "wind" && { label: "Wind", text: showParticles ? <>Particles trace the 10 m wind; faster particles mean stronger wind.</> : <>Arrows point the way the wind is blowing; longer arrows are stronger winds.</> },
+              layer === "frz" && { label: "Freezing level", text: <>Snow usually reaches the ground about 1,000 ft below it.</> },
+              layer === "pgrad" && { label: "Pressure gradient", text: <>How fast sea-level pressure changes with distance, from the smoothed field; gap flows (Gorge, Fraser, Strait) pack tighter. Mountain cells (mean height above 600 m, or peaks above 1,400 m) are blank: sea-level pressure there is an extrapolation, and its gradient would mostly trace the terrain.</> },
+              layer === "ivt" && { label: "Water vapour transport", text: <>Vertically integrated (GFS and ECMWF AIFS), the measure behind the atmospheric-river scale{showParticles ? "; particles follow the moisture flow" : ""}.</> },
+            ] },
+            { title: "Overlays", items: [
+              mode !== "totals" && showPairs && pairList.length > 0 && { label: "Station pairs", text: <>Lines join each gradient pair, labelled with this model's pressure difference (hPa, first station minus second). Arrowheads point from high to low pressure, the way the gap flow blows; amber and red mark the pair's first and second thresholds, as on the pressure gradient card.</> },
+              mode !== "totals" && showParticles && layer !== "wind" && layer !== "ivt" && { label: "Wind particles", text: <>They trace the 10 m wind.</> },
+              mode !== "totals" && isobars && entriesA.mslp && { label: "Isobars", text: <>Sea-level pressure every 2 hPa; heavier, labelled lines every 4 hPa. H and L mark pressure centres.</> },
+              frontsOn && { label: "Fronts", text: <>The Weather Prediction Center's surface analyses every 3 hours for the last day, then its forecast chart once a day for days 1 – 3, so they move in steps rather than with each model hour. Symbols point the way the front is moving.</> },
+              reportsOn && { label: "Storm reports", text: <>NWS storm reports and report summaries from the last {data.obsReports?.reportHours ?? 48} hours; gusts in mph, amounts in inches.</> },
+              firesOn && { label: "Fires", text: <>Current wildfire and prescribed-fire incidents and perimeters, from the Wildfire tab's sources.</> },
+            ] },
+          ]}
           downloads={!(mode === "totals" && (variable === "ar" || variable === "rivers" || variable === "storms")) && (
             <p>
-              Download as GeoTIFF:{" "}
+              GeoTIFF:{" "}
               {mode === "totals"
                 ? options.slice(0, 12).map((c, i) => (
                     <React.Fragment key={c.path}>{i > 0 && ", "}<a className="underline underline-offset-2 hover:text-foreground" href={cogUrl(c)} download>{c.model}</a></React.Fragment>
