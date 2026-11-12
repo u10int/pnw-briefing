@@ -20,6 +20,10 @@ its config, every `step` hours over the first `hours` of the briefing, this read
          atmospheric river carries (its sum through the column is IVT)
 - w:     rising (+) and sinking (-) air (m/s): GFS's geometric vertical velocity; ECMWF's pressure
          velocity converted with the air's density
+- pv:    potential vorticity (PVU), Ertel's on pressure levels from the wind and temperature;
+         the 2 PVU surface is the dynamic tropopause, which dips toward the ground under upper lows
+- hgt:   the pressure levels' own heights (m, as departures from each level's mean), for height
+         contours on a level; stored per level rather than per height
 
 Each column is resampled from its pressure levels onto a fixed height grid (0 – 12 km every
 500 m) using the levels' geopotential heights, so the page can draw the volume to scale. Heights
@@ -62,7 +66,11 @@ VARS = {
     "ice":   {"min": 0, "max": 2.0, "scale": "sqrt", "units": "g/kg", "label": "Ice and snow"},
     "mflux": {"min": 0, "max": 500, "scale": "sqrt", "units": "g/kg·m/s", "label": "Moisture flow"},
     "w":     {"min": -2, "max": 2, "scale": "linear", "units": "m/s", "label": "Rising and sinking air"},
+    "pv":    {"min": -2, "max": 10, "scale": "linear", "units": "PVU", "label": "Potential vorticity"},
+    "hgt":   {"min": -900, "max": 900, "scale": "linear", "units": "m", "label": "Height of pressure levels"},
 }
+# drawn on the page as contours on these levels (when the model has them)
+HGT_LEVELS = (850, 700, 500, 300)
 NOTES = {"cloud": {"ecmwf": "Estimated from relative humidity (ECMWF publishes no cloud on pressure levels)."}}
 
 # GRIB records to read, and the cfgrib names (or GRIB names) each lands under
@@ -112,9 +120,32 @@ def cloud_from_rh(rh, rh_crit=80.0):
     return (100 * (1 - np.sqrt(x))).astype("float32")
 
 
-def derive(got, family, levels=None):
+def potential_vorticity(t, u, v, levels, lat, lon):
+    """Ertel's potential vorticity (PVU) on pressure levels [level, y, x]: -g (ζ + f) ∂θ/∂p plus the
+    tilting terms, g (∂v/∂p ∂θ/∂x - ∂u/∂p ∂θ/∂y), with derivatives on the sphere."""
+    p = np.asarray(levels, dtype="float64") * 100                       # Pa
+    theta = t * (100000 / p[:, None, None]) ** 0.2857
+    lat = np.asarray(lat, dtype="float64")
+    lon = np.asarray(lon, dtype="float64")
+    R_E, OMEGA, G = 6.371e6, 7.292e-5, 9.80665
+    y = np.radians(lat) * R_E                                            # m north
+    coslat = np.cos(np.radians(lat))[None, :, None]
+    x = np.radians(lon) * R_E                                            # m east at the equator
+
+    def ddx(a): return np.gradient(a, x, axis=2) / coslat
+    def ddy(a): return np.gradient(a, y, axis=1)
+    def ddp(a): return np.gradient(a, p, axis=0)
+    # relative vorticity on the sphere: ∂v/∂x - ∂(u cos φ)/∂y / cos φ
+    zeta = ddx(v) - np.gradient(u * coslat, y, axis=1) / coslat
+    f = 2 * OMEGA * np.sin(np.radians(lat))[None, :, None]
+    pv = -G * ((zeta + f) * ddp(theta) - ddp(v) * ddx(theta) + ddp(u) * ddy(theta))
+    return (pv * 1e6).astype("float32")
+
+
+def derive(got, family, levels=None, lat=None, lon=None):
     """{var: [level, y, x]} in display units from the raw records on pressure levels (`levels`,
-    hPa, for turning ECMWF's pressure velocity into m/s)."""
+    hPa, for turning ECMWF's pressure velocity into m/s and for potential vorticity, which also
+    needs the grid's `lat` and `lon`)."""
     out = {}
     if "t" in got:
         out["temp"] = (got["t"] - 273.15) * 9 / 5 + 32
@@ -142,6 +173,8 @@ def derive(got, family, levels=None):
         p = np.asarray(levels, dtype="float32").reshape(-1, *([1] * (got["omega"].ndim - 1))) * 100
         rho = p / (287.05 * got["t"])
         out["w"] = -got["omega"] / (rho * 9.81)
+    if all(k in got for k in ("t", "u", "v")) and levels is not None and lat is not None and len(levels) >= 3:
+        out["pv"] = potential_vorticity(got["t"], got["u"], got["v"], levels, lat, lon)
     return {k: np.asarray(v, dtype="float32") for k, v in out.items()}
 
 
@@ -207,7 +240,7 @@ def fetch(spec, run, lead0, dom, hours=48, step=3):
                 why[h] = f"no heights or temperature among {', '.join(seen) or 'no fields'}"
                 return h, None
             heights = got.pop("gh")
-            return h, (lat, lon, levs, heights, {k: to_heights(v, heights) for k, v in derive(got, fam, levs).items()})
+            return h, (lat, lon, levs, heights, {k: to_heights(v, heights) for k, v in derive(got, fam, levs, lat, lon).items()})
         except Exception as e:
             why[h] = f"{type(e).__name__}: {e}"
             log.debug("%s volume f%03d: %s", spec["label"], h, e)
@@ -224,9 +257,13 @@ def fetch(spec, run, lead0, dom, hours=48, step=3):
     names = sorted(set.intersection(*(set(r[4]) for _, r in res)))
     mean_h = np.nanmean(np.stack([r[3] for _, r in res]), axis=(0, 2, 3))
     log.info("%s volume: %d steps, %s", spec["label"], len(res), ", ".join(names))
+    keep = [i for i, p in enumerate(levs) if p in HGT_LEVELS]
     return {"hours": [h for h, _ in res], "lat": lat, "lon": lon, "family": fam,
             "levels": {int(p): float(z) for p, z in zip(levs, mean_h)},
-            "vars": {k: np.stack([r[4][k] for _, r in res]) for k in names}}
+            "vars": {k: np.stack([r[4][k] for _, r in res]) for k in names},
+            # the chosen levels' heights [t, level, y, x], as departures from each level's mean
+            "hgt": {"hPa": [int(levs[i]) for i in keep], "mean": [float(mean_h[i]) for i in keep],
+                    "values": np.stack([r[3][keep] for _, r in res]) - mean_h[keep][None, :, None, None]} if keep else None}
 
 
 def export(models, out_dir: Path):
@@ -251,6 +288,11 @@ def export(models, out_dir: Path):
             (out_dir / rel).write_bytes(gzip.compress(pack(a, var).tobytes(), 6))
             note = NOTES.get(var, {}).get(vol.get("family", ""))
             entry["vars"][var] = {"path": f"volume/{rel}", **VARS[var], **({"note": note} if note else {})}
+        hg = vol.get("hgt")
+        if hg and entry["vars"]:
+            rel = f"{m['id']}_hgt.bin.gz"
+            (out_dir / rel).write_bytes(gzip.compress(pack(hg["values"], "hgt").tobytes(), 6))
+            entry["vars"]["hgt"] = {"path": f"volume/{rel}", **VARS["hgt"], "hPa": hg["hPa"], "meanM": [round(x, 1) for x in hg["mean"]]}
         if entry["vars"]:
             out.append(entry)
         m.pop("volume", None)
@@ -274,7 +316,12 @@ def demo_volume(spec, run, dom, family, hours=48, step=3, seed=0):
     smooth = rng.normal(0, 1, (len(lat), len(lon)))
     for _ in range(4):
         smooth = (smooth + np.roll(smooth, 1, 0) + np.roll(smooth, -1, 0) + np.roll(smooth, 1, 1) + np.roll(smooth, -1, 1)) / 5
-    out = {k: [] for k in ("temp", "wind", "rh", "cloud", "water", "ice", "u", "v", "mflux", "w")}
+    out = {k: [] for k in ("temp", "wind", "rh", "cloud", "water", "ice", "u", "v", "mflux", "w", "pv")}
+    levs = LEVELS[family]
+    std = {1000: 110, 975: 320, 950: 540, 925: 760, 900: 990, 850: 1460, 800: 1950, 750: 2470, 700: 3010, 650: 3590,
+           600: 4210, 550: 4870, 500: 5570, 450: 6330, 400: 7180, 350: 8110, 300: 9160, 250: 10360, 200: 11780}
+    hlev = [p for p in levs if p in HGT_LEVELS]
+    hgt = []
     for h in hrs:
         cx = dom["lon_min"] + 1.0 + (h / hours) * 7.5               # the front moves east
         band = np.exp(-(((X - cx) - 0.6 * (Y - 47)) / 1.4) ** 2)     # a tilted frontal band
@@ -300,15 +347,19 @@ def demo_volume(spec, run, dom, family, hours=48, step=3, seed=0):
         oro = np.exp(-((X + 121.75) / 0.3) ** 2) - 0.8 * np.exp(-((X + 121.15) / 0.3) ** 2) \
             + 0.7 * (np.exp(-((X + 123.85) / 0.25) ** 2) - 0.6 * np.exp(-((X + 123.3) / 0.25) ** 2)) * np.exp(-((Y - 47.8) / 0.4) ** 2)
         w = 0.35 * band[None] * np.sin(np.pi * np.clip(z / 10, 0, 1)) + 0.6 * oro[None] * np.exp(-z / 3) - 0.05 * behind[None]
+        # an upper trough behind the front: the tropopause (2 PVU) folds down from 10.5 km to about
+        # 5 km in a lobe over the cold air, and the levels' heights dip under it
+        trough = np.exp(-(((X - cx + 2.2) / 1.6) ** 2 + ((Y - 48.8) / 1.3) ** 2))
+        zt = 10.5 - 5.5 * trough - 0.6 * smooth
+        pv = 0.4 + 0.25 * z / 12 + 6.5 / (1 + np.exp(-(z - zt[None]) / 0.45))
+        hgt.append(np.stack([-(40 + 0.06 * std[p]) * (2.2 * trough + 0.6 * (Y - 47) / 4) + 25 * smooth for p in hlev]))
         for k, v in (("temp", temp), ("wind", wind), ("rh", rh), ("cloud", cloud), ("water", water), ("ice", ice), ("u", u), ("v", v),
-                     ("mflux", mflux), ("w", w)):
+                     ("mflux", mflux), ("w", w), ("pv", pv)):
             out[k].append(np.asarray(v, dtype="float32"))
-    keep = ("temp", "wind", "u", "v", "rh", "cloud", "mflux", "w") + (("water", "ice") if family == "ncep" else ())
-    levs = LEVELS[family]
-    std = {1000: 110, 975: 320, 950: 540, 925: 760, 900: 990, 850: 1460, 800: 1950, 750: 2470, 700: 3010, 650: 3590,
-           600: 4210, 550: 4870, 500: 5570, 450: 6330, 400: 7180, 350: 8110, 300: 9160, 250: 10360, 200: 11780}
+    keep = ("temp", "wind", "u", "v", "rh", "cloud", "mflux", "w", "pv") + (("water", "ice") if family == "ncep" else ())
     return {"hours": hrs, "lat": lat, "lon": lon, "family": family, "levels": {p: float(std[p]) for p in levs},
-            "vars": {k: np.stack(out[k]) for k in keep}}
+            "vars": {k: np.stack(out[k]) for k in keep},
+            "hgt": {"hPa": hlev, "mean": [float(std[p]) for p in hlev], "values": np.stack(hgt).astype("float32")}}
 
 
 # ---------------------------------------------------------------- standalone run

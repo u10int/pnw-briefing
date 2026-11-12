@@ -25,8 +25,17 @@ export interface VolumeDraw {
   lit: boolean
   /** Surfaces at set values: the packed fraction (0 – 1) and premultiplied-ready RGBA (0 – 1). */
   isos?: { at: number; rgba: [number, number, number, number] }[]
-  /** Colour the surfaces by height instead (256 RGBA over 0 – topKm). */
+  /** Colours by height (256 RGBA over 0 – topKm): the surfaces' when isoByHeight, the volume's or the
+   *  solid's when colorMode is "height". */
   heightLut?: Uint8Array
+  isoByHeight?: boolean
+  /** The volume's (and solid's) colour: its own, by height, or by a second field (colorBy). */
+  colorMode?: "own" | "height" | "field"
+  colorBy?: { data: Uint8Array; lut: Uint8Array }
+  /** An opaque surface where the field reaches `at` (packed fraction), in `rgb` (0 – 1) unless coloured. */
+  solid?: { at: number; rgb: [number, number, number] } | null
+  /** Shadows on the ground from the solid, or from the lit field. */
+  shadow?: boolean
 }
 
 /** Wind for the particles: u and v (m/s) packed like the other fields, every time step. */
@@ -40,7 +49,10 @@ export interface VolumeWind {
 }
 
 /** Screen positions (CSS px) of the height and pressure ticks, for the page to label. */
-export interface AxisPoint { x: number; y: number; label: string; side: "left" | "right" }
+export interface AxisPoint { x: number; y: number; label: string; side: "left" | "right" | "mid" }
+/** Lines for the box (a level's contours and arrows, trajectories): xyz + premultiplied rgba per
+ *  vertex, in pairs; with labels at box points. */
+export interface BoxOverlay { verts: Float32Array; labels: { x: number; y: number; z: number; text: string }[] }
 
 const EARTH_CIRC = 2 * Math.PI * 6371008.8
 const GROUND_KM = 5             // the ground texture's range (above the region's highest peak)
@@ -101,7 +113,7 @@ uniform vec2 uLat;              // data rows' first and last latitude
 uniform vec3 uSize;             // nx, ny, nz
 uniform int uSteps;
 uniform vec2 uZr;               // the heights drawn, as fractions of the box's height
-uniform bool uLit;              // shade by what lies above (clouds and the like); else flat colour
+uniform bool uLit;              // shade by what lies towards the light (clouds and the like); else flat
 uniform bool uHasGround;        // the terrain: rays stop where they reach it
 uniform sampler2D uGround;      // terrain height over the box (rows north to south), as a fraction of GROUND_KM
 uniform float uGroundScale;     // GROUND_KM / the box's top (km)
@@ -111,9 +123,21 @@ uniform int uIsoN;
 uniform float uIso[6];
 uniform vec4 uIsoCol[6];
 uniform bool uIsoByHeight;
-uniform sampler2D uHeight;
+uniform sampler2D uHeight;      // colours by height over the box (0 – 1)
+// colour: 0 the field's own, 1 by height, 2 by a second field (uC0, uC1 through uCLut)
+uniform int uColorMode;
+uniform sampler3D uC0, uC1;
+uniform sampler2D uCLut;
+// a solid surface where the field reaches uSolidAt: opaque, lit, self-shadowed
+uniform bool uSolid;
+uniform float uSolidAt;
+uniform vec3 uSolidCol;
+// shadows on the ground, from the solid surface or the lit field
+uniform bool uShadow;
 out vec4 fragColor;
 const float PI = 3.141592653589793;
+// the light: from the south-west and fairly high, in the box's true proportions (x east, y south, z up)
+const vec3 LW = vec3(-0.5, 0.42, 0.76);
 
 vec3 texPos(vec3 p) {
   float lat = degrees(atan(sinh(PI * (1.0 - 2.0 * mix(uMercY.x, uMercY.y, p.y)))));
@@ -122,20 +146,50 @@ vec3 texPos(vec3 p) {
 }
 float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
 float val(vec3 q) { return mix(texture(uA, q).r, texture(uB, q).r, uT); }
+float valAt(vec3 p) { vec3 q = texPos(p); return (q.y < 0.0 || q.y > 1.0 || p.x < 0.0 || p.x > 1.0) ? 0.0 : val(q); }
 // the field's gradient in the box's true proportions (texture rows run north, the box's y south)
-vec3 normalAt(vec3 p) {
+vec3 gradAt(vec3 p) {
   vec3 q = texPos(p), e = 1.0 / uSize;
   vec3 g = vec3(val(q + vec3(e.x, 0, 0)) - val(q - vec3(e.x, 0, 0)),
                 -(val(q + vec3(0, e.y, 0)) - val(q - vec3(0, e.y, 0))),
                 val(q + vec3(0, 0, e.z)) - val(q - vec3(0, 0, e.z)));
-  g /= uScale / uSize;
-  float l = length(g);
-  return l > 0.0 ? g / l : vec3(0, 0, 1);
+  return g / (uScale / uSize);
 }
+vec3 normalAt(vec3 p) { vec3 g = gradAt(p); float l = length(g); return l > 0.0 ? g / l : vec3(0, 0, 1); }
 float extinction(vec3 p) {
   vec3 q = texPos(p);
-  float v = mix(texture(uA, q).r, texture(uB, q).r, uT);
-  return texture(uLut, vec2((v * 255.0 + 0.5) / 256.0, 0.5)).a;
+  if (q.y < 0.0 || q.y > 1.0 || p.x < 0.0 || p.x > 1.0 || p.z > 1.0) return 0.0;
+  return texture(uLut, vec2((val(q) * 255.0 + 0.5) / 256.0, 0.5)).a;
+}
+// the light's direction in box units, scaled to climb one box height
+vec3 lightBox() { vec3 l = LW / uScale; return l / l.z; }
+float groundZ(vec2 xy) {
+  if (!uHasGround || xy.x < 0.0 || xy.x > 1.0 || xy.y < 0.0 || xy.y > 1.0) return 0.0;
+  float lat = degrees(atan(sinh(PI * (1.0 - 2.0 * mix(uMercY.x, uMercY.y, xy.y)))));
+  float fy = (lat - uLat.x) / (uLat.y - uLat.x);
+  return texture(uGround, vec2(xy.x, 1.0 - fy)).r * uGroundScale;
+}
+vec3 colourAt(vec3 p, vec3 own) {
+  if (uColorMode == 1) return texture(uHeight, vec2(clamp(p.z, 0.0, 1.0), 0.5)).rgb;
+  if (uColorMode == 2) {
+    vec3 q = texPos(p);
+    float c = mix(texture(uC0, q).r, texture(uC1, q).r, uT);
+    return texture(uCLut, vec2((c * 255.0 + 0.5) / 256.0, 0.5)).rgb;
+  }
+  return own;
+}
+// how much of the light reaches p: the lit field's thickness, or the solid surface, towards the light
+float lightAt(vec3 p, float d0) {
+  vec3 L = lightBox();
+  float od = 0.0;
+  for (int k = 1; k <= 6; k++) {
+    float dz = d0 * float(k * k);                              // taps further apart further out
+    vec3 s = p + L * dz;
+    if (s.z > uZr.y || s.z > 1.0) break;
+    if (uSolid) od += step(uSolidAt, valAt(s)) * 2.5;
+    else od += extinction(s) * 4.0 * uDensity * length(L * d0 * float(2 * k - 1) * uScale) / uScale.x;
+  }
+  return exp(-od);
 }
 
 void main() {
@@ -147,55 +201,107 @@ void main() {
   vec3 tlo = min(t0, t1), thi = max(t0, t1);
   float tn = max(max(tlo.x, tlo.y), max(tlo.z, 0.0));
   float tf = min(min(thi.x, thi.y), thi.z);
-  if (tf <= tn) discard;
-  // steps sized in box units across its diagonal; the opacity of each follows its true length
-  float dt = 1.7320508 / float(uSteps) / length(rd);
-  float worldStep = length(rd * dt * uScale) / uScale.x;   // in box widths
+  bool inBox = tf > tn;
+  if (!inBox && !uShadow) discard;
   vec4 acc = vec4(0.0);
-  float t = tn + dt * hash(gl_FragCoord.xy);
-  float prev = -1.0;
-  vec3 Ldir = normalize(vec3(-0.45, 0.55, 1.0));
-  for (int i = 0; i < 512; i++) {
-    if (t > tf || acc.a > 0.97) break;
-    vec3 p = ro + rd * t;
-    vec3 q = texPos(p);
-    if (uHasGround && p.z < texture(uGround, vec2(p.x, 1.0 - q.y)).r * uGroundScale) break;   // into the mountains
-    if (q.y >= 0.0 && q.y <= 1.0) {
-      float v = val(q);
-      // a surface between the last sample and this one: composite it first, where it falls
-      if (prev >= 0.0) {
-        for (int k = 0; k < 6; k++) {
-          if (k >= uIsoN) break;
-          float iso = uIso[k];
-          if ((prev - iso) * (v - iso) < 0.0) {
-            float f = (iso - prev) / (v - prev);
-            vec3 ph = p - rd * dt * (1.0 - f);
-            float lam = 0.5 + 0.5 * abs(dot(normalAt(ph), Ldir));
-            vec4 ic = uIsoCol[k];
-            vec3 col = uIsoByHeight ? texture(uHeight, vec2(clamp(ph.z, 0.0, 1.0), 0.5)).rgb : ic.rgb;
-            acc.rgb += (1.0 - acc.a) * ic.a * col * lam;
-            acc.a += (1.0 - acc.a) * ic.a;
+  vec3 Lw = normalize(LW);
+  bool hitGround = false, hitSolid = false;
+  vec3 pg = vec3(0.0);
+  if (inBox) {
+    // steps sized in box units across its diagonal; the opacity of each follows its true length
+    float dt = 1.7320508 / float(uSteps) / length(rd);
+    float worldStep = length(rd * dt * uScale) / uScale.x;   // in box widths
+    float t = tn + dt * hash(gl_FragCoord.xy);
+    float prev = -1.0;
+    vec3 prevP = ro + rd * t;
+    for (int i = 0; i < 512; i++) {
+      if (t > tf || acc.a > 0.97) break;
+      vec3 p = ro + rd * t;
+      vec3 q = texPos(p);
+      if (uHasGround && p.z < groundZ(p.xy)) { hitGround = true; pg = p; break; }   // into the mountains
+      if (q.y >= 0.0 && q.y <= 1.0) {
+        float v = val(q);
+        // the solid surface: find where the ray crosses it, light it and stop
+        if (uSolid && v >= uSolidAt) {
+          vec3 a = prevP, b = p;
+          if (prev >= 0.0 && prev < uSolidAt) {
+            for (int k = 0; k < 6; k++) { vec3 m = (a + b) * 0.5; if (valAt(m) >= uSolidAt) b = m; else a = m; }
+          }
+          vec3 ps = b;
+          vec3 nrm = -normalAt(ps);
+          vec3 V = -normalize(rd * uScale);
+          if (dot(nrm, V) < 0.0) nrm = -nrm;                     // the side facing us
+          float sh = lightAt(ps + nrm * 0.004, 0.012);
+          float diff = max(dot(nrm, Lw), 0.0);
+          float spec = pow(max(dot(nrm, normalize(Lw + V)), 0.0), 40.0) * 0.22;
+          vec3 base = uColorMode == 0 ? uSolidCol : colourAt(ps, uSolidCol);
+          vec3 col = base * (0.36 + 0.14 * (nrm.z * 0.5 + 0.5) + 0.62 * diff * sh) + spec * sh;
+          acc.rgb += (1.0 - acc.a) * col;
+          acc.a = 1.0;
+          hitSolid = true;
+          break;
+        }
+        // a surface between the last sample and this one: composite it first, where it falls
+        if (prev >= 0.0) {
+          for (int k = 0; k < 6; k++) {
+            if (k >= uIsoN) break;
+            float iso = uIso[k];
+            if ((prev - iso) * (v - iso) < 0.0) {
+              float fr = (iso - prev) / (v - prev);
+              vec3 ph = p - rd * dt * (1.0 - fr);
+              float lam = 0.5 + 0.5 * abs(dot(normalAt(ph), Lw));
+              vec4 ic = uIsoCol[k];
+              vec3 col = uIsoByHeight ? texture(uHeight, vec2(clamp(ph.z, 0.0, 1.0), 0.5)).rgb : ic.rgb;
+              acc.rgb += (1.0 - acc.a) * ic.a * col * lam;
+              acc.a += (1.0 - acc.a) * ic.a;
+            }
           }
         }
+        prev = v;
+        prevP = p;
+        vec4 c = texture(uLut, vec2((v * 255.0 + 0.5) / 256.0, 0.5));
+        float a = 1.0 - exp(-c.a * 4.0 * uDensity * worldStep);
+        if (a > 0.002) {
+          vec3 col = colourAt(p, c.rgb);
+          if (uLit) {
+            // light that gets through the field towards the sun, a sky fill from above, and
+            // forward scattering where we look towards the light (bright cloud edges)
+            float L = lightAt(p, 0.008);
+            float fwd = pow(max(dot(normalize(rd * uScale), Lw), 0.0), 6.0);
+            col *= 0.34 + 0.16 * p.z + 0.62 * L + 0.25 * fwd * L;
+          } else {
+            col *= mix(0.72, 1.0, p.z);                        // a little darker low down, for depth
+          }
+          acc.rgb += (1.0 - acc.a) * a * col;
+          acc.a += (1.0 - acc.a) * a;
+        }
       }
-      prev = v;
-      vec4 c = texture(uLut, vec2((v * 255.0 + 0.5) / 256.0, 0.5));
-      float a = 1.0 - exp(-c.a * 4.0 * uDensity * worldStep);
-      vec3 col = c.rgb;
-      if (uLit && a > 0.002) {
-        // light from above and a little to the south-west: two taps towards it stand in for the
-        // shadow of whatever lies over this point, so the undersides go gray and the tops stay bright
-        vec3 L = vec3(-0.05, 0.08, 0.25);
-        float od = (extinction(p + L * 0.35) + extinction(p + L)) * 4.0 * uDensity * 0.06;
-        col *= mix(0.42, 1.0, exp(-od)) * mix(0.8, 1.0, p.z);
-      } else {
-        col *= mix(0.72, 1.0, p.z);                          // a little darker low down, for depth
-      }
-      acc.rgb += (1.0 - acc.a) * a * col;
-      acc.a += (1.0 - acc.a) * a;
+      t += dt;
     }
-    t += dt;
   }
+  // the shadow on the ground (or the map), where the light passes through the field or the solid
+  if (uShadow && !hitSolid && acc.a < 0.97) {
+    if (!hitGround) {
+      if (rd.z >= 0.0) { if (!inBox) discard; fragColor = acc * uOpacity; return; }
+      float tg = -ro.z / rd.z;
+      pg = ro + rd * tg;
+      for (int k = 0; k < 2; k++) { float gz = groundZ(pg.xy); tg = (gz - ro.z) / rd.z; pg = ro + rd * tg; }
+    }
+    vec3 L = lightBox();
+    float od = 0.0;
+    float z0 = max(pg.z, uZr.x);
+    float jit = hash(gl_FragCoord.yx);                           // dithered, so the steps don't band
+    for (int k = 0; k < 56; k++) {
+      float z = mix(z0, uZr.y, (float(k) + jit) / 56.0);
+      vec3 s = pg + L * (z - pg.z);
+      if (s.x < 0.0 || s.x > 1.0 || s.y < 0.0 || s.y > 1.0) continue;
+      if (uSolid) od += smoothstep(uSolidAt - 0.015, uSolidAt + 0.015, valAt(s)) * 0.5;
+      else od += extinction(s) * 4.0 * uDensity * length(L * (uZr.y - z0) / 56.0 * uScale) / uScale.x;
+    }
+    float sa = 0.36 * (1.0 - exp(-od));
+    acc.a += (1.0 - acc.a) * sa;                                 // black, premultiplied
+  }
+  if (acc.a <= 0.0) discard;
   fragColor = acc * uOpacity;
 }`
 
@@ -301,6 +407,9 @@ export class VolumeLayer implements CustomLayerInterface {
   private lutKey = ""
   private draw: VolumeDraw | null = null
   private textures = new Map<number, WebGLTexture>()
+  private colorTextures = new Map<number, WebGLTexture>()
+  private cLut?: WebGLTexture
+  private cLutData: Uint8Array | null = null
   private i0 = 0
   private i1 = 0
   private t = 0
@@ -324,6 +433,11 @@ export class VolumeLayer implements CustomLayerInterface {
   private trailProg?: Program
   private trailVao?: WebGLVertexArrayObject
   private trailBuf?: WebGLBuffer
+  private overlays: Record<string, BoxOverlay | null> = {}
+  private ovVao?: WebGLVertexArrayObject
+  private ovBuf?: WebGLBuffer
+  private ovCount = 0
+  private ovDirty = false
   private pos = new Float32Array(0)       // [particle, history, xyz] in box coordinates, newest first
   private age = new Float32Array(0)
   private life = new Float32Array(0)
@@ -360,6 +474,16 @@ export class VolumeLayer implements CustomLayerInterface {
     gl.enableVertexAttribArray(1)
     gl.vertexAttribPointer(1, 4, gl.FLOAT, false, 28, 12)
     gl.bindVertexArray(null)
+    this.ovVao = gl.createVertexArray()!
+    gl.bindVertexArray(this.ovVao)
+    this.ovBuf = gl.createBuffer()!
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.ovBuf)
+    gl.enableVertexAttribArray(0)
+    gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 28, 0)
+    gl.enableVertexAttribArray(1)
+    gl.vertexAttribPointer(1, 4, gl.FLOAT, false, 28, 12)
+    gl.bindVertexArray(null)
+    this.ovDirty = true
     this.vao = unitQuad(gl)
     const vao = (data: Float32Array) => {
       const v = gl.createVertexArray()!
@@ -373,6 +497,11 @@ export class VolumeLayer implements CustomLayerInterface {
       return v
     }
     this.lineVao = vao(EDGES)
+    this.cLut = gl.createTexture()!
+    gl.bindTexture(gl.TEXTURE_2D, this.cLut)
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, 256, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, null)
+    for (const [k, v] of [[gl.TEXTURE_MIN_FILTER, gl.LINEAR], [gl.TEXTURE_MAG_FILTER, gl.LINEAR], [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE]])
+      gl.texParameteri(gl.TEXTURE_2D, k, v)
     this.lut = gl.createTexture()!
     gl.bindTexture(gl.TEXTURE_2D, this.lut)
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, 256, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, null)
@@ -394,20 +523,24 @@ export class VolumeLayer implements CustomLayerInterface {
     if (this.curtainTex) gl.deleteTexture(this.curtainTex)
     if (this.trailProg) gl.deleteProgram(this.trailProg.program)
     if (this.trailBuf) gl.deleteBuffer(this.trailBuf)
+    if (this.ovBuf) gl.deleteBuffer(this.ovBuf)
+    if (this.ovVao) gl.deleteVertexArray(this.ovVao)
     if (this.fbo) gl.deleteFramebuffer(this.fbo)
     if (this.fboTex) gl.deleteTexture(this.fboTex)
     if (this.vao) gl.deleteVertexArray(this.vao)
     if (this.lineVao) gl.deleteVertexArray(this.lineVao)
     if (this.lut) gl.deleteTexture(this.lut)
+    if (this.cLut) gl.deleteTexture(this.cLut)
   }
 
-  private clearTextures() {
-    for (const t of this.textures.values()) this.gl?.deleteTexture(t)
-    this.textures.clear()
+  private clearTextures(which: "main" | "color" | "both" = "both") {
+    if (which !== "color") { for (const t of this.textures.values()) this.gl?.deleteTexture(t); this.textures.clear() }
+    if (which !== "main") { for (const t of this.colorTextures.values()) this.gl?.deleteTexture(t); this.colorTextures.clear() }
   }
 
   setDraw(d: VolumeDraw | null, levels: { hPa: number; km: number }[] = []) {
-    if (d?.data !== this.draw?.data) this.clearTextures()
+    if (d?.data !== this.draw?.data) this.clearTextures("main")
+    if (d?.colorBy?.data !== this.draw?.colorBy?.data) this.clearTextures("color")
     this.dataChanged = true
     this.draw = d
     this.levels = levels
@@ -523,6 +656,35 @@ export class VolumeLayer implements CustomLayerInterface {
     this.map?.triggerRepaint()                               // keep them moving
   }
 
+  /** Lines in the box under a name ("level", "traj"), or null to remove them. */
+  setOverlay(name: string, o: BoxOverlay | null) {
+    this.overlays[name] = o
+    this.ovDirty = true
+    this.map?.triggerRepaint()
+  }
+  private drawOverlays(gl: WebGL2RenderingContext, mvp: M4) {
+    if (!this.trailProg || !this.ovVao || !this.ovBuf) return
+    if (this.ovDirty) {
+      const parts = Object.values(this.overlays).filter((o): o is BoxOverlay => !!o && o.verts.length > 0)
+      const n = parts.reduce((a, o) => a + o.verts.length, 0)
+      const all = new Float32Array(n)
+      let k = 0
+      for (const o of parts) { all.set(o.verts, k); k += o.verts.length }
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.ovBuf)
+      gl.bufferData(gl.ARRAY_BUFFER, all, gl.STATIC_DRAW)
+      this.ovCount = n / 7
+      this.ovDirty = false
+    }
+    if (!this.ovCount) return
+    gl.useProgram(this.trailProg.program)
+    gl.uniformMatrix4fv(this.trailProg.u("uMVP"), false, Float32Array.from(mvp))
+    gl.enable(gl.BLEND)
+    gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA)
+    gl.bindVertexArray(this.ovVao)
+    gl.drawArrays(gl.LINES, 0, this.ovCount)
+    gl.bindVertexArray(null)
+  }
+
   /** Draw only between these heights (km); the full box by default. */
   setHeightRange(loKm: number, hiKm: number) {
     const top = this.draw?.grid.topKm ?? 12
@@ -573,13 +735,14 @@ export class VolumeLayer implements CustomLayerInterface {
     this.map?.triggerRepaint()
   }
 
-  private stepTexture(gl: WebGL2RenderingContext, d: VolumeDraw, i: number) {
+  private stepTexture(gl: WebGL2RenderingContext, d: VolumeDraw, i: number, color = false) {
     const k = Math.max(0, Math.min(d.steps - 1, i))
-    let tex = this.textures.get(k)
+    const cache = color ? this.colorTextures : this.textures
+    let tex = cache.get(k)
     if (tex) return tex
     const { nx, ny, nz } = d.grid
     const n = nx * ny * nz
-    const slice = d.data.slice(k * n, (k + 1) * n)
+    const slice = (color ? d.colorBy!.data : d.data).slice(k * n, (k + 1) * n)
     for (let j = 0; j < slice.length; j++) if (slice[j] === 255) slice[j] = 0     // missing: clear
     tex = gl.createTexture()!
     gl.bindTexture(gl.TEXTURE_3D, tex)
@@ -588,7 +751,7 @@ export class VolumeLayer implements CustomLayerInterface {
     for (const [p, v] of [[gl.TEXTURE_MIN_FILTER, gl.LINEAR], [gl.TEXTURE_MAG_FILTER, gl.LINEAR], [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE],
                           [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_R, gl.CLAMP_TO_EDGE]])
       gl.texParameteri(gl.TEXTURE_3D, p, v)
-    this.textures.set(k, tex)
+    cache.set(k, tex)
     return tex
   }
 
@@ -654,6 +817,7 @@ export class VolumeLayer implements CustomLayerInterface {
     gl.drawArrays(gl.TRIANGLES, 0, 6)
 
     this.drawCurtain(gl, mvp, g)
+    this.drawOverlays(gl, mvp)
     this.drawParticles(gl, mvp)
     if (this.precipOn && this.precip?.render(gl, Float32Array.from(mvp), { lon: g.lon, lat: g.lat, topKm: g.topKm }, this.zr, window.devicePixelRatio || 1))
       this.map?.triggerRepaint()                             // keep it falling
@@ -710,7 +874,28 @@ export class VolumeLayer implements CustomLayerInterface {
       gl.uniform1fv(p.u("uIso[0]"), Float32Array.from({ length: 6 }, (_, i) => isos[i]?.at ?? 2))
       gl.uniform4fv(p.u("uIsoCol[0]"), Float32Array.from({ length: 24 }, (_, i) => isos[i >> 2]?.rgba[i & 3] ?? 0))
     }
-    gl.uniform1i(p.u("uIsoByHeight"), d.heightLut ? 1 : 0)
+    gl.uniform1i(p.u("uIsoByHeight"), d.heightLut && d.isoByHeight ? 1 : 0)
+    const mode = d.colorMode === "height" && d.heightLut ? 1 : d.colorMode === "field" && d.colorBy ? 2 : 0
+    gl.uniform1i(p.u("uColorMode"), mode)
+    // the colouring field (or the main one again, so the 3D samplers always have a texture)
+    gl.activeTexture(gl.TEXTURE5)
+    gl.bindTexture(gl.TEXTURE_3D, mode === 2 ? this.stepTexture(gl, d, this.i0, true) : this.stepTexture(gl, d, this.i0))
+    gl.uniform1i(p.u("uC0"), 5)
+    gl.activeTexture(gl.TEXTURE6)
+    gl.bindTexture(gl.TEXTURE_3D, mode === 2 ? this.stepTexture(gl, d, this.i1, true) : this.stepTexture(gl, d, this.i1))
+    gl.uniform1i(p.u("uC1"), 6)
+    gl.activeTexture(gl.TEXTURE7)
+    gl.bindTexture(gl.TEXTURE_2D, this.cLut!)
+    if (d.colorBy && d.colorBy.lut !== this.cLutData) {
+      resetUnpack(gl)
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 256, 1, gl.RGBA, gl.UNSIGNED_BYTE, d.colorBy.lut)
+      this.cLutData = d.colorBy.lut
+    }
+    gl.uniform1i(p.u("uCLut"), 7)
+    gl.uniform1i(p.u("uSolid"), d.solid ? 1 : 0)
+    gl.uniform1f(p.u("uSolidAt"), d.solid?.at ?? 2)
+    gl.uniform3f(p.u("uSolidCol"), ...(d.solid?.rgb ?? [1, 1, 1]))
+    gl.uniform1i(p.u("uShadow"), d.shadow ? 1 : 0)
     // always bound to its own unit: a 2D sampler left on unit 0 would share it with uA's 3D texture,
     // which WebGL refuses to draw
     gl.activeTexture(gl.TEXTURE3)
@@ -734,6 +919,8 @@ export class VolumeLayer implements CustomLayerInterface {
     gl.uniform1f(p.u("uGroundScale"), GROUND_KM / g.topKm)
     if (d.heightLut) {
       if (this.heightKey !== d.key) {
+        gl.activeTexture(gl.TEXTURE3)                          // its own unit (the ground's is active here)
+        gl.bindTexture(gl.TEXTURE_2D, this.heightTex!)
         resetUnpack(gl)
         gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, 256, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, d.heightLut)
         for (const [k, v] of [[gl.TEXTURE_MIN_FILTER, gl.LINEAR], [gl.TEXTURE_MAG_FILTER, gl.LINEAR], [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE]])
@@ -799,6 +986,13 @@ export class VolumeLayer implements CustomLayerInterface {
       if (![1000, 850, 700, 500, 300, 200].includes(l.hPa) || l.km > g.topKm) continue
       const q = at(1, 1, Math.max(0, l.km) / g.topKm)
       if (q) pts.push({ ...q, label: `${l.hPa} mb`, side: "right" })
+    }
+    for (const o of Object.values(this.overlays)) for (const l of o?.labels ?? []) {
+      if (l.z < this.zr[0] - 1e-3 || l.z > this.zr[1] + 1e-3) continue
+      const q = at(l.x, l.y, l.z)
+      // skip one that would crowd a label already placed (contours bunch up around lows)
+      if (q && q.x > 0 && q.y > 0 && q.x < w && q.y < h && !pts.some((o) => o.side === "mid" && Math.abs(o.x - q.x) < 34 && Math.abs(o.y - q.y) < 16))
+        pts.push({ ...q, label: l.text, side: "mid" })
     }
     this.onAxis(pts)
   }

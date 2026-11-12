@@ -5,6 +5,10 @@ import { FRZ, type Ramp, TEMP, WIND } from "@/lib/ramps"
 /** One model's pressure-level volume (data/volume.json). */
 export interface VolumeVar {
   path: string; min: number; max: number; scale: "linear" | "sqrt"; units: string; label: string; note?: string
+  /** a view worked out in the page from other fields (path is then only a cache key) */
+  make?: () => Promise<Uint8Array>
+  /** hgt only: its pressure levels (the data's level order) and their mean heights (m) */
+  hPa?: number[]; meanM?: number[]
 }
 export interface VolumeEntry {
   model: string; run: string; times: string[]
@@ -13,11 +17,47 @@ export interface VolumeEntry {
   levels: { hPa: number; km: number }[]
   vars: Record<string, VolumeVar>
 }
-export type VolVar = "cloud" | "rh" | "temp" | "wind" | "water" | "ice" | "frz" | "mflux" | "w"
-export const VOL_ORDER: VolVar[] = ["cloud", "water", "ice", "rh", "mflux", "w", "frz", "temp", "wind"]
-/** The data file each view draws from: the freezing level is the temperature field's 32°F surface. */
-export const SOURCE: Record<VolVar, string> = { cloud: "cloud", rh: "rh", temp: "temp", wind: "wind", water: "water", ice: "ice", frz: "temp", mflux: "mflux", w: "w" }
-export const VIEW_LABEL: Partial<Record<VolVar, string>> = { frz: "Freezing level" }
+export type VolVar = "cloud" | "rh" | "temp" | "wind" | "water" | "ice" | "frz" | "mflux" | "w" | "pv" | "dgz" | "icing"
+export const VOL_ORDER: VolVar[] = ["cloud", "water", "ice", "rh", "dgz", "icing", "mflux", "w", "pv", "frz", "temp", "wind"]
+/** The data file each view draws from: the freezing level is the temperature field's 32°F surface;
+ *  the snow growth zone and icing are worked out in the page (DERIVED). */
+export const SOURCE: Record<VolVar, string> = { cloud: "cloud", rh: "rh", temp: "temp", wind: "wind", water: "water", ice: "ice", frz: "temp", mflux: "mflux", w: "w",
+  pv: "pv", dgz: "rh", icing: "water" }
+export const VIEW_LABEL: Partial<Record<VolVar, string>> = { frz: "Freezing level", pv: "Tropopause (PV)", dgz: "Snow growth zone", icing: "Icing (supercooled water)" }
+
+/** A smooth 0 – 1 weight for x inside [lo, hi], easing over `edge` at each end. */
+const inside = (x: number, lo: number, hi: number, edge: number) => Math.min(1, Math.max(0, (x - lo + edge) / (2 * edge)), Math.max(0, (hi + edge - x) / (2 * edge)))
+const repack = (x: number, v: Omit<VolumeVar, "path">) => {
+  let f = Math.min(1, Math.max(0, (x - v.min) / (v.max - v.min)))
+  if (v.scale === "sqrt") f = Math.sqrt(f)
+  return Math.round(f * 254)
+}
+/** Views worked out from two fields, cell by cell: [the fields needed, the result's scale, the rule]. */
+const DERIVED: Partial<Record<VolVar, { needs: [string, string]; spec: Omit<VolumeVar, "path">; at: (a: number, temp: number) => number }>> = {
+  // humidity in the layer between -12 and -18 °C (10 and 0 °F), where snowflakes grow fastest as
+  // dendrites: saturated air there makes the big, fluffy, high-ratio snow
+  dgz: { needs: ["rh", "temp"], spec: { min: 0, max: 100, scale: "linear", units: "%", label: "Snow growth zone" },
+         at: (rh, t) => rh * inside(t, 0.4, 10.4, 1.2) },
+  // liquid water colder than freezing (to -20 °C, -4 °F): it freezes onto aircraft
+  icing: { needs: ["water", "temp"], spec: { min: 0, max: 2, scale: "sqrt", units: "g/kg", label: "Supercooled water" },
+           at: (w, t) => w * inside(t, -4, 31, 1) },
+}
+
+/** A view's data description for a model: its own file, or a view worked out from two others. */
+export function viewVar(e: VolumeEntry, n: VolVar): VolumeVar | undefined {
+  const d = DERIVED[n]
+  if (!d) return e.vars[SOURCE[n]]
+  const [va, vt] = d.needs.map((k) => e.vars[k])
+  if (!va || !vt) return undefined
+  return { ...d.spec, path: `derived/${e.model}/${e.run}/${n}`,
+    make: () => Promise.all([loadVolume(va), loadVolume(vt)]).then(([a, t]) => {
+      const lutA = new Float32Array(256), lutT = new Float32Array(256)
+      for (let b = 0; b < 255; b++) { lutA[b] = unpack(b, va); lutT[b] = unpack(b, vt) }
+      const out = new Uint8Array(a.length)
+      for (let i = 0; i < a.length; i++) out[i] = a[i] === 255 || t[i] === 255 ? 255 : repack(d.at(lutA[a[i]], lutT[t[i]]), d.spec)
+      return out
+    }) }
+}
 
 /** The manifest, fetched the first time the 3D view is turned on. */
 export function useVolumes(on: boolean): VolumeEntry[] | null {
@@ -37,6 +77,7 @@ export function useVolumes(on: boolean): VolumeEntry[] | null {
 const cache = new Map<string, Promise<Uint8Array>>()
 /** One variable's bytes for every time step (gzip, unpacked in the browser). */
 export function loadVolume(v: VolumeVar): Promise<Uint8Array> {
+  if (!cache.has(v.path) && v.make) cache.set(v.path, v.make().catch((e) => { cache.delete(v.path); throw e }))
   if (!cache.has(v.path)) {
     cache.set(v.path, fetch(`data/${v.path}`).then(async (r) => {
       if (!r.ok || !r.body) throw new Error(`volume ${r.status}`)
@@ -85,6 +126,15 @@ const UP: [number, [number, number, number]][] = [[0, [255, 214, 170]], [0.3, [2
 const DOWN: [number, [number, number, number]][] = [[0, [196, 220, 248]], [0.3, [82, 140, 220]], [1, [26, 72, 178]]]
 const WATER_STOPS: [number, [number, number, number]][] = [[0, [170, 230, 240]], [0.2, [80, 200, 220]], [0.6, [40, 140, 210]], [2, [30, 80, 170]]]
 const ICE_STOPS: [number, [number, number, number]][] = [[0, [245, 245, 255]], [0.2, [225, 215, 255]], [0.6, [190, 170, 250]], [2, [150, 120, 230]]]
+// potential vorticity: tropospheric air pale, the stratosphere's from the tropopause up in greens and yellows
+const PV_STOPS: [number, [number, number, number]][] = [[0, [200, 205, 215]], [1.5, [120, 190, 170]], [2, [150, 205, 60]], [4, [225, 215, 40]], [8, [235, 140, 40]]]
+// the snow growth zone: snowflake blues, whiter where it's saturated
+const DGZ_STOPS: [number, [number, number, number]][] = [[60, [150, 195, 235]], [85, [110, 170, 240]], [100, [225, 240, 255]]]
+// icing: amber to the deep reds of heavy icing
+const ICING_STOPS: [number, [number, number, number]][] = [[0, [250, 210, 120]], [0.1, [245, 160, 60]], [0.4, [220, 80, 40]], [1, [170, 30, 60]]]
+/** Colours for the surface's height (km, 0 – 12): low purples and blues through teal to the high yellows. */
+const HEIGHT_STOPS: [number, [number, number, number]][] = [[0, [72, 40, 130]], [2, [60, 90, 175]], [4, [40, 140, 170]], [6, [60, 175, 120]], [8, [160, 200, 60]], [10, [240, 200, 50]], [12, [250, 150, 60]]]
+export const heightRgb = (km: number) => lerp(HEIGHT_STOPS, km)
 
 /**
  * Colour and extinction for each value: what shows and how thick it looks. Clouds, water and ice
@@ -105,6 +155,10 @@ export function transfer(name: VolVar, x: number): [number, number, number, numb
     case "mflux": return [...lerp(MFLUX_STOPS, x), 1.6 * smooth(30, 280, x) ** 1.2] as [number, number, number, number]
     // rising air warm, sinking air cool; still air clear
     case "w": return [...lerp(x >= 0 ? UP : DOWN, Math.abs(x)), 1.8 * smooth(0.04, 0.6, Math.abs(x)) ** 1.3] as [number, number, number, number]
+    // the volume itself stays clear: the tropopause reads as its 2 PVU surface (ISOS)
+    case "pv": return [...lerp(PV_STOPS, x), 0] as [number, number, number, number]
+    case "dgz": return [...lerp(DGZ_STOPS, x), 1.5 * smooth(70, 100, x) ** 1.5] as [number, number, number, number]
+    case "icing": return [...lerp(ICING_STOPS, x), 2.2 * smooth(0.005, 0.4, x) ** 0.8] as [number, number, number, number]
   }
 }
 
@@ -134,7 +188,10 @@ export const ISOS: Partial<Record<VolVar, { at: number; color: string; alpha: nu
     { at: 140, color: "#c8352b", alpha: 0.6, label: "140 mph" },
   ],
   frz: [{ at: 32, color: "#1f78d1", alpha: 0.92, label: "32°F" }],
+  pv: [{ at: 2, color: "#9bcf3c", alpha: 0.9, label: "2 PVU (tropopause)" }],
 }
+/** Views whose surfaces take their colour from their height. */
+export const ISO_BY_HEIGHT: Partial<Record<VolVar, "frz" | "km">> = { frz: "frz", pv: "km" }
 /** The packed fraction (0 – 1) a value sits at, as the shader samples it. */
 export function frac(x: number, v: VolumeVar) {
   const f = Math.min(1, Math.max(0, (x - v.min) / (v.max - v.min)))
@@ -145,19 +202,39 @@ export const hexRgb = hex
 /** The freezing level's colour at a height: the 2D map's freezing-level scale (1,000 ft bands), so
  *  the surface reads like contours. */
 export function frzColor(ft: number): [number, number, number] { return rampRgb(FRZ, ft) }
-export function heightLut(topKm: number): Uint8Array {
+export function heightLut(topKm: number, scale: "frz" | "km" = "frz"): Uint8Array {
   const out = new Uint8Array(256 * 4)
-  for (let i = 0; i < 256; i++) out.set([...frzColor(((i / 255) * topKm * 1000) / 0.3048), 255], i * 4)
+  for (let i = 0; i < 256; i++) {
+    const km = (i / 255) * topKm
+    out.set([...(scale === "frz" ? frzColor((km * 1000) / 0.3048) : heightRgb(km)).map(Math.round), 255], i * 4)
+  }
+  return out
+}
+// smooth scales for colouring a volume or surface by temperature or wind (the map's banded ones
+// would stripe it): cold purples and blues through white at freezing to warm oranges; calm blues
+// through yellows and oranges to the jet's reds and magentas
+const TEMP_SMOOTH: [number, [number, number, number]][] = [[-70, [59, 15, 112]], [-40, [88, 76, 196]], [-15, [63, 135, 210]], [10, [138, 196, 232]],
+  [32, [240, 244, 246]], [45, [247, 205, 128]], [60, [233, 120, 64]], [80, [178, 24, 43]]]
+const WIND_SMOOTH: [number, [number, number, number]][] = [[0, [170, 205, 230]], [30, [120, 190, 210]], [60, [245, 220, 110]], [90, [240, 150, 60]],
+  [120, [215, 60, 80]], [150, [185, 40, 170]], [200, [110, 30, 140]]]
+/** 256 RGB(A) entries of a view's own colours, for colouring another field's volume by it. */
+export function colorLut(name: VolVar, v: VolumeVar): Uint8Array {
+  const out = new Uint8Array(256 * 4)
+  for (let b = 0; b < 255; b++) {
+    const x = unpack(b, v)
+    const rgb = name === "temp" || name === "frz" ? lerp(TEMP_SMOOTH, x) : name === "wind" ? lerp(WIND_SMOOTH, x) : transfer(name, x).slice(0, 3)
+    out.set([...rgb.map(Math.round), 255], b * 4)
+  }
   return out
 }
 
 /** Colours across a variable's useful range, for the legend: [value, css colour, how opaque]. */
 export function legendStops(name: VolVar, v: VolumeVar): { show: [number, number]; ticks: number[] } {
   const show: Record<VolVar, [number, number]> = { cloud: [0, 100], rh: [0, 100], temp: [-60, 70], wind: [0, 180], water: [0, 1], ice: [0, 1], frz: [0, 12000],
-    mflux: [0, 500], w: [-1, 1] }
+    mflux: [0, 500], w: [-1, 1], pv: [0, 8], dgz: [50, 100], icing: [0, 1] }
   const ticks: Record<VolVar, number[]> = { cloud: [0, 25, 50, 75, 100], rh: [0, 20, 40, 60, 80, 100], temp: [-60, -40, -20, 0, 20, 32, 50, 70],
     wind: [0, 40, 80, 120, 160], water: [0, 0.25, 0.5, 0.75, 1], ice: [0, 0.25, 0.5, 0.75, 1], frz: [0, 2000, 4000, 6000, 8000, 10000, 12000],
-    mflux: [0, 100, 200, 300, 400, 500], w: [-1, -0.5, 0, 0.5, 1] }
+    mflux: [0, 100, 200, 300, 400, 500], w: [-1, -0.5, 0, 0.5, 1], pv: [0, 1, 2, 4, 6, 8], dgz: [50, 60, 70, 80, 90, 100], icing: [0, 0.25, 0.5, 0.75, 1] }
   return { show: show[name] ?? [v.min, v.max], ticks: ticks[name] }
 }
 
