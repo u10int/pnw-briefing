@@ -105,12 +105,12 @@ const smoothRamp = (stops: [number, [number, number, number]][], x: number): [nu
  *  cloud, water and ice painted over a pale sky in proportion to the amount. */
 export function sliceColor(name: VolVar, x: number): [number, number, number] {
   if (!Number.isFinite(x)) return [228, 228, 228]
-  if (name === "temp" || name === "frz") return smoothRamp(TEMP_STOPS, x)
+  if (name === "temp" || name === "frz" || name === "wbz") return smoothRamp(TEMP_STOPS, x)
   if (name === "wind") return x < 10 ? SKY : rampAt(WIND.levels, WIND.colors, x) as [number, number, number]
   const [r, g, b, e] = transfer(name, x)
-  if (name === "rh") return [r, g, b]
+  if (name === "rh" || name === "thetae" || name === "theta") return [r, g, b]
   if (name === "pv") return x < 0 ? SKY : [r, g, b]                   // the scale itself: the tropopause stands out
-  if (name === "w") {                                   // diverging: white where the air is still
+  if (name === "w" || name === "oro") {                                   // diverging: white where the air is still
     const a = Math.min(1, Math.abs(x) / 0.6)
     return [255 + (r - 255) * a, 255 + (g - 255) * a, 255 + (b - 255) * a]
   }
@@ -129,6 +129,12 @@ export function contourLevels(name: VolVar): { at: number[]; bold?: number; unit
     case "mflux": return { at: [100, 200, 300, 400], unit: "" }
     case "w": return { at: [-0.5, -0.2, 0.2, 0.5], unit: " m/s" }
     case "pv": return { at: [1, 2, 4], bold: 2, unit: " PVU" }
+    case "wbz": return { at: [-20, 0, 20, 32, 40, 60], bold: 32, unit: "°F" }
+    case "thetae": return { at: [280, 290, 300, 310, 320, 330, 340], unit: " K" }
+    case "theta": return { at: [280, 290, 300, 310, 320, 330, 340, 350, 360], unit: " K" }
+    case "oro": return { at: [-0.5, -0.2, 0.2, 0.5], unit: " m/s" }
+    case "turb": return { at: [0.25, 1], bold: 0.25, unit: "" }
+    case "dbz": return { at: [20, 35, 50], unit: " dBZ" }
     case "dgz": return { at: [80, 90], unit: "%" }
     default: return { at: [0.05, 0.2, 0.5], unit: " g/kg" }
   }

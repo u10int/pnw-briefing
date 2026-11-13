@@ -1,12 +1,16 @@
 import * as React from "react"
 
-import { FRZ, type Ramp, TEMP, WIND } from "@/lib/ramps"
+import { elevationFor } from "@/lib/fields"
+import { FRZ, type Ramp, REFC, TEMP, WIND } from "@/lib/ramps"
 
 /** One model's pressure-level volume (data/volume.json). */
 export interface VolumeVar {
   path: string; min: number; max: number; scale: "linear" | "sqrt"; units: string; label: string; note?: string
   /** a view worked out in the page from other fields (path is then only a cache key) */
   make?: () => Promise<Uint8Array>
+  /** observed radar: the steps arrive one at a time; \`load(step)\` fills that step of the buffer
+   *  \`make\` returned (all clear until then) and resolves when it's in */
+  lazy?: { load: (step: number) => Promise<void>; ready: (step: number) => boolean }
   /** hgt only: its pressure levels (the data's level order) and their mean heights (m) */
   hPa?: number[]; meanM?: number[]
 }
@@ -18,12 +22,17 @@ export interface VolumeEntry {
   vars: Record<string, VolumeVar>
 }
 export type VolVar = "cloud" | "rh" | "temp" | "wind" | "water" | "ice" | "frz" | "mflux" | "w" | "pv" | "dgz" | "icing"
-export const VOL_ORDER: VolVar[] = ["cloud", "water", "ice", "rh", "dgz", "icing", "mflux", "w", "pv", "frz", "temp", "wind"]
+  | "wbz" | "thetae" | "theta" | "oro" | "turb" | "dbz"
+export const VOL_ORDER: VolVar[] = ["dbz", "cloud", "water", "ice", "rh", "dgz", "icing", "mflux", "w", "oro", "turb", "pv", "frz", "wbz", "temp", "thetae", "theta", "wind"]
 /** The data file each view draws from: the freezing level is the temperature field's 32°F surface;
  *  the snow growth zone and icing are worked out in the page (DERIVED). */
 export const SOURCE: Record<VolVar, string> = { cloud: "cloud", rh: "rh", temp: "temp", wind: "wind", water: "water", ice: "ice", frz: "temp", mflux: "mflux", w: "w",
-  pv: "pv", dgz: "rh", icing: "water" }
-export const VIEW_LABEL: Partial<Record<VolVar, string>> = { frz: "Freezing level", pv: "Tropopause (PV)", dgz: "Snow growth zone", icing: "Icing (supercooled water)" }
+  pv: "pv", dgz: "rh", icing: "water", wbz: "temp", thetae: "temp", theta: "temp", oro: "u", turb: "u", dbz: "dbz" }
+export const VIEW_LABEL: Partial<Record<VolVar, string>> = { frz: "Freezing level", pv: "Tropopause (PV)", dgz: "Snow growth zone", icing: "Icing (supercooled water)",
+  wbz: "Snow level (wet-bulb 32°F)", thetae: "Equivalent potential temperature (θe)", theta: "Isentropic surfaces (θ)", oro: "Orographic lift",
+  turb: "Turbulence (Richardson number)", dbz: "Radar reflectivity (observed)" }
+/** Views drawn as one surface coloured by its height in feet, like the freezing level. */
+export const LEVEL_VIEWS: VolVar[] = ["frz", "wbz"]
 
 /** A smooth 0 – 1 weight for x inside [lo, hi], easing over `edge` at each end. */
 const inside = (x: number, lo: number, hi: number, edge: number) => Math.min(1, Math.max(0, (x - lo + edge) / (2 * edge)), Math.max(0, (hi + edge - x) / (2 * edge)))
@@ -32,31 +41,166 @@ const repack = (x: number, v: Omit<VolumeVar, "path">) => {
   if (v.scale === "sqrt") f = Math.sqrt(f)
   return Math.round(f * 254)
 }
-/** Views worked out from two fields, cell by cell: [the fields needed, the result's scale, the rule]. */
-const DERIVED: Partial<Record<VolVar, { needs: [string, string]; spec: Omit<VolumeVar, "path">; at: (a: number, temp: number) => number }>> = {
+/** What a derived view's rule gets: the inputs unpacked (NaN where missing), every step, laid out
+ *  [t, z, y, x] like the files; the grid; each height's pressure (hPa) and height (m); the cell
+ *  spacing (m) east-west for each row and north-south; and the terrain (km, [y, x], rows south to
+ *  north) when the view asks for it. It writes `out` (NaN for missing). */
+interface DeriveCtx {
+  e: VolumeEntry; inputs: Float32Array[]; out: Float32Array
+  pHpa: Float32Array; zM: Float32Array; dxM: Float32Array; dyM: number; ground: Float32Array | null
+}
+interface Derived { needs: string[]; spec: Omit<VolumeVar, "path">; terrain?: boolean; pressure?: boolean; run: (c: DeriveCtx) => void }
+
+const fToC = (f: number) => ((f - 32) * 5) / 9
+const cToF = (c: number) => (c * 9) / 5 + 32
+/** Saturation vapour pressure over water (hPa), Bolton. */
+const esat = (tc: number) => 6.112 * Math.exp((17.67 * tc) / (tc + 243.5))
+/** Each height's pressure (hPa): log-pressure interpolated between the model's levels at their mean heights. */
+function pressureAt(e: VolumeEntry): Float32Array {
+  const lv = [...e.levels].sort((a, b) => a.km - b.km)
+  const out = new Float32Array(e.nz)
+  for (let k = 0; k < e.nz; k++) {
+    const km = (k / (e.nz - 1)) * e.topKm
+    let i = 0
+    while (i < lv.length - 2 && km > lv[i + 1].km) i++
+    const a = lv[i], b = lv[Math.min(i + 1, lv.length - 1)]
+    const f = b.km === a.km ? 0 : (km - a.km) / (b.km - a.km)
+    out[k] = Math.exp(Math.log(a.hPa) + f * (Math.log(b.hPa) - Math.log(a.hPa)))
+  }
+  return out
+}
+/** The pressure (hPa) at a height (km), from the model's levels at their mean heights. */
+export function pressureAtKm(e: VolumeEntry, km: number): number {
+  const lv = [...e.levels].sort((a, b) => a.km - b.km)
+  if (lv.length < 2) return NaN
+  let i = 0
+  while (i < lv.length - 2 && km > lv[i + 1].km) i++
+  const a = lv[i], b = lv[i + 1]
+  return Math.exp(Math.log(a.hPa) + ((km - a.km) / (b.km - a.km)) * (Math.log(b.hPa) - Math.log(a.hPa)))
+}
+/** Every cell's value from one rule of the inputs at the same cell (and its height's pressure). */
+const perCell = (rule: (x: number[], pHpa: number) => number) => (c: DeriveCtx) => {
+  const { e, inputs, out, pHpa } = c
+  const nxy = e.nx * e.ny, per = nxy * e.nz
+  const x = new Array<number>(inputs.length)
+  for (let i = 0; i < out.length; i++) {
+    let bad = false
+    for (let k = 0; k < inputs.length; k++) { x[k] = inputs[k][i]; if (Number.isNaN(x[k])) bad = true }
+    out[i] = bad ? NaN : rule(x, pHpa[Math.floor((i % per) / nxy)])
+  }
+}
+/** Potential temperature (K) from °F and hPa. */
+const thetaK = (tF: number, p: number) => (fToC(tF) + 273.15) * (1000 / p) ** 0.2857
+
+/** Views worked out in the page from fields already published, cell by cell or with their neighbours. */
+const DERIVED: Partial<Record<VolVar, Derived>> = {
   // humidity in the layer between -12 and -18 °C (10 and 0 °F), where snowflakes grow fastest as
   // dendrites: saturated air there makes the big, fluffy, high-ratio snow
   dgz: { needs: ["rh", "temp"], spec: { min: 0, max: 100, scale: "linear", units: "%", label: "Snow growth zone" },
-         at: (rh, t) => rh * inside(t, 0.4, 10.4, 1.2) },
+         run: perCell(([rh, t]) => rh * inside(t, 0.4, 10.4, 1.2)) },
   // liquid water colder than freezing (to -20 °C, -4 °F): it freezes onto aircraft
   icing: { needs: ["water", "temp"], spec: { min: 0, max: 2, scale: "sqrt", units: "g/kg", label: "Supercooled water" },
-           at: (w, t) => w * inside(t, -4, 31, 1) },
+           run: perCell(([w, t]) => w * inside(t, -4, 31, 1)) },
+  // the wet-bulb temperature (Stull 2011, from temperature and humidity): falling snow cools the air
+  // toward it as it melts, so its 32 °F surface is close to where snow turns to rain
+  wbz: { needs: ["temp", "rh"], spec: { min: -80, max: 90, scale: "linear", units: "°F", label: "Wet-bulb temperature" },
+         run: perCell(([tF, rh0]) => {
+           const t = fToC(tF), rh = Math.min(100, Math.max(1, rh0))
+           return cToF(t * Math.atan(0.151977 * Math.sqrt(rh + 8.313659)) + Math.atan(t + rh) - Math.atan(rh - 1.676331)
+             + 0.00391838 * rh ** 1.5 * Math.atan(0.023101 * rh) - 4.686035)
+         }) },
+  // equivalent potential temperature (Bolton 1980): the temperature air would have if all its
+  // vapour condensed and it were brought to 1000 hPa; it follows air through rising and sinking,
+  // so warm, moist conveyors stand out from dry intrusions, and fronts as sharp changes
+  thetae: { needs: ["temp", "rh"], pressure: true, spec: { min: 250, max: 370, scale: "linear", units: "K", label: "Equivalent potential temperature" },
+            run: perCell(([tF, rh0], p) => {
+              const tc = fToC(tF), tk = tc + 273.15, rh = Math.min(100, Math.max(1, rh0))
+              const e = (rh / 100) * esat(tc), r = (622 * e) / Math.max(1, p - e)                    // g/kg
+              const tl = 1 / (1 / (tk - 55) - Math.log(rh / 100) / 2840) + 55
+              return tk * (1000 / p) ** (0.2854 * (1 - 0.00028 * r)) * Math.exp((3.376 / tl - 0.00254) * r * (1 + 0.00081 * r))
+            }) },
+  // potential temperature: surfaces of constant θ are the ones air moves along when it isn't rising
+  // through cloud; where they slope up, air sliding north along them is lifted
+  theta: { needs: ["temp"], pressure: true, spec: { min: 250, max: 400, scale: "linear", units: "K", label: "Potential temperature" },
+           run: perCell(([tF], p) => thetaK(tF, p)) },
+  // the wind blowing up (or down) the terrain: wind times the slope, fading with height above the
+  // ground over about 2 km; positive where air is forced up the windward side
+  oro: { needs: ["u", "v"], terrain: true, spec: { min: -2, max: 2, scale: "linear", units: "m/s", label: "Orographic lift" },
+         run: ({ e, inputs: [u, v], out, zM, dxM, dyM, ground }) => {
+           const { nx, ny, nz } = e, nxy = nx * ny, per = nxy * nz, steps = out.length / per
+           const g = ground!
+           // the terrain's slope on the model grid (central differences)
+           const sx = new Float32Array(nxy), sy = new Float32Array(nxy)
+           for (let y = 0; y < ny; y++) for (let x = 0; x < nx; x++) {
+             const i = y * nx + x, xa = Math.max(0, x - 1), xb = Math.min(nx - 1, x + 1), ya = Math.max(0, y - 1), yb = Math.min(ny - 1, y + 1)
+             sx[i] = ((g[y * nx + xb] - g[y * nx + xa]) * 1000) / ((xb - xa) * dxM[y])
+             sy[i] = ((g[yb * nx + x] - g[ya * nx + x]) * 1000) / ((yb - ya) * dyM)            // rows run south to north
+           }
+           for (let t = 0; t < steps; t++) for (let k = 0; k < nz; k++) for (let i = 0; i < nxy; i++) {
+             const o = t * per + k * nxy + i, agl = zM[k] - g[i] * 1000
+             if (agl < 0) { out[o] = 0; continue }
+             if (Number.isNaN(u[o]) || Number.isNaN(v[o])) { out[o] = NaN; continue }
+             out[o] = (u[o] * sx[i] + v[o] * sy[i]) * Math.exp(-agl / 2000)
+           }
+         } },
+  // the Richardson number: stability (from θ's change with height) over the wind shear squared.
+  // Below about 1 the shear can overturn the layer (Kelvin–Helmholtz waves, clear-air turbulence);
+  // below 0.25 it usually does. Stored as Ri, 0 – 2; shown above 1.5 km, where it means clear air
+  turb: { needs: ["temp", "u", "v"], pressure: true, spec: { min: 0, max: 2, scale: "linear", units: "Ri", label: "Richardson number" },
+          run: ({ e, inputs: [T, u, v], out, pHpa, zM }) => {
+            const { nx, ny, nz } = e, nxy = nx * ny, per = nxy * nz, steps = out.length / per
+            for (let t = 0; t < steps; t++) for (let k = 0; k < nz; k++) for (let i = 0; i < nxy; i++) {
+              const o = t * per + k * nxy + i
+              if (zM[k] < 1500 || k === 0 || k === nz - 1) { out[o] = NaN; continue }
+              const a = o - nxy, b = o + nxy, dz = zM[k + 1] - zM[k - 1]
+              const th0 = thetaK(T[a], pHpa[k - 1]), th1 = thetaK(T[b], pHpa[k + 1]), th = thetaK(T[o], pHpa[k])
+              const n2 = (9.81 / th) * ((th1 - th0) / dz)
+              const s2 = ((u[b] - u[a]) / dz) ** 2 + ((v[b] - v[a]) / dz) ** 2
+              const ri = n2 / Math.max(s2, 1e-7)
+              out[o] = Number.isNaN(ri) ? NaN : Math.min(2, Math.max(0, ri))
+            }
+          } },
 }
 
-/** A view's data description for a model: its own file, or a view worked out from two others. */
+/** Whether a view is worked out in the page rather than read from its own file. */
+export const isDerived = (n: VolVar) => !!DERIVED[n]
+
+/** A view's data description for a model: its own file, or a view worked out from others. */
 export function viewVar(e: VolumeEntry, n: VolVar): VolumeVar | undefined {
   const d = DERIVED[n]
   if (!d) return e.vars[SOURCE[n]]
-  const [va, vt] = d.needs.map((k) => e.vars[k])
-  if (!va || !vt) return undefined
+  const vs = d.needs.map((k) => e.vars[k])
+  if (vs.some((x) => !x) || (d.pressure && e.levels.length < 2)) return undefined
   return { ...d.spec, path: `derived/${e.model}/${e.run}/${n}`,
-    make: () => Promise.all([loadVolume(va), loadVolume(vt)]).then(([a, t]) => {
-      const lutA = new Float32Array(256), lutT = new Float32Array(256)
-      for (let b = 0; b < 255; b++) { lutA[b] = unpack(b, va); lutT[b] = unpack(b, vt) }
-      const out = new Uint8Array(a.length)
-      for (let i = 0; i < a.length; i++) out[i] = a[i] === 255 || t[i] === 255 ? 255 : repack(d.at(lutA[a[i]], lutT[t[i]]), d.spec)
-      return out
-    }) }
+    make: async () => {
+      const raw = await Promise.all(vs.map((x) => loadVolume(x!)))
+      const inputs = raw.map((r, k) => {
+        const lut = new Float32Array(256)
+        for (let b = 0; b < 256; b++) lut[b] = b === 255 ? NaN : unpack(b, vs[k]!)
+        const f = new Float32Array(r.length)
+        for (let i = 0; i < r.length; i++) f[i] = lut[r[i]]
+        return f
+      })
+      const out = new Float32Array(raw[0].length).fill(NaN)
+      const zM = Float32Array.from({ length: e.nz }, (_, k) => (k / (e.nz - 1)) * e.topKm * 1000)
+      const dLat = (e.lat[1] - e.lat[0]) / (e.ny - 1), dLon = (e.lon[1] - e.lon[0]) / (e.nx - 1)
+      const dxM = Float32Array.from({ length: e.ny }, (_, y) => dLon * 111320 * Math.cos(((e.lat[0] + y * dLat) * Math.PI) / 180))
+      let ground: Float32Array | null = null
+      if (d.terrain) {
+        // the terrain's mean height over each model cell (rows north to south from the tiles; flipped)
+        const el = await elevationFor({ width: e.nx, height: e.ny, west: e.lon[0] - dLon / 2, east: e.lon[1] + dLon / 2,
+                                        south: e.lat[0] - dLat / 2, north: e.lat[1] + dLat / 2 })
+        ground = new Float32Array(e.nx * e.ny)
+        for (let y = 0; y < e.ny; y++) for (let x = 0; x < e.nx; x++) {
+          const m = el.mean[(e.ny - 1 - y) * e.nx + x]
+          ground[y * e.nx + x] = Number.isFinite(m) ? Math.max(0, m) / 1000 : 0
+        }
+      }
+      d.run({ e, inputs, out, pHpa: pressureAt(e), zM, dxM, dyM: dLat * 110540, ground })
+      const bytes = new Uint8Array(out.length)
+      for (let i = 0; i < out.length; i++) bytes[i] = Number.isNaN(out[i]) ? 255 : repack(out[i], d.spec)
+      return bytes
+    } }
 }
 
 /** The manifest, fetched the first time the 3D view is turned on. */
@@ -132,6 +276,13 @@ const PV_STOPS: [number, [number, number, number]][] = [[0, [200, 205, 215]], [1
 const DGZ_STOPS: [number, [number, number, number]][] = [[60, [150, 195, 235]], [85, [110, 170, 240]], [100, [225, 240, 255]]]
 // icing: amber to the deep reds of heavy icing
 const ICING_STOPS: [number, [number, number, number]][] = [[0, [250, 210, 120]], [0.1, [245, 160, 60]], [0.4, [220, 80, 40]], [1, [170, 30, 60]]]
+// θe: the cold, dry air in blues to the warm, moist air in oranges and reds
+const THETAE_STOPS: [number, [number, number, number]][] = [[270, [70, 80, 170]], [290, [90, 150, 210]], [305, [140, 200, 170]], [315, [240, 210, 110]], [330, [235, 120, 60]], [350, [180, 30, 60]]]
+const THETA_STOPS: [number, [number, number, number]][] = [[270, [90, 90, 180]], [290, [80, 160, 200]], [300, [120, 190, 140]], [310, [230, 200, 90]], [330, [230, 120, 60]], [380, [170, 40, 90]]]
+// turbulence: deep purple at the most unstable through amber to clear
+const TURB_STOPS: [number, [number, number, number]][] = [[0, [120, 30, 120]], [0.25, [200, 50, 90]], [0.5, [240, 140, 50]], [1, [250, 220, 120]], [2, [250, 240, 200]]]
+// reflectivity: the 2D radar layer's rain colours, as a smooth scale
+const DBZ_STOPS: [number, [number, number, number]][] = REFC.rain.levels.map((l, i) => [l, hex(REFC.rain.colors[i])] as [number, [number, number, number]])
 /** Colours for the surface's height (km, 0 – 12): low purples and blues through teal to the high yellows. */
 const HEIGHT_STOPS: [number, [number, number, number]][] = [[0, [72, 40, 130]], [2, [60, 90, 175]], [4, [40, 140, 170]], [6, [60, 175, 120]], [8, [160, 200, 60]], [10, [240, 200, 50]], [12, [250, 150, 60]]]
 export const heightRgb = (km: number) => lerp(HEIGHT_STOPS, km)
@@ -159,6 +310,16 @@ export function transfer(name: VolVar, x: number): [number, number, number, numb
     case "pv": return [...lerp(PV_STOPS, x), 0] as [number, number, number, number]
     case "dgz": return [...lerp(DGZ_STOPS, x), 1.5 * smooth(70, 100, x) ** 1.5] as [number, number, number, number]
     case "icing": return [...lerp(ICING_STOPS, x), 2.2 * smooth(0.005, 0.4, x) ** 0.8] as [number, number, number, number]
+    case "wbz": return [0, 0, 0, 0]
+    // θe and θ read as surfaces (ISOS) over a faint wash
+    case "thetae": return [...lerp(THETAE_STOPS, x), 0.004] as [number, number, number, number]
+    case "theta": return [...lerp(THETA_STOPS, x), 0] as [number, number, number, number]
+    // lift up the slopes warm, sinking down them cool, like rising and sinking air
+    case "oro": return [...lerp(x >= 0 ? UP : DOWN, Math.abs(x)), 1.8 * smooth(0.05, 0.7, Math.abs(x)) ** 1.3] as [number, number, number, number]
+    // the lower the Richardson number, the likelier the overturning: clear above 1, solid near 0.25
+    case "turb": return [...lerp(TURB_STOPS, x), 1.6 * smooth(1.0, 0.2, x) ** 1.5] as [number, number, number, number]
+    // the radar's own colours, thickening with the echo
+    case "dbz": return [...lerp(DBZ_STOPS, x), 2.2 * smooth(8, 50, x) ** 1.3] as [number, number, number, number]
   }
 }
 
@@ -189,9 +350,22 @@ export const ISOS: Partial<Record<VolVar, { at: number; color: string; alpha: nu
   ],
   frz: [{ at: 32, color: "#1f78d1", alpha: 0.92, label: "32°F" }],
   pv: [{ at: 2, color: "#9bcf3c", alpha: 0.9, label: "2 PVU (tropopause)" }],
+  wbz: [{ at: 32, color: "#1f78d1", alpha: 0.92, label: "Wet-bulb 32°F" }],
+  thetae: [
+    { at: 290, color: "#5a96d2", alpha: 0.3, label: "290 K" },
+    { at: 300, color: "#8cc8aa", alpha: 0.34, label: "300 K" },
+    { at: 310, color: "#e6c864", alpha: 0.4, label: "310 K" },
+    { at: 320, color: "#e67a3c", alpha: 0.45, label: "320 K" },
+  ],
+  theta: [
+    { at: 290, color: "#50a0c8", alpha: 0.5, label: "290 K" },
+    { at: 300, color: "#78be8c", alpha: 0.5, label: "300 K" },
+    { at: 310, color: "#e6c85a", alpha: 0.5, label: "310 K" },
+    { at: 320, color: "#e6783c", alpha: 0.5, label: "320 K" },
+  ],
 }
 /** Views whose surfaces take their colour from their height. */
-export const ISO_BY_HEIGHT: Partial<Record<VolVar, "frz" | "km">> = { frz: "frz", pv: "km" }
+export const ISO_BY_HEIGHT: Partial<Record<VolVar, "frz" | "km">> = { frz: "frz", pv: "km", wbz: "frz", theta: "km" }
 /** The packed fraction (0 – 1) a value sits at, as the shader samples it. */
 export function frac(x: number, v: VolumeVar) {
   const f = Math.min(1, Math.max(0, (x - v.min) / (v.max - v.min)))
@@ -222,7 +396,7 @@ export function colorLut(name: VolVar, v: VolumeVar): Uint8Array {
   const out = new Uint8Array(256 * 4)
   for (let b = 0; b < 255; b++) {
     const x = unpack(b, v)
-    const rgb = name === "temp" || name === "frz" ? lerp(TEMP_SMOOTH, x) : name === "wind" ? lerp(WIND_SMOOTH, x) : transfer(name, x).slice(0, 3)
+    const rgb = name === "temp" || name === "frz" || name === "wbz" ? lerp(TEMP_SMOOTH, x) : name === "wind" ? lerp(WIND_SMOOTH, x) : transfer(name, x).slice(0, 3)
     out.set([...rgb.map(Math.round), 255], b * 4)
   }
   return out
@@ -231,10 +405,13 @@ export function colorLut(name: VolVar, v: VolumeVar): Uint8Array {
 /** Colours across a variable's useful range, for the legend: [value, css colour, how opaque]. */
 export function legendStops(name: VolVar, v: VolumeVar): { show: [number, number]; ticks: number[] } {
   const show: Record<VolVar, [number, number]> = { cloud: [0, 100], rh: [0, 100], temp: [-60, 70], wind: [0, 180], water: [0, 1], ice: [0, 1], frz: [0, 12000],
-    mflux: [0, 500], w: [-1, 1], pv: [0, 8], dgz: [50, 100], icing: [0, 1] }
+    mflux: [0, 500], w: [-1, 1], pv: [0, 8], dgz: [50, 100], icing: [0, 1], wbz: [0, 12000], thetae: [270, 350], theta: [270, 380], oro: [-1, 1],
+    turb: [0, 1.5], dbz: [5, 70] }
   const ticks: Record<VolVar, number[]> = { cloud: [0, 25, 50, 75, 100], rh: [0, 20, 40, 60, 80, 100], temp: [-60, -40, -20, 0, 20, 32, 50, 70],
     wind: [0, 40, 80, 120, 160], water: [0, 0.25, 0.5, 0.75, 1], ice: [0, 0.25, 0.5, 0.75, 1], frz: [0, 2000, 4000, 6000, 8000, 10000, 12000],
-    mflux: [0, 100, 200, 300, 400, 500], w: [-1, -0.5, 0, 0.5, 1], pv: [0, 1, 2, 4, 6, 8], dgz: [50, 60, 70, 80, 90, 100], icing: [0, 0.25, 0.5, 0.75, 1] }
+    mflux: [0, 100, 200, 300, 400, 500], w: [-1, -0.5, 0, 0.5, 1], pv: [0, 1, 2, 4, 6, 8], dgz: [50, 60, 70, 80, 90, 100], icing: [0, 0.25, 0.5, 0.75, 1],
+    wbz: [0, 2000, 4000, 6000, 8000, 10000, 12000], thetae: [270, 290, 310, 330, 350], theta: [270, 300, 330, 360], oro: [-1, -0.5, 0, 0.5, 1],
+    turb: [0, 0.25, 0.5, 1, 1.5], dbz: [10, 20, 30, 40, 50, 60, 70] }
   return { show: show[name] ?? [v.min, v.max], ticks: ticks[name] }
 }
 
