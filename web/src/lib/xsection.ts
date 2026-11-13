@@ -1,7 +1,7 @@
 import { type Grid } from "@/lib/gl/util"
 import { elevationFor } from "@/lib/fields"
 import { WIND } from "@/lib/ramps"
-import { transfer, unpack, type VolumeEntry, type VolVar } from "@/lib/volume"
+import { transfer, unpack, type VolumeEntry, type VolumeVar, type VolVar } from "@/lib/volume"
 
 /** A vertical slice through a model's volume along a straight line on the map. */
 export type LonLat = [number, number]
@@ -27,8 +27,7 @@ export function miles(a: LonLat, b: LonLat) {
  * The volume's values along the line: [height][column] in display units, NaN where missing.
  * Bilinear between grid points, blended between the two time steps either side of the clock.
  */
-export function sampleSection(e: VolumeEntry, name: string, data: Uint8Array, line: { a: LonLat; b: LonLat }, i0: number, i1: number, t: number, n = 240): Float32Array {
-  const v = e.vars[name]
+export function sampleSection(e: VolumeEntry, v: VolumeVar, data: Uint8Array, line: { a: LonLat; b: LonLat }, i0: number, i1: number, t: number, n = 240): Float32Array {
   const { nx, ny, nz } = e
   const per = nx * ny * nz
   const lut = new Float32Array(256)

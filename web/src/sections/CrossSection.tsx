@@ -1,7 +1,7 @@
 import * as React from "react"
 
 import type { Briefing } from "@/types"
-import { type VolumeEntry, type VolVar } from "@/lib/volume"
+import { type VolumeEntry, type VolVar, viewVar } from "@/lib/volume"
 import { contourLevels, isolines, miles, paintSlice, sampleSection, type SectionLine, terrainProfile } from "@/lib/xsection"
 
 const N = 240                    // columns along the line
@@ -84,6 +84,8 @@ export function CrossSection({ data, entry, name, values, temp, line, time, subs
   const [hover, setHover] = React.useState<{ x: number; y: number; text: string } | null>(null)
   const last = React.useRef<{ sec: Float32Array; plot: { x: number; y: number; w: number; h: number } } | null>(null)
   const field = name === "frz" ? "temp" : name
+  // the field's encoding: a stored variable, or one worked out in the page (snow growth zone, icing)
+  const fv = React.useMemo(() => viewVar(entry, name), [entry, name])
   const dist = miles(line.a, line.b)
   const near = React.useMemo(() => data.points.map((p) => {
     // distance from the line (flat approximation, fine at this scale) and position along it
@@ -115,8 +117,9 @@ export function CrossSection({ data, entry, name, values, temp, line, time, subs
     ctx.setTransform(1, 0, 0, 1, 0, 0)
     ctx.clearRect(0, 0, c.width, c.height)
     const { i0, i1, t } = time()
-    const sec = sampleSection(entry, field, values, line, i0, i1, t, N)
-    const tsec = field === "temp" ? null : temp ? sampleSection(entry, "temp", temp, line, i0, i1, t, N) : null
+    if (!fv) return
+    const sec = sampleSection(entry, fv, values, line, i0, i1, t, N)
+    const tsec = field === "temp" || !entry.vars.temp ? null : temp ? sampleSection(entry, entry.vars.temp, temp, line, i0, i1, t, N) : null
     const m = { l: 44 * dpr, r: 46 * dpr, t: 8 * dpr, b: 30 * dpr }
     const plot = { x: m.l, y: m.t, w: c.width - m.l - m.r, h: c.height - m.t - m.b }
     last.current = { sec, plot }
@@ -154,7 +157,7 @@ export function CrossSection({ data, entry, name, values, temp, line, time, subs
       ctx.fillRect(x - 0.5 * dpr, plot.y + plot.h - 4 * dpr, dpr, 4 * dpr)
       ctx.fillText(p.name, x, by + 13 * dpr)
     }
-  }, [entry, field, name, values, temp, line, terrain, time, near, dist, onImage])
+  }, [entry, field, fv, name, values, temp, line, terrain, time, near, dist, onImage])
 
   React.useEffect(() => {
     draw()
@@ -185,7 +188,7 @@ export function CrossSection({ data, entry, name, values, temp, line, time, subs
 
   return (
     <div ref={wrap} className="relative w-full" onPointerMove={onMove} onPointerLeave={() => setHover(null)}>
-      <canvas ref={cv} role="img" aria-label={`Cross-section of ${entry.vars[field]?.label.toLowerCase() ?? name} along ${line.label}`} />
+      <canvas ref={cv} role="img" aria-label={`Cross-section of ${fv?.label.toLowerCase() ?? name} along ${line.label}`} />
       {hover && (
         <div className="pointer-events-none absolute z-10 rounded-md bg-popover px-2 py-1 text-xs whitespace-nowrap text-popover-foreground shadow-md ring-1 ring-border"
           style={{ left: Math.min(hover.x + 12, (wrap.current?.clientWidth ?? 600) - 280), top: Math.max(0, hover.y - 30) }}>
