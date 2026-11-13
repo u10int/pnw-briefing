@@ -22,7 +22,8 @@ import type { Md } from "@/lib/spcmd"
 import { useMds } from "@/lib/useMds"
 import { REPORT_COLORS, reportMag, SPC_CAT } from "@/sections/Convective"
 import { nearestFrame, preload, SAT_KINDS, type SatKind, type SatTimes, satTimes, satUrl } from "@/lib/satellite"
-import { bicubicAt, contourLines, fieldUrl, gridPos, loadField, nearestAt, nearestTime, type Elevation, elevationFor, pressureCenters, pressureGradient, windArrows, windFrom } from "@/lib/fields"
+import { bicubicAt, fieldUrl, gridPos, loadField, nearestAt, nearestTime, type Elevation, elevationFor, pressureGradient, windArrows, windFrom } from "@/lib/fields"
+import { contourAsync, isobarsAsync } from "@/lib/fields-pool"
 import { GRAD_COLORS, gradLevel, pairName, seriesAt } from "@/lib/gradients"
 import type { MapRequest } from "@/lib/maplink"
 import { GridLayer, type GridDraw } from "@/lib/gl/grid-layer"
@@ -219,7 +220,9 @@ interface Loaded {
 }
 interface Overlays { spc?: FC | null; isobars?: FC | null; centers?: FC | null; pairs?: FC | null; freezing?: FC | null; arrows?: FC | null; ar?: FC | null; sample?: (lon: number, lat: number, smooth: boolean) => string | null }
 /** One channel's choice for the current time: `key` identifies the data, `t` blends within it. */
-interface Choice<T> { key: string; t: number; load: () => Promise<T> }
+/** What to show for a time: its key, the blend factor, how to load it, and (for overlays that cost
+ *  real work) whether it's already worked out, or cheap enough to ask for while scrubbing. */
+interface Choice<T> { key: string; t: number; load: () => Promise<T>; ready?: boolean }
 
 interface View {
   key: string
@@ -611,19 +614,25 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
       },
       () => {},
     )
+    let ovWait = 0
     const windCh = new Channel<WindDraw>((w, t) => pl.setWind(w, t), (t) => pl.setT(t), undefined, (on) => clock.hold(windCh, on))
     const update = () => {
       const v = viewRef.current!
       const interp = clock.playing
       setSub(v.sub(clock.time))
       gridCh.push(v.grid(clock.time, interp))
-      ovCh.push(v.overlays?.(clock.time) ?? null)
+      // overlays (contours, centres) take a worker a moment each: while scrubbing, wait until the
+      // time rests before asking, so passing steps don't queue work; playing asks at once
+      clearTimeout(ovWait)
+      const oc = v.overlays?.(clock.time) ?? null
+      if (interp || !oc || oc.ready !== false) ovCh.push(oc)
+      else ovWait = window.setTimeout(() => ovCh.push(oc), 70)
       windCh.push(particles ? v.wind?.(clock.time, interp) ?? null : null)
       if (interp && clock.time != null) v.prefetch?.(clock.time)
     }
     update()
     const unsub = clock.subscribe(update)
-    return () => { unsub(); clearTimeout(slow); gridCh.cancel(); ovCh.cancel(); windCh.cancel() }
+    return () => { unsub(); clearTimeout(slow); clearTimeout(ovWait); gridCh.cancel(); ovCh.cancel(); windCh.cancel() }
   }, [view?.key, particles])
 
   React.useEffect(() => { layers.current!.grid.setOpacity(opacity); drape.current?.grid.setOpacity(opacity) }, [opacity])
@@ -1750,14 +1759,15 @@ function hourlyView(model: string, entries: Record<string, FieldEntry>, layer: H
       if (!b) return null
       const i = b.i0
       const valid = prim.times[i]
+      const ck = `${model}|${layer}|${i}|${iso ? 1 : 0}|${pairs ? 1 : 0}`
       return {
-        key: `${i}`, t: 0,
-        load: () => cachedOverlay(`${model}|${layer}|${i}|${iso ? 1 : 0}|${pairs ? 1 : 0}`, async () => {
+        key: `${i}`, t: 0, ready: overlayCache.has(ck) || !(iso || layer === "t2m"),
+        load: () => cachedOverlay(ck, async () => {
           const out: Overlays = {}
           if (pairs) out.pairs = pairOverlay(pairs, model, Date.parse(valid))
           if (layer === "t2m") {
             const f = await loadField(prim)
-            out.freezing = contourLines(f, await f.band(i), [32], 1)
+            out.freezing = await contourAsync(f, await f.band(i), [32], 1)
           }
           if (layer === "wind") {
             const f = await loadField(prim)
@@ -1767,8 +1777,10 @@ function hourlyView(model: string, entries: Record<string, FieldEntry>, layer: H
           if (iso) {
             const p = await bandNear(entries.mslp, valid, 1.6)
             if (p) {
-              out.isobars = contourLines(p.f, p.data, ISOBARS, p.f.width > 120 ? 4 : 1)   // extra smoothing on 3 km grids, where sea-level reduction over terrain is noisy
-              out.centers = pressureCenters(p.f, p.data)
+              // extra smoothing on 3 km grids, where sea-level reduction over terrain is noisy
+              const { lines, centers } = await isobarsAsync(p.f, p.data, ISOBARS, p.f.width > 120 ? 4 : 1)
+              out.isobars = lines
+              out.centers = centers
               out.sample = (lon, lat, smooth) => {
                 const v = valueAt(p.f, p.data, lon, lat, smooth)
                 return Number.isFinite(v) ? `${v.toFixed(0)} hPa` : null
@@ -1801,8 +1813,12 @@ function hourlyView(model: string, entries: Record<string, FieldEntry>, layer: H
       }
     },
     prefetch(time) {
-      // decode the next few steps ahead of playback
+      // decode the next few steps ahead of playback, and work out their overlays
       const i = Math.floor(posOf(msOf(prim.times), time))
+      for (let k = 1; k <= 3; k++) {
+        const iso = prim.times[i + k]
+        if (iso) this.overlays?.(Date.parse(iso))?.load().catch(() => {})
+      }
       for (const e of [prim, entries.ptype, entries.prate, entries.v10, entries.u10, entries.ivtv]) {
         if (!e) continue
         for (let k = 1; k <= 6; k++) {
