@@ -1,18 +1,19 @@
 name: probe-mrms3d
 on: push
+permissions: { contents: write }
 jobs:
   p:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
       - run: |
-          B=https://noaa-mrms-pds.s3.amazonaws.com
-          mkdir -p out && cd out
-          curl -s "$B/?list-type=2&prefix=CONUS/MergedReflectivityQC_03.00/20261113/" -o list.xml
-          KEY=$(grep -o "MRMS_MergedReflectivityQC_03.00_20261113-180[0-9]*.grib2.gz" list.xml | head -1)
-          TS=${KEY#MRMS_MergedReflectivityQC_03.00_}; TS=${TS%.grib2.gz}; echo $TS > ts.txt; cat ts.txt
-          for L in 00.50 01.00 01.50 02.00 02.50 03.00 03.50 04.00 04.50 05.00 05.50 06.00 06.50 07.00 07.50 08.00 08.50 09.00 10.00 11.00 12.00; do
-            curl -sf "$B/CONUS/MergedReflectivityQC_$L/20261113/MRMS_MergedReflectivityQC_${L}_$TS.grib2.gz" -o "$L.grib2.gz" || echo miss $L
-          done
-          ls -la | head -30; du -sh .
-      - uses: actions/upload-artifact@v4
-        with: { name: mrms3d, path: out }
+          cd web && npm ci >/dev/null 2>&1 && npx vite build --outDir /tmp/site >/dev/null && cd ..
+          git fetch -q --depth 1 origin gh-pages && git --work-tree=/tmp/gp checkout origin/gh-pages -- data 2>/dev/null || (mkdir -p /tmp/gp && git archive origin/gh-pages data | tar -x -C /tmp/gp)
+          cp -r /tmp/gp/data /tmp/site/data && ls /tmp/site/data | head
+          cd web && npx playwright install --with-deps chromium >/dev/null 2>&1 && cd ..
+          (cd /tmp/site && python3 -m http.server 8000 >/dev/null 2>&1 &) ; sleep 1
+          mkdir -p probe-out && cp probe/shot.cjs web/shot.cjs && (cd web && node shot.cjs) ; mv web/probe-out/* probe-out/ 2>/dev/null; ls -la probe-out
+          git config user.name probe && git config user.email probe@users.noreply.github.com
+          git add probe-out && git commit -qm "probe output" && git push -q origin HEAD:probe-mrms3d
