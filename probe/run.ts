@@ -1,4 +1,4 @@
-import { mrms3dEntry } from "../web/src/lib/mrms3d"
+import { mrms3dEntry } from "./mrms3d"
 async function main() {
   const t0 = Date.now()
   const e = await mrms3dEntry(Date.now() - 20 * 3600e3, { west: -130, south: 41.5, east: -116.5, north: 51 })

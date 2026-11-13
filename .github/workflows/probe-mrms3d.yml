@@ -7,4 +7,4 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
-      - run: cd web && npm ci --ignore-scripts >/dev/null 2>&1 && npx esbuild ../probe/run.ts --bundle --platform=node --alias:./mrms=../probe/shim-mrms.ts --outfile=/tmp/run.cjs --log-level=warning && node /tmp/run.cjs
+      - run: sed -e 's#from "./mrms"#from "./shim-mrms"#' -e 's#from "./volume"#from "../web/src/lib/volume"#' web/src/lib/mrms3d.ts > probe/mrms3d.ts && npx -y esbuild@0.25.0 probe/run.ts --bundle --platform=node --outfile=/tmp/run.cjs --log-level=warning && node /tmp/run.cjs
