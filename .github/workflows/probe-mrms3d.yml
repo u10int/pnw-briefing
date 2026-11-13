@@ -4,7 +4,15 @@ jobs:
   p:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: { node-version: 22 }
-      - run: sed -e 's#from "./mrms"#from "./shim-mrms"#' -e 's#from "./volume"#from "../web/src/lib/volume"#' web/src/lib/mrms3d.ts > probe/mrms3d.ts && npx -y esbuild@0.25.0 probe/run.ts --bundle --platform=node --outfile=/tmp/run.cjs --log-level=warning && node /tmp/run.cjs
+      - run: |
+          B=https://noaa-mrms-pds.s3.amazonaws.com
+          mkdir -p out && cd out
+          curl -s "$B/?list-type=2&prefix=CONUS/MergedReflectivityQC_03.00/20261113/" -o list.xml
+          KEY=$(grep -o "MRMS_MergedReflectivityQC_03.00_20261113-180[0-9]*.grib2.gz" list.xml | head -1)
+          TS=${KEY#MRMS_MergedReflectivityQC_03.00_}; TS=${TS%.grib2.gz}; echo $TS > ts.txt; cat ts.txt
+          for L in 00.50 01.00 01.50 02.00 02.50 03.00 03.50 04.00 04.50 05.00 05.50 06.00 06.50 07.00 07.50 08.00 08.50 09.00 10.00 11.00 12.00; do
+            curl -sf "$B/CONUS/MergedReflectivityQC_$L/20261113/MRMS_MergedReflectivityQC_${L}_$TS.grib2.gz" -o "$L.grib2.gz" || echo miss $L
+          done
+          ls -la | head -30; du -sh .
+      - uses: actions/upload-artifact@v4
+        with: { name: mrms3d, path: out }
