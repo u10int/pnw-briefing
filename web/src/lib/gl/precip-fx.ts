@@ -82,8 +82,8 @@ void main() {
   fragColor = vec4(vCol.rgb * core * a + vec3(0.16, 0.2, 0.3) * rim * 0.55 * a, (core + rim * 0.55) * a);
 }`
 
-const MAX = 14000           // drops and flakes at most
-const PER_MM = 1.6          // per cell, for each mm/h of precipitation (liquid equivalent)
+const MAX = 20000           // drops and flakes at most
+const PER_CELL = 8          // per cell, times the square root of its rate (mm/h, liquid equivalent)
 const SNOW_BOOST = 4        // snow falls as far more flakes than its water would make drops
 const START_KM = 3.5        // where they appear (roughly cloud base and below)
 
@@ -226,7 +226,7 @@ export class PrecipFx {
         const code = types ? Math.round(types[i]) : 1
         const name = (PTYPE_NAMES[code] ?? "rain") as string
         const kind = name === "none" ? 0 : Math.max(0, (["rain", "snow", "freezing rain", "sleet", "mix"] as string[]).indexOf(name))
-        xs.push((lon - box.lon[0]) / (box.lon[1] - box.lon[0])); ys.push(y); ws.push(kind === 1 ? w * SNOW_BOOST : w); ks.push(kind)
+        xs.push((lon - box.lon[0]) / (box.lon[1] - box.lon[0])); ys.push(y); ws.push(Math.sqrt(kind === 1 ? w * SNOW_BOOST : w)); ks.push(kind)
       }
     }
     const cdf = new Float32Array(ws.length)
@@ -234,8 +234,9 @@ export class PrecipFx {
     for (let i = 0; i < ws.length; i++) { s += ws[i]; cdf[i] = s }
     this.src = { x: Float32Array.from(xs), y: Float32Array.from(ys), w: Float32Array.from(ws), kind: Uint8Array.from(ks), cdf, total: s }
     this.srcKey = key
-    // how many: in proportion to the rate, so heavy cells are many times denser than light ones
-    this.n = Math.min(MAX, Math.round(s * PER_MM))
+    // how many: by the square root of the rate (sixteen times the rate, four times the drops), so
+    // heavy cells stand out without light rain vanishing
+    this.n = Math.min(MAX, Math.round(s * PER_CELL))
     for (let i = 0; i < this.n; i++) this.spawn(i, box, true)
     return this.src
   }
@@ -254,7 +255,7 @@ export class PrecipFx {
     this.top[i] = (START_KM * (0.7 + 0.3 * Math.random())) / box.topKm
     this.pz[i] = scatter ? Math.random() * this.top[i] : this.top[i]
     this.kind[i] = s.kind[lo]
-    this.inten[i] = Math.min(1, Math.sqrt(s.w[lo] / 12))
+    this.inten[i] = Math.min(1, s.w[lo] / 3.5)
     this.phase[i] = Math.random() * Math.PI * 2
   }
 
