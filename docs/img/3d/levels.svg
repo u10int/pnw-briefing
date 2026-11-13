@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 350" font-family="system-ui,-apple-system,Segoe UI,sans-serif" font-size="13">
+  <rect width="760" height="350" fill="#ffffff"/>
+  <defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0L10,5L0,10z" fill="#334"/></marker></defs>
+  <text x="30" y="26" fill="#334" font-weight="600">1 · resample each column to fixed heights</text>
+  <!-- left column: pressure levels at uneven heights (GFS levels ~ km) -->
+  <line x1="90" y1="300" x2="90" y2="50" stroke="#889"/>
+  <g fill="#c0392b" font-size="11">
+    <circle cx="90" cy="296" r="4"/><text x="100" y="300">1000 mb  0.1 km</text>
+    <circle cx="90" cy="286" r="4"/><circle cx="90" cy="276" r="4"/>
+    <circle cx="90" cy="265" r="4"/><text x="100" y="269">850  1.5</text>
+    <circle cx="90" cy="254" r="4"/><circle cx="90" cy="243" r="4"/>
+    <circle cx="90" cy="232" r="4"/><text x="100" y="236">700  3.0</text>
+    <circle cx="90" cy="208" r="4"/><circle cx="90" cy="180" r="4"/><text x="100" y="184">500  5.6</text>
+    <circle cx="90" cy="148" r="4"/><circle cx="90" cy="110" r="4"/><text x="100" y="114">300  9.2</text>
+    <circle cx="90" cy="88" r="4"/><circle cx="90" cy="62" r="4"/><text x="100" y="66">200  11.8</text>
+  </g>
+  <text x="40" y="320" fill="#666" font-size="12">pressure levels (heights vary)</text>
+  <line x1="200" y1="175" x2="260" y2="175" stroke="#334" marker-end="url(#a)"/>
+  <text x="196" y="165" fill="#334" font-size="12">interpolate</text>
+  <!-- right column: regular -->
+  <line x1="300" y1="300" x2="300" y2="50" stroke="#889"/>
+  <g fill="#2f6fd6">
+    <circle cx="300" cy="300" r="3"/><circle cx="300" cy="290" r="3"/><circle cx="300" cy="280" r="3"/><circle cx="300" cy="270" r="3"/><circle cx="300" cy="260" r="3"/>
+    <circle cx="300" cy="250" r="3"/><circle cx="300" cy="240" r="3"/><circle cx="300" cy="230" r="3"/><circle cx="300" cy="220" r="3"/><circle cx="300" cy="210" r="3"/>
+    <circle cx="300" cy="200" r="3"/><circle cx="300" cy="190" r="3"/><circle cx="300" cy="180" r="3"/><circle cx="300" cy="170" r="3"/><circle cx="300" cy="160" r="3"/>
+    <circle cx="300" cy="150" r="3"/><circle cx="300" cy="140" r="3"/><circle cx="300" cy="130" r="3"/><circle cx="300" cy="120" r="3"/><circle cx="300" cy="110" r="3"/>
+    <circle cx="300" cy="100" r="3"/><circle cx="300" cy="90" r="3"/><circle cx="300" cy="80" r="3"/><circle cx="300" cy="70" r="3"/><circle cx="300" cy="60" r="3"/>
+  </g>
+  <text x="312" y="304" fill="#2f6fd6" font-size="11">0 km</text><text x="312" y="64" fill="#2f6fd6" font-size="11">12 km</text>
+  <text x="312" y="184" fill="#2f6fd6" font-size="11">25 heights, 500 m apart</text>
+  <!-- packing curves -->
+  <text x="430" y="26" fill="#334" font-weight="600">2 · pack each value into one byte</text>
+  <g transform="translate(500,60)">
+    <rect width="240" height="200" fill="#fafbfd" stroke="#ccd"/>
+    <path d="M0 200 L240 0" stroke="#7d8798" stroke-width="2" fill="none"/>
+    <path d="M0 200 C 4 120, 30 60, 240 0" stroke="#2f6fd6" stroke-width="2" fill="none"/>
+    <text x="120" y="130" fill="#7d8798" font-size="12">linear</text>
+    <text x="20" y="70" fill="#2f6fd6" font-size="12">sqrt (water, ice,</text>
+    <text x="20" y="85" fill="#2f6fd6" font-size="12">moisture flow)</text>
+    <text x="0" y="220" fill="#555" font-size="12">min</text><text x="200" y="220" fill="#555" font-size="12">max</text>
+    <text x="80" y="236" fill="#555" font-size="12">value</text>
+    <text x="-34" y="6" fill="#555" font-size="12">254</text><text x="-18" y="200" fill="#555" font-size="12">0</text>
+    <text x="-48" y="104" fill="#555" font-size="12">byte</text>
+  </g>
+  <text x="430" y="320" fill="#666" font-size="12">0 – 254 = value, 255 = missing</text><text x="430" y="336" fill="#666" font-size="12">stored [time, height, lat, lon], gzip per variable</text>
+</svg>

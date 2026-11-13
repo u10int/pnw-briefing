@@ -248,6 +248,9 @@ over. On a phone the map and its timeline come first, with the controls under th
 
 ## The 3D view
 
+How the volumes are built and drawn (data packing, the ray-march shader, transfer tables, render
+modes, lighting, caching) is explained with diagrams in [docs/3d-rendering.md](docs/3d-rendering.md).
+
 Presets set up a field, its options and a camera in one go (atmospheric river, jet stream, snow
 levels, upper low, clouds and precipitation, mountain lift). **Profile** shows the column over a
 clicked point as a simple sounding: temperature and dewpoint (from the humidity) by height with

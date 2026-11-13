@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 360" font-family="system-ui,-apple-system,Segoe UI,sans-serif" font-size="13">
+  <rect width="760" height="360" fill="#ffffff"/>
+  <defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0L10,5L0,10z" fill="#334"/></marker></defs>
+  <!-- map plane (parallelogram) -->
+  <path d="M90 270 L520 270 L640 190 L210 190 Z" fill="#eef2ea" stroke="#9aa79a"/>
+  <text x="96" y="292" fill="#677">map (Web Mercator)</text>
+  <!-- box -->
+  <g fill="none" stroke="#5b6b85" stroke-width="1.4">
+    <path d="M140 255 L480 255 L570 200 L230 200 Z"/>
+    <path d="M140 95 L480 95 L570 40 L230 40 Z"/>
+    <path d="M140 255 L140 95 M480 255 L480 95 M570 200 L570 40 M230 200 L230 40" />
+  </g>
+  <!-- grid cells hint on bottom -->
+  <g stroke="#b6c0d0" stroke-width="0.8">
+    <path d="M208 255 L298 200 M276 255 L366 200 M344 255 L434 200 M412 255 L502 200"/>
+    <path d="M158 244 L498 244 M176 233 L516 233 M194 222 L534 222 M212 211 L552 211"/>
+  </g>
+  <!-- axes -->
+  <line x1="140" y1="255" x2="500" y2="255" stroke="#334" stroke-width="1.6" marker-end="url(#a)"/>
+  <text x="300" y="318" fill="#334">x: 0 → 1, west → east</text>
+  <text x="300" y="334" fill="#667" font-size="12">linear in longitude (= linear in Mercator x)</text>
+  <line x1="480" y1="255" x2="585" y2="190" stroke="#334" stroke-width="1.6" marker-end="url(#a)"/>
+  <text x="592" y="226" fill="#334">y: 0 → 1, north → south</text>
+  <text x="592" y="242" fill="#667" font-size="12">in Mercator y, so latitude</text>
+  <text x="592" y="256" fill="#667" font-size="12">is converted in the shader</text>
+  <line x1="140" y1="255" x2="140" y2="78" stroke="#334" stroke-width="1.6" marker-end="url(#a)"/>
+  <text x="18" y="150" fill="#334">z: 0 → 1</text>
+  <text x="18" y="166" fill="#667" font-size="12">0 – 12 km ×</text>
+  <text x="18" y="180" fill="#667" font-size="12">exaggeration</text>
+  <!-- labels -->
+  <text x="250" y="30" fill="#5b6b85">the data box: grid edges are cell centres</text>
+  <text x="250" y="130" fill="#5b6b85" font-size="12">nx × ny × nz cells</text>
+  <text x="250" y="146" fill="#5b6b85" font-size="12">(25 heights, every 500 m)</text>
+  <!-- slab -->
+  <path d="M140 175 L480 175 L570 120 L230 120 Z" fill="#2f6fd6" fill-opacity=".08" stroke="#2f6fd6" stroke-dasharray="4 3"/>
+  <text x="578" y="122" fill="#2f6fd6" font-size="12">height range: only this</text>
+  <text x="578" y="136" fill="#2f6fd6" font-size="12">slab is marched (uZr)</text>
+</svg>
