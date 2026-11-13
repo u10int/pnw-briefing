@@ -1,0 +1,10 @@
+name: probe-mrms3d
+on: push
+jobs:
+  p:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: cd web && npm ci --ignore-scripts >/dev/null 2>&1 && npx esbuild ../probe/run.ts --bundle --platform=node --alias:./mrms=../probe/shim-mrms.ts --outfile=/tmp/run.cjs --log-level=warning && node /tmp/run.cjs
