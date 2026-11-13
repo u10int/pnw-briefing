@@ -1,7 +1,7 @@
 import * as React from "react"
 
 import { elevationFor } from "@/lib/fields"
-import { FRZ, type Ramp, REFC, TEMP, WIND } from "@/lib/ramps"
+import { FRZ, type Ramp, TEMP, WIND } from "@/lib/ramps"
 
 /** One model's pressure-level volume (data/volume.json). */
 export interface VolumeVar {
@@ -282,8 +282,10 @@ const THETAE_STOPS: [number, [number, number, number]][] = [[270, [70, 80, 170]]
 const THETA_STOPS: [number, [number, number, number]][] = [[270, [90, 90, 180]], [290, [80, 160, 200]], [300, [120, 190, 140]], [310, [230, 200, 90]], [330, [230, 120, 60]], [380, [170, 40, 90]]]
 // turbulence: deep purple at the most unstable through amber to clear
 const TURB_STOPS: [number, [number, number, number]][] = [[0, [120, 30, 120]], [0.25, [200, 50, 90]], [0.5, [240, 140, 50]], [1, [250, 220, 120]], [2, [250, 240, 200]]]
-// reflectivity: the 2D radar layer's rain colours, as a smooth scale
-const DBZ_STOPS: [number, [number, number, number]][] = REFC.rain.levels.map((l, i) => [l, hex(REFC.rain.colors[i])] as [number, [number, number, number]])
+// reflectivity: the radar layer's greens, yellows, reds and magentas, as a smooth scale (its greys
+// for the weakest echoes would read as murk in 3D, so they start pale green)
+const DBZ_STOPS: [number, [number, number, number]][] = [[5, [176, 218, 176]], [15, [96, 196, 96]], [20, [30, 200, 40]], [30, [40, 160, 40]], [35, [220, 229, 3]],
+  [40, [238, 210, 100]], [45, [238, 125, 39]], [50, [255, 52, 47]], [55, [176, 48, 96]], [60, [179, 59, 131]], [65, [231, 29, 240]], [70, [255, 146, 255]]]
 /** Colours for the surface's height (km, 0 – 12): low purples and blues through teal to the high yellows. */
 const HEIGHT_STOPS: [number, [number, number, number]][] = [[0, [72, 40, 130]], [2, [60, 90, 175]], [4, [40, 140, 170]], [6, [60, 175, 120]], [8, [160, 200, 60]], [10, [240, 200, 50]], [12, [250, 150, 60]]]
 export const heightRgb = (km: number) => lerp(HEIGHT_STOPS, km)
@@ -316,11 +318,11 @@ export function transfer(name: VolVar, x: number): [number, number, number, numb
     case "thetae": return [...lerp(THETAE_STOPS, x), 0.004] as [number, number, number, number]
     case "theta": return [...lerp(THETA_STOPS, x), 0] as [number, number, number, number]
     // lift up the slopes warm, sinking down them cool, like rising and sinking air
-    case "oro": return [...lerp(x >= 0 ? UP : DOWN, Math.min(1, Math.abs(x) * 2)), 2 * smooth(0.03, 0.45, Math.abs(x)) ** 1.2] as [number, number, number, number]
+    case "oro": return [...lerp(x >= 0 ? UP : DOWN, Math.min(1, Math.abs(x) * 2.5)), 2.4 * smooth(0.02, 0.35, Math.abs(x)) ** 1.1] as [number, number, number, number]
     // the lower the Richardson number, the likelier the overturning: clear above 1, solid near 0.25
     case "turb": return [...lerp(TURB_STOPS, x), 1.6 * smooth(1.0, 0.2, x) ** 1.5] as [number, number, number, number]
     // the radar's own colours, thickening with the echo
-    case "dbz": return [...lerp(DBZ_STOPS, x), 2.2 * smooth(8, 50, x) ** 1.3] as [number, number, number, number]
+    case "dbz": return [...lerp(DBZ_STOPS, x), 2.8 * smooth(5, 45, x) ** 1.1] as [number, number, number, number]
   }
 }
 
