@@ -28,13 +28,13 @@ import { GRAD_COLORS, gradLevel, pairName, seriesAt } from "@/lib/gradients"
 import type { MapRequest } from "@/lib/maplink"
 import { GridLayer, type GridDraw } from "@/lib/gl/grid-layer"
 import { ParticleLayer, type WindDraw } from "@/lib/gl/particle-layer"
-import { VolumeLayer } from "@/lib/gl/volume-layer"
+import { sunLight, VolumeLayer } from "@/lib/gl/volume-layer"
 import { corners, GridDrape, groundFor, Snowline, snowLevels } from "@/lib/gl/terrain"
 import { type LonLat, SECTION_PRESETS, type SectionLine } from "@/lib/xsection"
 import { Profile } from "@/sections/Profile"
 import { CrossSection } from "@/sections/CrossSection"
 import { colorLut, frac, frzColor, heightLut, heightRgb, hexRgb, ISO_BY_HEIGHT, ISOS, legendStops, loadVolume, lutFor, mfluxRgb, SOURCE, transfer, unpack, useVolumes,
-  viewVar, VIEW_LABEL, VOL_ORDER, type VolumeEntry, type VolumeVar, type VolVar } from "@/lib/volume"
+  isDerived, LEVEL_VIEWS, pressureAtKm, viewVar, VIEW_LABEL, VOL_ORDER, type VolumeEntry, type VolumeVar, type VolVar } from "@/lib/volume"
 import { levelOverlay, pointCloud, trajectories } from "@/lib/volume-overlays"
 import { type Grid, mercY, sameGrid } from "@/lib/gl/util"
 import { AR_COLORS, AR_LABELS, FLOOD_COLORS, FLOOD_LABELS, FRZ, GUST, IVT, legendBins, PCT, PGRAD, PRECIP, PROB, PTYPE_COLORS, PTYPE_NAMES, type Ramp, REFC, RH, SMOKE, SNOW, SPREAD, TDEP, TEMP, WIND } from "@/lib/ramps"
@@ -333,6 +333,10 @@ export interface PaneVolume {
   from?: number
   /** A slice of the field across the box, with the rest dimmed; \`sink\` moves it while sweeping. */
   scan?: { axis: ScanAxis; pos: number; sink: React.RefObject<{ set?: (pos: number) => void }> } | null
+  /** Light the field by the sun at the map's time, or from a fixed direction. */
+  light?: "sun" | "fixed"
+  /** Read out what's under the cursor in the box. */
+  hover?: boolean
 }
 type ScanAxis = "z" | "x" | "y"
 type RenderMode = "volume" | "cloud" | "max" | "solid" | "points"
@@ -342,19 +346,23 @@ const RENDER_HELP = "How the field is drawn. Volume: see-through, thicker where 
 const SOLID_AT: Partial<Record<VolVar, number[]>> = {
   cloud: [50, 30, 80], rh: [90, 70, 100], water: [0.1, 0.05, 0.3], ice: [0.1, 0.05, 0.3], dgz: [85, 75, 95], icing: [0.05, 0.02, 0.2],
   mflux: [200, 100, 300, 400], w: [0.3, 0.15, 0.6], pv: [2, 1.5, 3], temp: [32, 50, 0, -40], wind: [115, 80, 140, 160],
+  thetae: [310, 300, 320, 330], theta: [300, 290, 310, 320], oro: [0.3, 0.15, 0.6], turb: [0.5, 0.25, 1], dbz: [30, 20, 40, 50],
 }
+/** Views whose solid is everything at or below the value: θ rises with height, so the solid is the
+ *  air under the surface, and the surface is its top. */
+const SOLID_BELOW: VolVar[] = ["theta"]
 const solidLabel = (n: VolVar, x: number, units: string) =>
-  n === "wind" ? `${x} mph (${Math.round(x / 1.15078)} kt)` : n === "temp" ? `${x}°F` : `${x}${units === "%" ? "%" : ` ${units}`}`
+  n === "wind" ? `${x} mph (${Math.round(x / 1.15078)} kt)` : n === "temp" ? `${x}°F` : n === "turb" ? `Ri ${x}` : `${x}${units === "%" ? "%" : ` ${units}`}`
 /** Views drawn as a volume (the others are surfaces), the ones lit from above, and the views another
  *  volume can be coloured by. */
-const VOLUME_VIEWS: VolVar[] = ["cloud", "water", "ice", "rh", "dgz", "icing", "mflux", "w"]
+const VOLUME_VIEWS: VolVar[] = ["cloud", "water", "ice", "rh", "dgz", "icing", "mflux", "w", "oro", "turb", "dbz"]
 const LIT_VIEWS: VolVar[] = ["cloud", "water", "ice", "rh", "mflux", "dgz", "icing"]
-const COLOR_BY: VolVar[] = ["temp", "wind", "rh", "w", "pv", "cloud"]
+const COLOR_BY: VolVar[] = ["temp", "wind", "rh", "w", "pv", "cloud", "thetae"]
 
 /** Ready-made 3D views: a field and its options, and a camera that shows them well. */
 interface Preset {
   id: string; label: string; note: string; field: VolVar
-  solid?: number; level?: number; wind?: boolean; traj?: boolean; terrain?: boolean; precip?: boolean; heights?: [number, number]; color?: "own" | "height"
+  solid?: number; level?: number; wind?: boolean; traj?: boolean; terrain?: boolean; precip?: boolean; heights?: [number, number]; color?: "own" | "height" | VolVar
   cam: Camera
 }
 const PRESETS: Preset[] = [
@@ -370,6 +378,12 @@ const PRESETS: Preset[] = [
     cam: { lon: -123.2, lat: 46.2, zoom: 5.6, pitch: 60, bearing: 20 } },
   { id: "lift", label: "Mountain lift", note: "Rising air up the windward slopes and sinking in their lee, over the terrain, with the low-level wind.",
     field: "w", terrain: true, wind: true, heights: [0, 6], cam: { lon: -123.0, lat: 46.9, zoom: 6.0, pitch: 62, bearing: 75 } },
+  { id: "isen", label: "Isentropic lift", note: "The 300 K surface as a solid coloured by humidity: moist air sliding up it ahead of a warm front.",
+    field: "theta", solid: 300, color: "rh", wind: true, cam: { lon: -124.6, lat: 45.6, zoom: 5.1, pitch: 58, bearing: 20 } },
+  { id: "snowlvl", label: "Wet-bulb snow level", note: "Where the wet-bulb temperature is 32°F over the stretched terrain, with falling precipitation.",
+    field: "wbz", terrain: true, precip: true, wind: false, cam: { lon: -122.4, lat: 46.6, zoom: 6.2, pitch: 64, bearing: 55 } },
+  { id: "turb", label: "Clear-air turbulence", note: "Layers where shear can overturn the air, with the jet as particles.",
+    field: "turb", wind: true, heights: [3, 12], cam: { lon: -123.6, lat: 46.4, zoom: 4.9, pitch: 58, bearing: -15 } },
 ]
 /** A 3D view's data file and label (the freezing level draws from temperature). */
 const volVarOf = (e: VolumeEntry, n: VolVar): VolumeVar | undefined => viewVar(e, n)
@@ -412,7 +426,9 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
   viewRef.current = view
   const terrainRef = React.useRef(terrain)
   terrainRef.current = terrain
-  const [hover, setHover] = React.useState<{ x: number; y: number; text: string | null; place: string | null } | null>(null)
+  const [hover, setHover] = React.useState<{ x: number; y: number; text: string | null; place: string | null; vol?: string | null } | null>(null)
+  const volRef = React.useRef(vol)
+  volRef.current = vol
   const [status, setStatus] = React.useState<Status>({ kind: "loading" })
   const [sub, setSub] = React.useState<string | undefined>()
 
@@ -563,7 +579,10 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
       const { v, t } = loaded.current
       const parts = [v?.sample(e.lngLat.lng, e.lngLat.lat, t, smoothRef.current), overlays.current?.sample?.(e.lngLat.lng, e.lngLat.lat, smoothRef.current)]
       m.getCanvas().style.cursor = pickRef.current ? "crosshair" : near.length ? "pointer" : ""
-      setHover({ x: e.point.x, y: e.point.y, text: parts.filter(Boolean).join(", ") || null, place: near.length ? String(near[0].properties?.name) : null })
+      const pv = volRef.current
+      const vol3d = pv && !pv.none && pv.data && pv.hover !== false && !e.originalEvent.buttons
+        ? probeText(pv, layers.current!.volume, e.point.x, e.point.y, m.getCanvas().clientWidth, m.getCanvas().clientHeight) : null
+      setHover({ x: e.point.x, y: e.point.y, text: parts.filter(Boolean).join(", ") || null, place: near.length ? String(near[0].properties?.name) : null, vol: vol3d })
     })
     m.on("mouseout", () => setHover(null))
     // a forecast location opens its detail panel
@@ -759,7 +778,7 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
     // the solid's own colour: the view's colour at that value
     const solid = vol.solid == null ? null : (() => {
       const b = Math.round(frac(vol.solid, v) * 255), lut = colorLut(vol.name, v)
-      return { at: frac(vol.solid, v), rgb: [lut[b * 4] / 255, lut[b * 4 + 1] / 255, lut[b * 4 + 2] / 255] as [number, number, number] }
+      return { at: frac(vol.solid, v), rgb: [lut[b * 4] / 255, lut[b * 4 + 1] / 255, lut[b * 4 + 2] / 255] as [number, number, number], below: SOLID_BELOW.includes(vol.name) }
     })()
     const lit = LIT_VIEWS.includes(vol.name)
     const render = solid ? "solid" : vol.render ?? "volume"
@@ -778,7 +797,7 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
       colorMode, colorBy: cLut ? { data: vol.colorData!, lut: cLut } : undefined,
       solid, shadow: vol.shadow && (!!solid || (lit && (render === "volume" || render === "cloud"))),
       mode: render === "cloud" || render === "max" ? render : "volume", density: vol.density ?? 1, solidAlpha: vol.solidAlpha ?? 1,
-      scan, empty: render === "points" && !scan }, vol.entry.levels)
+      scan, empty: render === "points" && !scan, pickLut: render === "points" ? lut : undefined }, vol.entry.levels)
     if (vol.scan) vol.scan.sink.current = { set: (p) => L.setScanPos(p) }
     const ms = msOf(vol.entry.times)
     // the dots: worked out again as the clock moves, at most every 120 ms
@@ -797,10 +816,14 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
         : (_i: number, b: number) => [own[b * 4] / 255, own[b * 4 + 1] / 255, own[b * 4 + 2] / 255] as [number, number, number]
       L.setPoints(pointCloud(e, vol.data!, lut, i0, i1, t, vol.range, rgb, 120000 * (vol.density ?? 1)))
     }
+    // observed radar: download the frames either side of the clock as it reaches them
+    const lazy = vol.none ? undefined : v.lazy
+    let live = true
     const update = () => {
       const pos = posOf(ms, clock.time ?? ms[0])
       const i0 = Math.floor(pos), i1 = Math.min(i0 + 1, ms.length - 1)
       L.setTime(i0, i1, pos - i0)
+      if (lazy) for (const k of new Set([i0, i1])) if (!lazy.ready(k)) lazy.load(k).then(() => { if (live) { L.refreshStep(k); if (dots) update() } }).catch(() => {})
       if (dots) {
         window.clearTimeout(dotTimer)
         const wait = 120 - (performance.now() - lastDots)
@@ -811,9 +834,20 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
     if (!dots) L.setPoints(null)
     update()
     const off = clock.subscribe(update)
-    return () => { off(); window.clearTimeout(dotTimer) }
+    return () => { live = false; off(); window.clearTimeout(dotTimer) }
   }, [volKey, vol?.data, vol?.colorData])
   React.useEffect(() => () => layers.current?.volume.setPoints(null), [])
+  // the sun over the box's middle at the map's time
+  const lightMode = vol?.light ?? "sun", lightEntry = vol?.entry
+  React.useEffect(() => {
+    const L = layers.current?.volume
+    if (!L || !lightEntry) return
+    if (lightMode === "fixed") { L.setLight(null); return }
+    const lat = (lightEntry.lat[0] + lightEntry.lat[1]) / 2, lon = (lightEntry.lon[0] + lightEntry.lon[1]) / 2
+    const update = () => { if (clock.time != null) { const { dir, color, ambient } = sunLight(clock.time, lat, lon); L.setLight({ dir, color, ambient }) } }
+    update()
+    return clock.subscribe(update)
+  }, [lightMode, lightEntry])
   // a pressure level's contours and wind arrows, and the trajectories: worked out again as the clock moves
   React.useEffect(() => {
     const L = layers.current!.volume
@@ -983,7 +1017,7 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
       <div ref={axisEl} className={`pointer-events-none absolute inset-0 overflow-hidden ${vol?.data ? "" : "hidden"}`} aria-hidden />
       <div className={`pointer-events-none absolute top-2 max-w-[70%] rounded-md bg-card/95 px-2.5 py-1.5 text-xs shadow-sm ring-1 ring-border ${insetTitle ? "left-[118px] max-sm:top-12 max-sm:left-2" : "left-2"}`}>
         <div className="font-medium">{view?.title}</div>
-        {vol && <div className="text-muted-foreground">3D: {vol.entry.model} {vol.none ? (vol.wind ? "wind" : "box") : volLabel(vol.entry, vol.name).toLowerCase()}{vol.wind && !vol.none ? " and wind" : ""}, {vol.entry.run} run{vol.data ? "" : " (loading…)"}</div>}
+        {vol && <div className="text-muted-foreground">3D: {vol.entry.model} {vol.none ? (vol.wind ? "wind" : "box") : volLabel(vol.entry, vol.name).toLowerCase()}{vol.wind && !vol.none ? " and wind" : ""}{vol.entry.run === "observed" ? ", observed" : `, ${vol.entry.run} run`}{vol.data ? "" : " (loading…)"}</div>}
         {sub && <div className="text-muted-foreground">{sub}</div>}
         {satLabel && <div className="text-muted-foreground">{satLabel}</div>}
         {frontLabel && <div className="text-muted-foreground">{frontLabel}</div>}
@@ -993,11 +1027,12 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
           {status.kind === "loading" ? "Loading grid…" : status.kind === "error" ? "This grid could not be loaded." : (status.note ?? "Nothing to show for this choice.")}
         </div>
       )}
-      {hover && (hover.text || hover.place) && (
+      {hover && (hover.text || hover.place || hover.vol) && (
         <div className="pointer-events-none absolute z-10 rounded-md bg-popover px-2 py-1 text-xs shadow-md ring-1 ring-border"
              style={{ left: Math.min(hover.x + 14, (el.current?.clientWidth ?? 0) - 170), top: hover.y + 14 }}>
           {hover.place && <div className="font-medium">{hover.place} <span className="font-normal opacity-60">· click for details</span></div>}
-          <div className="tabular-nums">{hover.text ?? "No data"}</div>
+          {hover.vol && <div className="tabular-nums"><span className="font-medium">3D</span> {hover.vol}</div>}
+          {(hover.text || !hover.vol) && <div className="tabular-nums">{hover.vol ? <span className="opacity-70">Map: {hover.text ?? "no data"}</span> : hover.text ?? "No data"}</div>}
         </div>
       )}
     </div>
@@ -1068,6 +1103,12 @@ const VOL_SHORT: Record<VolVar, string> = {
   pv: "The 2 PVU surface (the dynamic tropopause), coloured by height: it dips toward the ground under upper lows.",
   dgz: "Moist air between 10 and 0°F, where snowflakes grow fastest.",
   icing: "Liquid water below freezing: aircraft icing.",
+  wbz: "Where the wet-bulb temperature is 32°F, coloured by height: about where snow turns to rain.",
+  thetae: "Surfaces of equal θe: warm, moist air in oranges, cold or dry air in blues.",
+  theta: "Surfaces at 290, 300, 310 and 320 K, coloured by height: outside cloud, air glides along them.",
+  oro: "Wind blowing up the terrain red, down it blue.",
+  turb: "Low Richardson number: shear strong enough to overturn the air (clear-air turbulence).",
+  dbz: "Observed radar echoes through the depth of the storm, in the radar's colours.",
 }
 const VOL_NOTES: Record<VolVar, string> = {
   cloud: "Cloud cover through the depth of the atmosphere: the thicker the cloud, the more solid it looks.",
@@ -1082,6 +1123,12 @@ const VOL_NOTES: Record<VolVar, string> = {
   dgz: "The snow growth zone: relative humidity in the layer between about 10 and 0°F (−12 to −18°C), where ice crystals grow fastest as six-armed dendrites. A deep, saturated layer there, especially with rising air through it, makes big flakes and fluffy, high-ratio snow.",
   icing: "Supercooled liquid water: cloud droplets and rain still liquid between 32 and −4°F, which freeze onto anything they hit, aircraft above all. From the model's own cloud water and rain.",
   frz: "The freezing level as a surface, coloured by its height in 1,000 ft bands: below it the air is above freezing, above it below. Snow usually reaches about 1,000 ft below it; where it meets the ground, it's freezing at the surface. More than one layer means a warm layer aloft (freezing rain or sleet risk).",
+  wbz: "The wet-bulb freezing level, coloured by its height in 1,000 ft bands: where the wet-bulb temperature (worked out from the model's temperature and humidity) is 32°F. Melting snow and evaporating precipitation cool the air toward its wet-bulb temperature, so in steady precipitation the snow level sits near this surface, often a few hundred feet below it, and below the dry-bulb freezing level when the air is dry.",
+  thetae: "Equivalent potential temperature (θe), worked out from the model's temperature and humidity: the temperature air would reach if all its water vapour condensed and it were brought down to 1000 mb. It stays with the air as it rises and sinks, so warm conveyor belts and atmospheric rivers stand out as high θe, dry intrusions behind cold fronts as low θe, and fronts as surfaces crowding together. Where θe falls with height, the air is potentially unstable.",
+  theta: "Isentropic surfaces: where the potential temperature (worked out from temperature and pressure) is 290, 300, 310 and 320 K, coloured by height. Outside cloud, air moves along these surfaces, so wind blowing toward where a surface rises is air being lifted (isentropic lift): the slow, widespread rise ahead of warm fronts. Colour the solid by humidity to see where that rising air is moist enough to make cloud.",
+  oro: "Orographic lift: the model's wind times the slope of the terrain under it (on the model's grid), fading with height above the ground over about 2 km. Red where the air is forced up the windward slopes, which wrings out its moisture; blue where it's going down the lee side and drying out. It shows the terrain's part in the model's own rising and sinking air.",
+  turb: "The Richardson number: how stable the air is (from how fast potential temperature rises with height) against how strongly the wind changes with height. Below about 1 the shear can overturn the layer in waves; below 0.25 it usually does, which aircraft feel as clear-air turbulence, often near the jet stream and above upper fronts. Shown above 1.5 km, on the model's 500 m spacing, so thin layers are missed.",
+  dbz: "Observed radar from NOAA's Multi-Radar Multi-Sensor (MRMS) 3D mosaic: the reflectivity at heights from 0.5 to 12 km above sea level, merged from every radar that sees each point and quality-controlled. Strong echoes are heavy rain, wet snow or hail; a bright band near the freezing level is snow melting into rain. Below the lowest beams (low over the ocean and in deep valleys) there's no data. Each frame is about 10 MB from the public data bucket, so frames load as the clock reaches them; past the newest frame, it stays on screen as the clock moves into the forecast.",
 }
 /** How to read the 3D field: shell swatches for temperature and wind, a height scale for the freezing
  *  level, otherwise the colours over the useful range (paler where nearly see-through); then the box. */
@@ -1093,7 +1140,7 @@ function VolumeLegend({ vol }: { vol: PaneVolume }) {
   // what sets the colours: the view's own scale, its height, or another field
   const colorView = vol.color !== "own" && vol.color !== "height" && vol.colorData ? vol.color : null
   const byHeight = vol.color === "height" || (byH === "km" && solid == null) || (byH === "km" && vol.color === "own" && solid != null)
-  const isos = solid != null || name === "frz" || byH === "km" ? null : ISOS[name]
+  const isos = solid != null || LEVEL_VIEWS.includes(name) || byH === "km" ? null : ISOS[name]
   const swatch = (bg: string, label: string, opacity = 1) => (
     <span key={label} className="flex items-center gap-1.5">
       <span className="h-3 w-5 rounded-[3px] ring-1 ring-black/10" style={{ background: bg, opacity }} aria-hidden />{label}
@@ -1144,14 +1191,14 @@ function OwnScale({ entry, name }: { entry: VolumeEntry; name: VolVar }) {
   const N = 48
   const cells = Array.from({ length: N }, (_, i) => {
     const x = show[0] + ((i + 0.5) / N) * (show[1] - show[0])
-    if (name === "frz") { const [r, g, b] = frzColor(x); return `rgb(${r},${g},${b})` }
+    if (LEVEL_VIEWS.includes(name)) { const [r, g, b] = frzColor(x); return `rgb(${r},${g},${b})` }
     const [r, g, b, e] = transfer(name, x)
     return `rgba(${r | 0},${g | 0},${b | 0},${Math.min(1, 0.25 + e / 1.2).toFixed(2)})`
   })
-  const fmt = (x: number) => (Math.abs(x) < 1 && x !== 0 ? x.toFixed(2) : name === "frz" ? x.toLocaleString("en-US") : String(x))
+  const fmt = (x: number) => (Math.abs(x) < 1 && x !== 0 ? x.toFixed(2) : LEVEL_VIEWS.includes(name) ? x.toLocaleString("en-US") : String(x))
   return (
     <div className="max-w-xl">
-      <div className="mb-1.5 text-xs text-muted-foreground">{name === "frz" ? "Freezing level height (ft)" : `${v.label} (${v.units})`}</div>
+      <div className="mb-1.5 text-xs text-muted-foreground">{name === "frz" ? "Freezing level height (ft)" : name === "wbz" ? "Wet-bulb 32°F height (ft)" : `${v.label} (${v.units})`}</div>
       <div className="flex h-3 overflow-hidden rounded-[3px] ring-1 ring-border" style={{ background: "repeating-conic-gradient(#d8dce2 0 25%, #fff 0 50%) 0 0 / 8px 8px" }}>
         {cells.map((c, i) => <span key={i} className="h-full flex-1" style={{ background: c }} />)}
       </div>
@@ -1176,8 +1223,10 @@ function volumeNotes({ entry, name, exaggeration, particles, precip, terrain, sn
   const pk = PARTICLE_HPA.map((p) => entry.levels.find((l) => l.hPa === p)).filter((l): l is { hPa: number; km: number } => !!l)
   return [
     // the note without its own "Moisture flow: " lead-in, since the label says it
-    !vol?.none && { label: VIEW_LABEL[name] ?? v?.label ?? "3D field", text: <>{VOL_NOTES[name].replace(/^[A-Z][a-z ]+: (.)/, (_, c: string) => c.toUpperCase())}{name !== "frz" && v?.note ? ` ${v.note}` : ""}</> },
-    { label: "The box", text: <>{entry.model} on pressure levels from the ground to {entry.topKm} km, heights stretched ×{exaggeration}: kilometres up one edge, the model's average pressure-level heights up the other. Steps every {hours} hours through {timeLabel(entry.times[steps - 1])}, blended in between.</> },
+    !vol?.none && { label: VIEW_LABEL[name] ?? v?.label ?? "3D field", text: <>{VOL_NOTES[name].replace(/^[A-Z][a-z ]+: (.)/, (_, c: string) => c.toUpperCase())}{!LEVEL_VIEWS.includes(name) && v?.note ? ` ${v.note}` : ""}</> },
+    entry.run === "observed"
+      ? { label: "The box", text: <>Observed radar at heights from the ground to {entry.topKm} km above sea level, every 500 m, stretched ×{exaggeration}. {steps} frames through {timeLabel(entry.times[steps - 1])}, hourly and then every 10 minutes over the last hour, blended in between.</> }
+      : { label: "The box", text: <>{entry.model} on pressure levels from the ground to {entry.topKm} km, heights stretched ×{exaggeration}: kilometres up one edge, the model's average pressure-level heights up the other. Steps every {hours} hours through {timeLabel(entry.times[steps - 1])}, blended in between.</> },
     { label: "Tilt and turn", text: <>Right-drag (or Ctrl-drag), or two fingers on a phone. Drag the compass to tilt; click it to face north.</> },
     particles && pk.length > 0 && { label: "Wind particles", text: <>The wind at {pk.map((l) => `${l.hPa}`).join(", ")} mb (about {pk.map((l) => l.km.toFixed(1)).join(", ")} km), coloured by {name === "mflux" ? "moisture flow" : "speed"}.</> },
     precip && { label: "Falling precipitation", text: <>From the radar layer, wherever the model's rate is 0.01 in/h or more (or its simulated radar about 15 dBZ, without a rate), thicker where it's heavier. Rain falls in streaks, snow drifts, sleet and freezing rain in between, coloured by type, from about 3 km.</> },
@@ -1187,7 +1236,7 @@ function volumeNotes({ entry, name, exaggeration, particles, precip, terrain, sn
     vol && !vol.none && vol.solid == null && vol.render === "cloud" && { label: "Cloud", text: <>The field's shape lit white like real cloud: bright on the side facing the light from the south-west, grey underneath and where it's thick.</> },
     vol && !vol.none && vol.solid == null && vol.render === "max" && { label: "Max", text: <>Each pixel shows the strongest value along that line of sight, like a composite radar seen from any angle: the cores stand out, but not how deep they are.</> },
     vol && !vol.none && vol.solid == null && vol.render === "points" && { label: "Points", text: <>Dots scattered through each grid cell, more where the field draws thicker; they keep their places as time moves, so motion reads as change in the field.</> },
-    vol && !vol.none && (vol.from ?? 0) > 0 && v && { label: "Show from", text: <>Values below {fmtVal(unpack(vol.from!, v), v.units)} are hidden.</> },
+    vol && !vol.none && (vol.from ?? 0) > 0 && v && { label: "Show from", text: <>Values {v.min > v.max ? "above" : "below"} {fmtVal(unpack(vol.from!, v), v.units)} are hidden.</> },
     vol?.scan && !vol.none && { label: "Scan", text: <>A slice {vol.scan.axis === "z" ? "at one height" : vol.scan.axis === "x" ? "from south to north at one longitude" : "from west to east at one latitude"}, coloured by the field's own colour scale (grey where it's missing), with the rest of the field faded so the slice reads.</> },
     vol && vol.color !== "own" && { label: "Colour", text: vol.color === "height" ? <>Coloured by height, purple low through teal to yellow and orange high.</> : <>The shape comes from {(VIEW_LABEL[name] ?? v?.label ?? "the field").toLowerCase()}, the colour from {volLabel(entry, vol.color).toLowerCase()} at the same place.</> },
     vol?.shadow && (vol.solid != null || LIT_VIEWS.includes(name)) && { label: "Shadows", text: <>Cast on the ground by the light from the south-west and fairly high, through {vol.solid != null ? "the solid" : "the field, thicker where it's thicker"}.</> },
@@ -1853,6 +1902,29 @@ function useMrms(data: Briefing, on: boolean): FieldEntry | null {
   return entry
 }
 
+/** The observed 3D radar entry (MRMS), listed once the 3D view is open, refreshed every 10 minutes
+ *  while the briefing's window reaches now; over the models' box (or the briefing's area). */
+function useRadar3d(data: Briefing, on: boolean, like: VolumeEntry | null): VolumeEntry | null {
+  const [entry, setEntry] = React.useState<VolumeEntry | null>(null)
+  const start = Date.parse(data.meta.cycle ?? `${data.dates[0]}T12:00:00Z`)
+  const d = data.domain
+  const box = like
+    ? { west: like.lon[0], east: like.lon[1], south: like.lat[0], north: like.lat[1] }
+    : { west: d.lon_min, south: d.lat_min, east: d.lon_max, north: d.lat_max }
+  const boxKey = `${box.west},${box.south},${box.east},${box.north}`
+  React.useEffect(() => {
+    if (!on) return
+    let stop = false
+    const load = () => import("@/lib/mrms3d").then((m) => m.mrms3dEntry(start, box))
+      .then((e) => { if (!stop) setEntry((old) => (e && old && e.times.join() === old.times.join() ? old : e)) })
+      .catch(() => {})
+    load()
+    const id = Date.now() < start + 48 * 3600e3 ? setInterval(load, 10 * 60e3) : undefined
+    return () => { stop = true; if (id) clearInterval(id) }
+  }, [on, start, boxKey])
+  return entry
+}
+
 /** GOES frame times from nowCOAST (about the last 7 hours), refreshed every 5 minutes while the
  *  hourly map is open; null when the service can't be reached (the option is then hidden). */
 function useSatTimes(on: boolean): SatTimes | null {
@@ -1922,6 +1994,26 @@ function Group({ title, children }: { title: string; children: React.ReactNode }
 }
 /** One setting: its label (and help) in a fixed column, the control filling the rest, and its value
  *  at the end when there is one (for sliders). */
+/** What the cursor is over in the 3D box, in words: the field's value (or which surface), its
+ *  height in km and feet, and roughly its pressure. */
+function probeText(vol: PaneVolume, L: VolumeLayer, x: number, y: number, w: number, h: number): string | null {
+  const hit = L.probe(x, y, w, h)
+  if (!hit) return null
+  const v = volVarOf(vol.entry, vol.name)
+  if (!v) return null
+  const km = hit.z * vol.entry.topKm
+  const where = `${km.toFixed(1)} km (${Math.round((km * 1000) / 0.3048 / 100) * 100} ft)`
+  const p = pressureAtKm(vol.entry, km)
+  const mb = Number.isFinite(p) ? ` · ~${Math.round(p / 10) * 10} mb` : ""
+  const val = unpack(hit.byte, v)
+  const label = volLabel(vol.entry, vol.name)
+  const fmt = (x: number) => (vol.name === "turb" ? `Ri ${x.toFixed(2)}` : vol.name === "temp" || vol.name === "wbz" ? `${Math.round(x)}°F` : fmtVal(x, v.units))
+  if (LEVEL_VIEWS.includes(vol.name) && hit.what === "surface") return `${label}: ${where}`
+  if (hit.what === "surface") return `${fmt(val)} surface at ${where}${mb}`
+  if (hit.what === "solid") return `${label}, solid at ${fmt(val)}: ${where}${mb}`
+  return `${label} ${fmt(val)}${hit.what === "max" ? " (strongest)" : ""} at ${where}${mb}`
+}
+
 /** A value with its units, rounded to suit its size. */
 function fmtVal(x: number, units: string) {
   const r = Math.abs(x) >= 10 ? Math.round(x) : Math.abs(x) >= 1 ? Math.round(x * 10) / 10 : Math.round(x * 100) / 100
@@ -2350,7 +2442,10 @@ export function InteractiveMap({ data, request, active = true, standalone = fals
     const z = (q.get("zr") ?? "").split(",").map(Number)
     return z.length === 2 && z.every(Number.isFinite) && z[1] > z[0] ? [z[0], z[1]] : null
   })
-  const vols = useVolumes(threeD)
+  const modelVols = useVolumes(threeD)
+  // observed 3D radar, over the same box as the models' volumes
+  const radar3d = useRadar3d(data, threeD && mode === "hourly" && active && modelVols != null, modelVols?.[0] ?? null)
+  const vols = React.useMemo(() => (modelVols ? (radar3d ? [...modelVols, radar3d] : modelVols) : null), [modelVols, radar3d])
 
   React.useEffect(() => { if (!active) setPlaying(false) }, [active])
 
@@ -2539,6 +2634,8 @@ export function InteractiveMap({ data, request, active = true, standalone = fals
   const scanSink = React.useRef<{ set?: (pos: number) => void }>({})
   const [colorPick, setColorPick] = React.useState<"own" | "height" | VolVar>(() => qs<"own" | "height" | VolVar>("col", "own"))
   const [shadowOn, setShadowOn] = React.useState(() => qb("sh", true))
+  const [lightPick, setLightPick] = React.useState<"sun" | "fixed">(() => qs<"sun" | "fixed">("lt", "sun"))
+  const [hoverOn, setHoverOn] = React.useState(() => qb("hv", true))
   // a pressure level as a map (contours and arrows), and trajectories
   const [levelHPa, setLevelHPa] = React.useState<number | null>(() => (q.has("lvl") ? qn("lvl", NaN) || null : null))
   const [trajOn, setTrajOn] = React.useState(() => qb("trj", false))
@@ -2630,7 +2727,7 @@ export function InteractiveMap({ data, request, active = true, standalone = fals
         solid: solidAt, color: colorView && colorData?.path !== colorPath ? "own" : colorBy, colorData: colorView && colorData?.path === colorPath ? colorData.data : null,
         shadow: shadowOn, level: paneLevel, uv, traj: paneTraj, profile: profileOn ? profilePt : null,
         render: renderMode === "solid" ? "volume" : renderMode, density, solidAlpha, from: isVolume ? showFrom : 0,
-        scan: scanAxis !== "off" && !volNone ? { axis: scanAxis, pos: scanPos, sink: scanSink } : null } : null
+        scan: scanAxis !== "off" && !volNone ? { axis: scanAxis, pos: scanPos, sink: scanSink } : null, light: lightPick, hover: hoverOn } : null
   // the cross-section: a preset line or one drawn on the map, sliced through the 3D field
   const [xsecOn, setXsecOn] = React.useState(() => qb("xs", false))
   const [xsecLine, setXsecLine] = React.useState<SectionLine>(() => {
@@ -2642,7 +2739,7 @@ export function InteractiveMap({ data, request, active = true, standalone = fals
   const [picking, setPicking] = React.useState<LonLat[] | null>(null)
   const xsecSink = React.useRef<{ set?: (img: HTMLCanvasElement) => void }>({})
   const xsecShown = !!(volOn && xsecOn && !volNone && paneVol?.data)
-  const needTemp = xsecShown && volEntry && volName && SOURCE[volName] !== "temp" && volEntry.vars.temp ? volEntry : null
+  const needTemp = xsecShown && volEntry && volName && (SOURCE[volName] !== "temp" || isDerived(volName)) && volEntry.vars.temp ? volEntry : null
   const [volTemp, setVolTemp] = React.useState<{ model: string; data: Uint8Array } | null>(null)
   React.useEffect(() => {
     if (!needTemp || volTemp?.model === needTemp.model) return
@@ -2716,7 +2813,7 @@ export function InteractiveMap({ data, request, active = true, standalone = fals
       put("vw", volWindPick); put("vp", volPrecip, true)
       if (solidAt != null) p.set("sol", String(solidAt))
       if (renderMode !== "solid") put("rm", renderMode, "volume")
-      put("dn", density, 1); put("th", showFrom, 0); put("so", solidAlpha, 1)
+      put("dn", density, 1); put("th", showFrom, 0); put("so", solidAlpha, 1); put("lt", lightPick, "sun"); put("hv", hoverOn, true)
       if (scanAxis !== "off") { p.set("sc", scanAxis); p.set("scp", scanPos.toFixed(3)) }
       put("col", colorPick, "own"); put("sh", shadowOn, true); put("lvl", level); put("trj", trajOn, false)
       put("t3", terr3d, false); put("sn", snowOn, true)
@@ -2790,7 +2887,7 @@ export function InteractiveMap({ data, request, active = true, standalone = fals
     <>
       {xsecShown && paneVol?.data ? (
         <CrossSection data={data} entry={volEntry!} name={volName!} values={paneVol.data}
-          temp={SOURCE[volName!] === "temp" ? paneVol.data : volTemp?.model === volEntry!.model ? volTemp.data : null}
+          temp={SOURCE[volName!] === "temp" && !isDerived(volName!) ? paneVol.data : volTemp?.model === volEntry!.model ? volTemp.data : null}
           line={xsecLine} time={sectionTime} subscribe={sectionSub} onImage={onSectionImage} />
       ) : <p className="text-xs text-muted-foreground">Loading the 3D data…</p>}
       <p className="text-xs text-muted-foreground">Heavy blue: freezing level. Brown: terrain. Hover for values.</p>
@@ -2961,7 +3058,7 @@ export function InteractiveMap({ data, request, active = true, standalone = fals
             <Row label="Model">
               <Select value={volEntry.model} onValueChange={setVolModel}>
                 <SelectTrigger className="h-8 w-full min-w-0" aria-label="3D model"><SelectValue /></SelectTrigger>
-                <SelectContent>{vols!.map((v) => <SelectItem key={v.model} value={v.model}>{v.model}</SelectItem>)}</SelectContent>
+                <SelectContent>{vols!.map((v) => <SelectItem key={v.model} value={v.model}>{v.run === "observed" ? `${v.model} (observed)` : v.model}</SelectItem>)}</SelectContent>
               </Select>
             </Row>
           )}
@@ -3015,7 +3112,20 @@ export function InteractiveMap({ data, request, active = true, standalone = fals
                 </Select>
               </Row>
             )}
-            {(solidAt != null || (LIT_VIEWS.includes(volName) && (renderMode === "volume" || renderMode === "cloud"))) && <SwitchRow id="vol-shadow" label="Shadows" checked={shadowOn} onChange={setShadowOn} />}
+            {(solidAt != null || (LIT_VIEWS.includes(volName) && (renderMode === "volume" || renderMode === "cloud"))) && (
+              <>
+                <Row label="Light" help="The sun where it is over the region at the map's time (low and warm near sunrise and sunset, a dim, cool light at night), or a fixed light from the south-west.">
+                  <Select value={lightPick} onValueChange={(x) => setLightPick(x as "sun" | "fixed")}>
+                    <SelectTrigger className="h-8 w-full min-w-0" aria-label="Light"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="sun">Sun at the map time</SelectItem>
+                      <SelectItem value="fixed">Fixed, from the south-west</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </Row>
+                <SwitchRow id="vol-shadow" label="Shadows" checked={shadowOn} onChange={setShadowOn} />
+              </>
+            )}
           </Group>
         )}
         <Group title="The box">
@@ -3065,6 +3175,7 @@ export function InteractiveMap({ data, request, active = true, standalone = fals
               </Select>
             </Row>
           )}
+          {!volNone && <SwitchRow id="vol-hover" label="Readout on hover" checked={hoverOn} onChange={setHoverOn} />}
           {!volNone && scanAxis !== "off" && <ScanSlider key={scanAxis} axis={scanAxis} entry={volEntry} pos={scanPos} onCommit={setScanPos} sink={scanSink} />}
           {!volNone && <SwitchRow id="vol-xsec" label="Cross-section" checked={xsecOn} onChange={(v) => { setXsecOn(v); if (!v) setPicking(null) }}
             help="Slice the 3D field along a line, shown as a chart and as a curtain in 3D. Pick a preset line or draw your own." />}

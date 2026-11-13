@@ -283,6 +283,16 @@ its 2 PVU surface, the dynamic tropopause, coloured by height; the heights of 85
 are worked out in the page from the others: the snow growth zone (humidity between 10 and 0°F)
 and icing (liquid water between 32 and −4°F, GFS only).
 
+**Fields worked out in the page** add to the files: the **wet-bulb snow level** (where the
+wet-bulb temperature is 32°F, close to where snow turns to rain), **θe** and **isentropic
+surfaces** (θ, with a solid that can be coloured by humidity to show isentropic lift), **orographic
+lift** (the wind times the terrain's slope, fading with height) and **turbulence** (the
+Richardson number, shown where shear can overturn the air). **Observed radar** is a model choice
+of its own: NOAA's MRMS 3D reflectivity mosaic, read from the public bucket in the browser, about
+10 MB a frame, downloaded as the clock reaches each frame. Volumes are **lit by the sun** at the
+map's time (low and warm near sunset, dim and cool at night) unless set to a fixed light, and
+**Readout on hover** shows the value, height and pressure under the cursor.
+
 A **render mode** sets how a volume draws: see-through (**Volume**), lit white like real cloud
 (**Cloud**), the strongest value along each line of sight like a composite radar (**Max**), or as
 **Points**, dots scattered through each cell in proportion to its opacity (kept in place as time

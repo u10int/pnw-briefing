@@ -88,19 +88,54 @@ so a range can change without touching the front end.
 - `unpack(byte, v)` reverses the packing: `x = b/254`, squared for sqrt variables, then scaled to
   `min … max`.
 
-**Fields worked out in the page.** Two views aren't in the files. `viewVar` builds them cell by
-cell from two others, and repacks the result on the same kind of byte scale:
+**Fields worked out in the page.** Seven views aren't in the files. `viewVar` builds them from
+fields that are, and repacks the result on the same kind of byte scale. Each `DERIVED` entry
+names its inputs and a rule. The rule gets the inputs unpacked (NaN where missing), each height's
+pressure (log-interpolated between the model's levels at their mean heights), the cell spacing in
+metres, and the terrain when it asks for it:
 
 | View | From | Rule |
 |---|---|---|
 | Snow growth zone (`dgz`) | `rh`, `temp` | humidity where it's −12 to −18 °C (10 to 0 °F), eased in over 1.2 °F at each end |
 | Icing (`icing`) | `water`, `temp` | liquid water colder than freezing, down to −20 °C (−4 °F) |
+| Wet-bulb snow level (`wbz`) | `temp`, `rh` | wet-bulb temperature (Stull 2011), drawn as its 32 °F surface coloured by height |
+| θe (`thetae`) | `temp`, `rh`, pressure | equivalent potential temperature (Bolton 1980), surfaces at 290 – 320 K |
+| Isentropic surfaces (`theta`) | `temp`, pressure | potential temperature, surfaces at 290 – 320 K coloured by height; its solid is the air *below* the value, so the surface is its top |
+| Orographic lift (`oro`) | `u`, `v`, terrain | wind · terrain slope on the model grid, × exp(−height above ground / 2 km) |
+| Turbulence (`turb`) | `temp`, `u`, `v`, pressure | Richardson number N²/S² from centred differences over ±500 m, above 1.5 km; packed high to low (byte 0 is Ri 2) so missing and calm air are clear |
+
+![The 300 K isentropic surface as a solid coloured by humidity, and turbulence near the jet (demo storm)](img/3d/derived.png)
+
+The terrain for orographic lift comes from the same Terrarium tiles as the map's elevation
+(`elevationFor`), averaged over each model cell.
 
 A derived view has a `make()` instead of a file, and a path like `derived/GFS/<run>/icing` that
 only serves as the cache key. Anything that needs a view's encoding (the cross-section, the
 legend, the profile) should go through `viewVar(entry, name)` and not `entry.vars[name]`, which
 only holds the stored files. The freezing level (`frz`) has no data of its own: it's the
 temperature field, drawn as just its 32 °F surface.
+
+**Observed radar** (`lib/mrms3d.ts`) is the one volume that isn't a model. It shows up in the
+3D panel's Model list as "MRMS radar (observed)", with a single field, reflectivity (`dbz`).
+NOAA's MRMS publishes a 3D reflectivity mosaic, `MergedReflectivityQC`, at 33 heights from 0.5
+to 19 km above sea level, every 2 minutes, in a public bucket the page can read directly. For
+each frame:
+
+- 21 levels are read: every 500 m from 0.5 to 9 km, plus 10, 11 and 12 km. That's about 10 MB.
+- They're decoded in the MRMS workers (`decodeMrms`, the same code as the 2D composite), cropped
+  to the models' box and reduced 4× to 0.04°. Each block keeps its strongest echo, so storm
+  cores survive.
+- They're packed onto the 3D view's heights: 9.5, 10.5 and 11.5 km are filled in from their
+  neighbours, and 0.5 km is copied to the ground. Bytes run 0 – 75 dBZ, and no echo is 0, which
+  draws as clear.
+
+The frames offered are hourly over the last 6 hours of the briefing's window, plus every 10
+minutes over the last hour. The list is refreshed every 10 minutes while the window reaches now.
+Frames are only downloaded when the clock reaches them: the entry's variable has a `lazy`
+loader, the page asks for the two steps either side of the clock, and when one arrives the layer
+re-uploads that step's texture (`refreshStep`).
+
+![Observed MRMS reflectivity with a south-to-north scan through it](img/3d/obs-radar.png)
 
 ## 3. The box
 
@@ -242,9 +277,22 @@ surfaces are the picture.
 
 ## 7. Lighting and shadows
 
-The light comes from the south-west and fairly high: `LW = (−0.5, 0.42, 0.76)`, in true
-proportions (x east, y south, z up). In box units its direction is rescaled to climb one box
-height (`lightBox()`), which keeps the light's angle the same at any exaggeration.
+The light (`LW`, a uniform) is a direction in true proportions (x east, y south, z up). By
+default it's **the sun at the map's time** over the middle of the box. `sunPosition` uses NOAA's
+low-precision formulas, good to a few tenths of a degree, and `sunLight` turns that into the
+direction, the colour (`uSunCol`) and how much sky light fills the shade (`uAmb`):
+
+- **By day** the light is white. The light still comes from the sun's direction when it's lower,
+  but its elevation is held at 8° or more, so shadows stay on the map.
+- **Toward sunset** it warms and dims.
+- **Through twilight into night** it becomes a dim, cool, moonlight-blue, with less sky fill, and
+  ground shadows fade with it.
+
+![GFS clouds lit by the setting sun](img/3d/sun-sunset.png)
+
+The **Light** control can switch to a fixed light from the south-west instead,
+`(−0.5, 0.42, 0.76)`. In box units the direction is rescaled to climb one box height
+(`lightBox()`), which keeps the light's angle the same at any exaggeration.
 
 **Lit volumes** (cloud, water, ice, humidity, moisture flow, snow growth zone, icing). At each
 sample, `lightAt` takes 6 taps toward the light, spaced further apart further out (`d0·k²`). It
@@ -334,12 +382,28 @@ their vertex data in `xyz + premultiplied rgba` (28-byte) buffers.
 
 ![Cross-section with its curtain in the box](img/3d/mode-xs.png)
 
+## Hover readout
+
+With **Readout on hover** on (Tools), moving the cursor over the box shows what's under it, for
+example "Clouds 68% at 9.0 km (29,600 ft) · ~300 mb", above the 2D map's own readout.
+`VolumeLayer.probe` reruns the shader's ray for that pixel on the CPU, using the last inverse
+matrix, the same box clip and terrain test, trilinear sampling blended in time, and the same
+step opacity. It stops at the first thing that shows:
+
+- the scan's slice;
+- the solid;
+- a surface (it then reports which one, or for the freezing and snow levels just the height);
+- the volume, once it's about a quarter opaque;
+- in Max mode, the ray's strongest value.
+
+The height is converted to feet, and to an approximate pressure from the model's levels.
+
 ## 10. Adding a field
 
 1. **Data** (`briefing/volume.py`): derive the variable in `derive()`, and give it a range,
    scale, units and label in `VARS`. Add the GRIB records it needs to `PATTERN`/`NAMES` if they
    aren't read yet. Add a test in `tests/test_volume.py`, and to `demo_volume` so the demo has it.
-2. **View** (`lib/volume.ts`): add it to `VolVar`, `VOL_ORDER` and `SOURCE`, and give it a case in
+2. **View** (`lib/volume.ts`): add it to `VolVar`, `VOL_ORDER`, `SOURCE` and `VIEW_LABEL`, and give it a case in
    `transfer()` (colour and extinction) and in `colorLut`/`legendStops`. Add `ISOS` if it reads
    better as surfaces. If it's worked out from other fields, add a `DERIVED` entry instead of a
    file.
@@ -356,7 +420,8 @@ their vertex data in `xyz + premultiplied rgba` (28-byte) buffers.
 |---|---|
 | `briefing/volume.py` | fetching, deriving, resampling, packing, the manifest, the demo storm |
 | `web/src/lib/volume.ts` | manifest and loading, unpacking, derived views, transfer and colour tables, surfaces, legend stops |
-| `web/src/lib/gl/volume-layer.ts` | the custom layer: ray-march shader, textures, caching, particles, points, overlays, curtain, axis |
+| `web/src/lib/gl/volume-layer.ts` | the custom layer: ray-march shader, textures, caching, particles, points, overlays, curtain, axis, the sun, the hover probe |
+| `web/src/lib/mrms3d.ts` | observed 3D radar: frame listing, decoding the levels, packing, loading frames as the clock reaches them |
 | `web/src/lib/volume-overlays.ts` | level maps, trajectories, the point cloud (CPU side) |
 | `web/src/lib/gl/precip-fx.ts` | falling rain and snow |
 | `web/src/lib/gl/terrain.ts` | draping the 2D layer over terrain, ground heights for the box, the snow line |
