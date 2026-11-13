@@ -146,7 +146,8 @@ const DERIVED: Partial<Record<VolVar, Derived>> = {
   // the Richardson number: stability (from θ's change with height) over the wind shear squared.
   // Below about 1 the shear can overturn the layer (Kelvin–Helmholtz waves, clear-air turbulence);
   // below 0.25 it usually does. Stored as Ri, 0 – 2; shown above 1.5 km, where it means clear air
-  turb: { needs: ["temp", "u", "v"], pressure: true, spec: { min: 0, max: 2, scale: "linear", units: "Ri", label: "Richardson number" },
+  // packed high to low (byte 0 is Ri 2), so missing and calm air read as clear
+  turb: { needs: ["temp", "u", "v"], pressure: true, spec: { min: 2, max: 0, scale: "linear", units: "Ri", label: "Richardson number" },
           run: ({ e, inputs: [T, u, v], out, pHpa, zM }) => {
             const { nx, ny, nz } = e, nxy = nx * ny, per = nxy * nz, steps = out.length / per
             for (let t = 0; t < steps; t++) for (let k = 0; k < nz; k++) for (let i = 0; i < nxy; i++) {

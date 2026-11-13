@@ -348,6 +348,9 @@ const SOLID_AT: Partial<Record<VolVar, number[]>> = {
   mflux: [200, 100, 300, 400], w: [0.3, 0.15, 0.6], pv: [2, 1.5, 3], temp: [32, 50, 0, -40], wind: [115, 80, 140, 160],
   thetae: [310, 300, 320, 330], theta: [300, 290, 310, 320], oro: [0.3, 0.15, 0.6], turb: [0.5, 0.25, 1], dbz: [30, 20, 40, 50],
 }
+/** Views whose solid is everything at or below the value: θ rises with height, so the solid is the
+ *  air under the surface, and the surface is its top. */
+const SOLID_BELOW: VolVar[] = ["theta"]
 const solidLabel = (n: VolVar, x: number, units: string) =>
   n === "wind" ? `${x} mph (${Math.round(x / 1.15078)} kt)` : n === "temp" ? `${x}°F` : n === "turb" ? `Ri ${x}` : `${x}${units === "%" ? "%" : ` ${units}`}`
 /** Views drawn as a volume (the others are surfaces), the ones lit from above, and the views another
@@ -775,7 +778,7 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
     // the solid's own colour: the view's colour at that value
     const solid = vol.solid == null ? null : (() => {
       const b = Math.round(frac(vol.solid, v) * 255), lut = colorLut(vol.name, v)
-      return { at: frac(vol.solid, v), rgb: [lut[b * 4] / 255, lut[b * 4 + 1] / 255, lut[b * 4 + 2] / 255] as [number, number, number] }
+      return { at: frac(vol.solid, v), rgb: [lut[b * 4] / 255, lut[b * 4 + 1] / 255, lut[b * 4 + 2] / 255] as [number, number, number], below: SOLID_BELOW.includes(vol.name) }
     })()
     const lit = LIT_VIEWS.includes(vol.name)
     const render = solid ? "solid" : vol.render ?? "volume"

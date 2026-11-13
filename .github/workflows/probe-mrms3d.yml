@@ -12,7 +12,7 @@ jobs:
           cd web && npm ci >/dev/null 2>&1 && npx vite build --outDir /tmp/site >/dev/null && cd ..
           git fetch -q --depth 1 origin gh-pages && git --work-tree=/tmp/gp checkout origin/gh-pages -- data 2>/dev/null || (mkdir -p /tmp/gp && git archive origin/gh-pages data | tar -x -C /tmp/gp)
           cp -r /tmp/gp/data /tmp/site/data && ls /tmp/site/data | head
-          cd web && npx playwright install --with-deps chromium >/dev/null 2>&1 && cd ..
+          cd web && npm i --no-save playwright@1.56.1 >/dev/null 2>&1 && npx playwright install --with-deps chromium >/dev/null 2>&1 && cd ..
           (cd /tmp/site && python3 -m http.server 8000 >/dev/null 2>&1 &) ; sleep 1
           mkdir -p probe-out && cp probe/shot.cjs web/shot.cjs && (cd web && node shot.cjs) ; mv web/probe-out/* probe-out/ 2>/dev/null; ls -la probe-out
           git config user.name probe && git config user.email probe@users.noreply.github.com

@@ -33,7 +33,7 @@ export interface VolumeDraw {
   colorMode?: "own" | "height" | "field"
   colorBy?: { data: Uint8Array; lut: Uint8Array }
   /** An opaque surface where the field reaches `at` (packed fraction), in `rgb` (0 – 1) unless coloured. */
-  solid?: { at: number; rgb: [number, number, number] } | null
+  solid?: { at: number; rgb: [number, number, number]; below?: boolean } | null
   /** Shadows on the ground from the solid, or from the lit field. */
   shadow?: boolean
   /** No field to draw: only the box and what goes in it (particles, precipitation, overlays). */
@@ -183,6 +183,7 @@ uniform sampler2D uCLut;
 // a solid surface where the field reaches uSolidAt: opaque, lit, self-shadowed
 uniform bool uSolid;
 uniform float uSolidAt;
+uniform float uSolidSign;      // 1: inside where the field is at or above the value; -1: at or below
 uniform vec3 uSolidCol;
 uniform float uSolidA;          // the solid's opacity (1: opaque; less lets the map show through)
 // shadows on the ground, from the solid surface or the lit field
@@ -251,7 +252,7 @@ float lightAt(vec3 p, float d0) {
     float dz = d0 * float(k * k);                              // taps further apart further out
     vec3 s = p + L * dz;
     if (s.z > uZr.y || s.z > 1.0) break;
-    if (uSolid) od += step(uSolidAt, valAt(s)) * 2.5;
+    if (uSolid) od += step(0.0, (valAt(s) - uSolidAt) * uSolidSign) * 2.5;
     else od += extinction(s) * 4.0 * uDensity * length(L * d0 * float(2 * k - 1) * uScale) / uScale.x;
   }
   return exp(-od);
@@ -316,10 +317,10 @@ void main() {
           continue;
         }
         // the solid surface: find where the ray crosses it, light it and stop
-        if (uSolid && v >= uSolidAt) {
+        if (uSolid && (v - uSolidAt) * uSolidSign >= 0.0) {
           vec3 a = prevP, b = p;
-          if (prev >= 0.0 && prev < uSolidAt) {
-            for (int k = 0; k < 6; k++) { vec3 m = (a + b) * 0.5; if (valAt(m) >= uSolidAt) b = m; else a = m; }
+          if (prev >= 0.0 && (prev - uSolidAt) * uSolidSign < 0.0) {
+            for (int k = 0; k < 6; k++) { vec3 m = (a + b) * 0.5; if ((valAt(m) - uSolidAt) * uSolidSign >= 0.0) b = m; else a = m; }
           }
           vec3 ps = b;
           vec3 nrm = -normalAt(ps);
@@ -403,7 +404,7 @@ void main() {
       float z = mix(z0, uZr.y, (float(k) + jit) / 56.0);
       vec3 s = pg + L * (z - pg.z);
       if (s.x < 0.0 || s.x > 1.0 || s.y < 0.0 || s.y > 1.0) continue;
-      if (uSolid) od += smoothstep(uSolidAt - 0.015, uSolidAt + 0.015, valAt(s)) * 0.5;
+      if (uSolid) od += smoothstep(-0.015, 0.015, (valAt(s) - uSolidAt) * uSolidSign) * 0.5;
       else od += extinction(s) * 4.0 * uDensity * length(L * (uZr.y - z0) / 56.0 * uScale) / uScale.x;
     }
     float sa = 0.36 * (1.0 - exp(-od)) * clamp(max(uSunCol.r, uSunCol.b) * 1.3, 0.0, 1.0);
@@ -765,7 +766,7 @@ export class VolumeLayer implements CustomLayerInterface {
         if (lut[Math.round(v) * 4 + 3] > 0 && v > best) { best = v; bestP = [x, y, z] }
         continue
       }
-      if (solidAt != null && v >= solidAt) return { x, y, z, byte: solidAt, what: "solid" }
+      if (solidAt != null && (v - solidAt) * (d.solid?.below ? -1 : 1) >= 0) return { x, y, z, byte: solidAt, what: "solid" }
       if (prev >= 0) for (const iso of isos) if ((prev - iso) * (v - iso) < 0) return { x, y, z, byte: iso, what: "surface" }
       prev = v
       const ext = (lut[Math.round(v) * 4 + 3] / 255) * 4
@@ -1184,6 +1185,7 @@ export class VolumeLayer implements CustomLayerInterface {
     gl.uniform1i(p.u("uCLut"), 7)
     gl.uniform1i(p.u("uSolid"), d.solid ? 1 : 0)
     gl.uniform1f(p.u("uSolidAt"), d.solid?.at ?? 2)
+    gl.uniform1f(p.u("uSolidSign"), d.solid?.below ? -1 : 1)
     gl.uniform3f(p.u("uSolidCol"), ...(d.solid?.rgb ?? [1, 1, 1]))
     gl.uniform1i(p.u("uShadow"), d.shadow ? 1 : 0)
     gl.uniform1f(p.u("uSolidA"), d.solidAlpha ?? 1)
