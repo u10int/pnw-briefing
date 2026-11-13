@@ -280,8 +280,15 @@ its 2 PVU surface, the dynamic tropopause, coloured by height; the heights of 85
 are worked out in the page from the others: the snow growth zone (humidity between 10 and 0°F)
 and icing (liquid water between 32 and −4°F, GFS only).
 
-Any view can also be drawn as a **solid**, opaque surface at a chosen value (the jet at 100 kt, the
-tropopause at 2 PVU) with lighting and self-shadowing; volumes and solids can be **coloured** by
+A **render mode** sets how a volume draws: see-through (**Volume**), lit white like real cloud
+(**Cloud**), the strongest value along each line of sight like a composite radar (**Max**), or as
+**Points**, dots scattered through each cell in proportion to its opacity (kept in place as time
+moves, at most about 120k); an **opacity** multiplier and a **show from** threshold hide the thin
+parts. A **scan** cuts a slice across the box (at one height, west to east or south to north) in
+the field's own colours with the rest faded, and can sweep back and forth.
+
+Any view can also be drawn as a **solid** surface at a chosen value (the jet at 100 kt, the
+tropopause at 2 PVU), opaque or partly see-through, with lighting and self-shadowing; volumes and solids can be **coloured** by
 height or by another field (humidity shaped, coloured by wind speed); solids and lit fields cast
 **shadows** on the ground. A **level map** draws a pressure level's height contours (in decametres)
 and wind arrows inside the box, and **trajectories** trace the air arriving over each forecast
