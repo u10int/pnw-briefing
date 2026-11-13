@@ -33,7 +33,7 @@ export interface VolumeDraw {
   colorMode?: "own" | "height" | "field"
   colorBy?: { data: Uint8Array; lut: Uint8Array }
   /** An opaque surface where the field reaches `at` (packed fraction), in `rgb` (0 – 1) unless coloured. */
-  solid?: { at: number; rgb: [number, number, number] } | null
+  solid?: { at: number; rgb: [number, number, number]; below?: boolean } | null
   /** Shadows on the ground from the solid, or from the lit field. */
   shadow?: boolean
   /** No field to draw: only the box and what goes in it (particles, precipitation, overlays). */
@@ -46,6 +46,8 @@ export interface VolumeDraw {
   /** A scan plane through the box (axis and position, 0 – 1 along it) with the rest dimmed, and the
    *  colours it shows every value in (256 RGBA). */
   scan?: { axis: "z" | "x" | "y"; pos: number; rest: number; lut: Uint8Array } | null
+  /** The opacity table for picking under the cursor, when the drawn one is zeroed (solid, points). */
+  pickLut?: Uint8Array
 }
 
 /** Wind for the particles: u and v (m/s) packed like the other fields, every time step. */
@@ -56,6 +58,46 @@ export interface VolumeWind {
   heightsKm: number[]
   /** Colour particles by the drawn field's value at them (its packed byte) instead of their speed. */
   tint?: (byte: number) => [number, number, number]
+}
+
+/** The light: its direction toward the light in true proportions (x east, y south, z up), colour, and
+ *  how bright the shade is (sky light). */
+export interface VolumeLight { dir: [number, number, number]; color: [number, number, number]; ambient: number }
+export const FIXED_LIGHT: VolumeLight = { dir: [-0.5, 0.42, 0.76], color: [1, 1, 1], ambient: 1 }
+
+/**
+ * Where the sun is for a time and place (NOAA's low-precision formulas, good to a few tenths of a
+ * degree): its azimuth (degrees clockwise from north) and elevation (degrees above the horizon).
+ */
+export function sunPosition(ms: number, lat: number, lon: number): { az: number; el: number } {
+  const rad = Math.PI / 180
+  const d = ms / 864e5 - 10957.5                                    // days from J2000.0
+  const g = (357.529 + 0.98560028 * d) * rad
+  const q = 280.459 + 0.98564736 * d
+  const L = (q + 1.915 * Math.sin(g) + 0.02 * Math.sin(2 * g)) * rad
+  const e = (23.439 - 0.00000036 * d) * rad
+  const ra = Math.atan2(Math.cos(e) * Math.sin(L), Math.cos(L))
+  const dec = Math.asin(Math.sin(e) * Math.sin(L))
+  const gmst = (18.697374558 + 24.06570982441908 * d) * 15             // degrees
+  const H = ((gmst + lon) * rad - ra)
+  const phi = lat * rad
+  const el = Math.asin(Math.sin(phi) * Math.sin(dec) + Math.cos(phi) * Math.cos(dec) * Math.cos(H))
+  const az = Math.atan2(-Math.sin(H), Math.tan(dec) * Math.cos(phi) - Math.sin(phi) * Math.cos(H))
+  return { az: ((az / rad) % 360 + 360) % 360, el: el / rad }
+}
+
+/** The light for the sun at a time over a place: from where the sun is (kept at least 8° up, so
+ *  shadows stay on the map), white by day, warming and dimming toward sunset, and a dim, cool
+ *  light with a bluer sky through twilight into the night. */
+export function sunLight(ms: number, lat: number, lon: number): VolumeLight & { az: number; el: number } {
+  const { az, el } = sunPosition(ms, lat, lon)
+  const r = Math.PI / 180, up = Math.max(8, el) * r
+  const dir: [number, number, number] = [Math.sin(az * r) * Math.cos(up), -Math.cos(az * r) * Math.cos(up), Math.sin(up)]
+  const mix = (a: number[], b: number[], t: number) => a.map((x, i) => x + (b[i] - x) * Math.min(1, Math.max(0, t))) as [number, number, number]
+  const day = [1, 1, 1], low = [1, 0.74, 0.5], night = [0.42, 0.47, 0.62]
+  const color = el >= 2 ? mix(low, day, (el - 2) / 16) : mix(night, low, (el + 8) / 10)
+  const ambient = el >= 0 ? 1 : 0.75 + 0.25 * Math.min(1, Math.max(0, (el + 12) / 12))
+  return { dir, color, ambient, az, el }
 }
 
 /** Screen positions (CSS px) of the height and pressure ticks, for the page to label. */
@@ -141,6 +183,7 @@ uniform sampler2D uCLut;
 // a solid surface where the field reaches uSolidAt: opaque, lit, self-shadowed
 uniform bool uSolid;
 uniform float uSolidAt;
+uniform float uSolidSign;      // 1: inside where the field is at or above the value; -1: at or below
 uniform vec3 uSolidCol;
 uniform float uSolidA;          // the solid's opacity (1: opaque; less lets the map show through)
 // shadows on the ground, from the solid surface or the lit field
@@ -155,8 +198,12 @@ uniform float uScanPos, uRest;
 uniform sampler2D uPLut;
 out vec4 fragColor;
 const float PI = 3.141592653589793;
-// the light: from the south-west and fairly high, in the box's true proportions (x east, y south, z up)
-const vec3 LW = vec3(-0.5, 0.42, 0.76);
+// the light, in the box's true proportions (x east, y south, z up): the sun at the map's time, or
+// a fixed light from the south-west; its colour (warmer and dimmer near the horizon, moonlight
+// blue at night) and how much of the sky's light fills the shade
+uniform vec3 LW;
+uniform vec3 uSunCol;
+uniform float uAmb;
 
 vec3 texPos(vec3 p) {
   float lat = degrees(atan(sinh(PI * (1.0 - 2.0 * mix(uMercY.x, uMercY.y, p.y)))));
@@ -205,7 +252,7 @@ float lightAt(vec3 p, float d0) {
     float dz = d0 * float(k * k);                              // taps further apart further out
     vec3 s = p + L * dz;
     if (s.z > uZr.y || s.z > 1.0) break;
-    if (uSolid) od += step(uSolidAt, valAt(s)) * 2.5;
+    if (uSolid) od += step(0.0, (valAt(s) - uSolidAt) * uSolidSign) * 2.5;
     else od += extinction(s) * 4.0 * uDensity * length(L * d0 * float(2 * k - 1) * uScale) / uScale.x;
   }
   return exp(-od);
@@ -253,9 +300,11 @@ void main() {
         float vs = valAt(pp);
         tPlane = 1e9;
         if (vs < 254.5 / 255.0 && !(uHasGround && pp.z < groundZ(pp.xy))) {
-          vec3 col = uColorMode == 0 ? texture(uPLut, vec2((vs * 255.0 + 0.5) / 256.0, 0.5)).rgb : colourAt(pp, vec3(0.5));
-          acc.rgb += (1.0 - acc.a) * 0.9 * col;
-          acc.a += (1.0 - acc.a) * 0.9;
+          vec4 pc = texture(uPLut, vec2((vs * 255.0 + 0.5) / 256.0, 0.5));
+          vec3 col = uColorMode == 0 ? pc.rgb : colourAt(pp, vec3(0.5));
+          float pa = 0.9 * pc.a;                                 // clear where the view has nothing (no echo)
+          acc.rgb += (1.0 - acc.a) * pa * col;
+          acc.a += (1.0 - acc.a) * pa;
         }
       }
       // the rest of the volume dims while scanning
@@ -270,10 +319,10 @@ void main() {
           continue;
         }
         // the solid surface: find where the ray crosses it, light it and stop
-        if (uSolid && v >= uSolidAt) {
+        if (uSolid && (v - uSolidAt) * uSolidSign >= 0.0) {
           vec3 a = prevP, b = p;
-          if (prev >= 0.0 && prev < uSolidAt) {
-            for (int k = 0; k < 6; k++) { vec3 m = (a + b) * 0.5; if (valAt(m) >= uSolidAt) b = m; else a = m; }
+          if (prev >= 0.0 && (prev - uSolidAt) * uSolidSign < 0.0) {
+            for (int k = 0; k < 6; k++) { vec3 m = (a + b) * 0.5; if ((valAt(m) - uSolidAt) * uSolidSign >= 0.0) b = m; else a = m; }
           }
           vec3 ps = b;
           vec3 nrm = -normalAt(ps);
@@ -283,7 +332,7 @@ void main() {
           float diff = max(dot(nrm, Lw), 0.0);
           float spec = pow(max(dot(nrm, normalize(Lw + V)), 0.0), 40.0) * 0.22;
           vec3 base = uColorMode == 0 ? uSolidCol : colourAt(ps, uSolidCol);
-          vec3 col = base * (0.36 + 0.14 * (nrm.z * 0.5 + 0.5) + 0.62 * diff * sh) + spec * sh;
+          vec3 col = base * (uAmb * (0.36 + 0.14 * (nrm.z * 0.5 + 0.5)) + uSunCol * 0.62 * diff * sh) + uSunCol * spec * sh;
           float sa = uSolidA * w;
           acc.rgb += (1.0 - acc.a) * sa * col;
           acc.a += (1.0 - acc.a) * sa;
@@ -316,13 +365,13 @@ void main() {
             // cloud: white and gray by the light that gets through, whatever the field's colours
             float L = lightAt(p, 0.008);
             float fwd = pow(max(dot(normalize(rd * uScale), Lw), 0.0), 6.0);
-            col = vec3(0.95, 0.96, 0.985) * (0.3 + 0.12 * p.z + 0.66 * L + 0.2 * fwd * L);
+            col = vec3(0.95, 0.96, 0.985) * (uAmb * (0.3 + 0.12 * p.z) + uSunCol * (0.66 * L + 0.2 * fwd * L));
           } else if (uLit) {
             // light that gets through the field towards the sun, a sky fill from above, and
             // forward scattering where we look towards the light (bright cloud edges)
             float L = lightAt(p, 0.008);
             float fwd = pow(max(dot(normalize(rd * uScale), Lw), 0.0), 6.0);
-            col *= 0.34 + 0.16 * p.z + 0.62 * L + 0.25 * fwd * L;
+            col *= uAmb * (0.34 + 0.16 * p.z) + uSunCol * (0.62 * L + 0.25 * fwd * L);
           } else {
             col *= mix(0.72, 1.0, p.z);                        // a little darker low down, for depth
           }
@@ -357,10 +406,10 @@ void main() {
       float z = mix(z0, uZr.y, (float(k) + jit) / 56.0);
       vec3 s = pg + L * (z - pg.z);
       if (s.x < 0.0 || s.x > 1.0 || s.y < 0.0 || s.y > 1.0) continue;
-      if (uSolid) od += smoothstep(uSolidAt - 0.015, uSolidAt + 0.015, valAt(s)) * 0.5;
+      if (uSolid) od += smoothstep(-0.015, 0.015, (valAt(s) - uSolidAt) * uSolidSign) * 0.5;
       else od += extinction(s) * 4.0 * uDensity * length(L * (uZr.y - z0) / 56.0 * uScale) / uScale.x;
     }
-    float sa = 0.36 * (1.0 - exp(-od));
+    float sa = 0.36 * (1.0 - exp(-od)) * clamp(max(uSunCol.r, uSunCol.b) * 1.3, 0.0, 1.0);
     acc.a += (1.0 - acc.a) * sa;                                 // black, premultiplied
   }
   if (acc.a <= 0.0) discard;
@@ -510,6 +559,9 @@ export class VolumeLayer implements CustomLayerInterface {
   private ovBuf?: WebGLBuffer
   private ovCount = 0
   private ovDirty = false
+  private light: VolumeLight = FIXED_LIGHT
+  private lastInv: M4 | null = null
+  private staleSteps = new Set<number>()
   private ptVao?: WebGLVertexArrayObject
   private ptBuf?: WebGLBuffer
   private ptCount = 0
@@ -642,6 +694,107 @@ export class VolumeLayer implements CustomLayerInterface {
     if (!d) this.onAxis?.([])
     this.map?.triggerRepaint()
   }
+  /**
+   * What's under a point of the map (CSS px in the canvas): marches the same ray the shader does, on
+   * the CPU, to the first thing that shows: the solid, a surface, the scan's slice, or the volume
+   * once it's about a quarter opaque (in Max mode, the strongest value along the ray). Returns the
+   * point in box coordinates and the packed value there (fractional, blended in time), or null.
+   */
+  probe(px: number, py: number, cssW: number, cssH: number): { x: number; y: number; z: number; byte: number; what: "volume" | "solid" | "surface" | "scan" | "max" } | null {
+    const d = this.draw, inv = this.lastInv
+    if (!d || !inv || d.empty && !d.pickLut) return null
+    const g = d.grid
+    const nx = (px / cssW) * 2 - 1, ny = 1 - (py / cssH) * 2
+    const un = (z: number) => {
+      const x = inv[0] * nx + inv[4] * ny + inv[8] * z + inv[12], y = inv[1] * nx + inv[5] * ny + inv[9] * z + inv[13]
+      const zz = inv[2] * nx + inv[6] * ny + inv[10] * z + inv[14], w = inv[3] * nx + inv[7] * ny + inv[11] * z + inv[15]
+      return [x / w, y / w, zz / w]
+    }
+    const ro = un(-1), f = un(1), rd = [f[0] - ro[0], f[1] - ro[1], f[2] - ro[2]]
+    let tn = 0, tf = Infinity
+    const lo = [0, 0, this.zr[0]], hi = [1, 1, this.zr[1]]
+    for (let a = 0; a < 3; a++) {
+      if (Math.abs(rd[a]) < 1e-12) { if (ro[a] < lo[a] || ro[a] > hi[a]) return null; continue }
+      let t0 = (lo[a] - ro[a]) / rd[a], t1 = (hi[a] - ro[a]) / rd[a]
+      if (t0 > t1) [t0, t1] = [t1, t0]
+      tn = Math.max(tn, t0); tf = Math.min(tf, t1)
+    }
+    if (!(tf > tn)) return null
+    const yN = mercY(g.lat[1]), yS = mercY(g.lat[0])
+    const per = g.nx * g.ny * g.nz, nxy = g.nx * g.ny
+    const s0 = Math.min(this.i0, d.steps - 1) * per, s1 = Math.min(this.i1, d.steps - 1) * per, tt = this.i0 === this.i1 ? 0 : this.t
+    const at = (x: number, y: number, z: number) => {
+      const lat = (Math.atan(Math.sinh(Math.PI * (1 - 2 * (yN + y * (yS - yN))))) * 180) / Math.PI
+      const fx = x * (g.nx - 1), fy = ((lat - g.lat[0]) / (g.lat[1] - g.lat[0])) * (g.ny - 1), fz = z * (g.nz - 1)
+      const x0 = Math.max(0, Math.min(g.nx - 2, Math.floor(fx))), y0 = Math.max(0, Math.min(g.ny - 2, Math.floor(fy))), z0 = Math.max(0, Math.min(g.nz - 2, Math.floor(fz)))
+      const ax = Math.min(1, Math.max(0, fx - x0)), ay = Math.min(1, Math.max(0, fy - y0)), az = Math.min(1, Math.max(0, fz - z0))
+      let v = 0
+      for (let c = 0; c < 8; c++) {
+        const dx = c & 1, dy = (c >> 1) & 1, dz = (c >> 2) & 1
+        const o = (z0 + dz) * nxy + (y0 + dy) * g.nx + x0 + dx
+        let b0 = d.data[s0 + o], b1 = d.data[s1 + o]
+        if (b0 === 255) b0 = 0
+        if (b1 === 255) b1 = 0
+        v += (b0 * (1 - tt) + b1 * tt) * (dx ? ax : 1 - ax) * (dy ? ay : 1 - ay) * (dz ? az : 1 - az)
+      }
+      return v
+    }
+    const lut = d.pickLut ?? d.lut
+    const dt = 1.7320508 / 400 / Math.hypot(...rd)
+    // the step's true length in box widths, as the shader works it out
+    const sx = mercX(g.lon[1]) - mercX(g.lon[0]), sy = yS - yN
+    const sz = (g.topKm * 1000 * this.exaggeration) / (EARTH_CIRC * Math.cos((((g.lat[0] + g.lat[1]) / 2) * Math.PI) / 180))
+    const worldStep = Math.hypot(rd[0] * dt * sx, rd[1] * dt * sy, rd[2] * dt * sz) / sx
+    // where the ray meets the scan plane
+    let tPlane = Infinity
+    if (d.scan) {
+      const ax = d.scan.axis === "z" ? 2 : d.scan.axis === "x" ? 0 : 1
+      const tp = (d.scan.pos - ro[ax]) / rd[ax]
+      if (tp > tn && tp < tf) tPlane = tp
+    }
+    const solidAt = d.solid ? d.solid.at * 255 : null
+    const isos = (d.isos ?? []).map((i) => i.at * 255)
+    let acc = 0, prev = -1, best = -1, bestP: number[] | null = null
+    for (let t = tn; t <= tf; t += dt) {
+      if (t >= tPlane) {
+        const p = [ro[0] + rd[0] * tPlane, ro[1] + rd[1] * tPlane, ro[2] + rd[2] * tPlane]
+        const pv = at(p[0], p[1], p[2])
+        if (p[2] >= this.groundAt(p[0], p[1]) && d.scan!.lut[Math.round(pv) * 4 + 3] > 0) return { x: p[0], y: p[1], z: p[2], byte: pv, what: "scan" }
+        tPlane = Infinity
+      }
+      const x = ro[0] + rd[0] * t, y = ro[1] + rd[1] * t, z = ro[2] + rd[2] * t
+      if (this.ground && z < this.groundAt(x, y)) break
+      const v = at(x, y, z)
+      if (d.mode === "max") {
+        if (lut[Math.round(v) * 4 + 3] > 0 && v > best) { best = v; bestP = [x, y, z] }
+        continue
+      }
+      if (solidAt != null && (v - solidAt) * (d.solid?.below ? -1 : 1) >= 0) return { x, y, z, byte: solidAt, what: "solid" }
+      if (prev >= 0) for (const iso of isos) if ((prev - iso) * (v - iso) < 0) return { x, y, z, byte: iso, what: "surface" }
+      prev = v
+      const ext = (lut[Math.round(v) * 4 + 3] / 255) * 4
+      acc += (1 - acc) * (1 - Math.exp(-ext * 30 * (d.density ?? 1) * Math.max(worldStep, 1e-4)))
+      if (acc > 0.25) return { x, y, z, byte: v, what: "volume" }
+    }
+    return bestP ? { x: bestP[0], y: bestP[1], z: bestP[2], byte: best, what: "max" } : null
+  }
+
+  /** A step's data arrived (observed radar): upload it again on the next frame. */
+  refreshStep(k: number) {
+    this.staleSteps.add(k)
+    this.dataChanged = true
+    this.map?.triggerRepaint()
+  }
+
+  /** Light the field by the sun (or a fixed light). */
+  setLight(l: VolumeLight | null) {
+    const n = l ?? FIXED_LIGHT
+    if (JSON.stringify(n) === JSON.stringify(this.light)) return
+    this.light = n
+    this.dataChanged = true
+    this.map?.triggerRepaint()
+  }
+
   /** Move the scan plane without anything else changing (for the sweep). */
   setScanPos(pos: number) {
     if (!this.draw?.scan || this.draw.scan.pos === pos) return
@@ -897,6 +1050,13 @@ export class VolumeLayer implements CustomLayerInterface {
     const mvp = mul(mercatorMatrix(args), model)
     const inv = invert(mvp)
     if (!inv) return
+    this.lastInv = inv
+    for (const k of this.staleSteps) {
+      const tex = this.textures.get(k)
+      if (tex) gl.deleteTexture(tex)
+      this.textures.delete(k)
+    }
+    this.staleSteps.clear()
 
     if (d.key !== this.lutKey) {
       gl.bindTexture(gl.TEXTURE_2D, this.lut)
@@ -999,6 +1159,9 @@ export class VolumeLayer implements CustomLayerInterface {
     gl.uniform1i(p.u("uSteps"), this.moving ? 96 : 192)
     gl.uniform2f(p.u("uZr"), this.zr[0], this.zr[1])
     gl.uniform1i(p.u("uLit"), d.lit ? 1 : 0)
+    gl.uniform3f(p.u("LW"), ...this.light.dir)
+    gl.uniform3f(p.u("uSunCol"), ...this.light.color)
+    gl.uniform1f(p.u("uAmb"), this.light.ambient)
     const isos = d.isos ?? []
     gl.uniform1i(p.u("uIsoN"), isos.length)
     if (isos.length) {
@@ -1025,6 +1188,7 @@ export class VolumeLayer implements CustomLayerInterface {
     gl.uniform1i(p.u("uCLut"), 7)
     gl.uniform1i(p.u("uSolid"), d.solid ? 1 : 0)
     gl.uniform1f(p.u("uSolidAt"), d.solid?.at ?? 2)
+    gl.uniform1f(p.u("uSolidSign"), d.solid?.below ? -1 : 1)
     gl.uniform3f(p.u("uSolidCol"), ...(d.solid?.rgb ?? [1, 1, 1]))
     gl.uniform1i(p.u("uShadow"), d.shadow ? 1 : 0)
     gl.uniform1f(p.u("uSolidA"), d.solidAlpha ?? 1)
