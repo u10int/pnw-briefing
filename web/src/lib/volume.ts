@@ -316,7 +316,7 @@ export function transfer(name: VolVar, x: number): [number, number, number, numb
     case "thetae": return [...lerp(THETAE_STOPS, x), 0.004] as [number, number, number, number]
     case "theta": return [...lerp(THETA_STOPS, x), 0] as [number, number, number, number]
     // lift up the slopes warm, sinking down them cool, like rising and sinking air
-    case "oro": return [...lerp(x >= 0 ? UP : DOWN, Math.abs(x)), 1.8 * smooth(0.05, 0.7, Math.abs(x)) ** 1.3] as [number, number, number, number]
+    case "oro": return [...lerp(x >= 0 ? UP : DOWN, Math.min(1, Math.abs(x) * 2)), 2 * smooth(0.03, 0.45, Math.abs(x)) ** 1.2] as [number, number, number, number]
     // the lower the Richardson number, the likelier the overturning: clear above 1, solid near 0.25
     case "turb": return [...lerp(TURB_STOPS, x), 1.6 * smooth(1.0, 0.2, x) ** 1.5] as [number, number, number, number]
     // the radar's own colours, thickening with the echo
@@ -398,7 +398,8 @@ export function colorLut(name: VolVar, v: VolumeVar): Uint8Array {
   for (let b = 0; b < 255; b++) {
     const x = unpack(b, v)
     const rgb = name === "temp" || name === "frz" || name === "wbz" ? lerp(TEMP_SMOOTH, x) : name === "wind" ? lerp(WIND_SMOOTH, x) : transfer(name, x).slice(0, 3)
-    out.set([...rgb.map(Math.round), 255], b * 4)
+    // no echo shows as nothing (a scan's slice through clear air stays clear)
+    out.set([...rgb.map(Math.round), name === "dbz" && x < 5 ? 0 : 255], b * 4)
   }
   return out
 }

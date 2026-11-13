@@ -2,17 +2,12 @@ const { chromium } = require('playwright');
 (async () => {
   const b = await chromium.launch()
   const shots = [
-    ['radar-volume', 'vm=MRMS%20radar&vf=dbz&vp=0&op=0&c=-123.6,46.3,5.6,60,-15'],
-    ['radar-max', 'vm=MRMS%20radar&vf=dbz&rm=max&vp=0&op=0&c=-123.6,46.3,5.6,60,-15'],
-    ['radar-scan', 'vm=MRMS%20radar&vf=dbz&sc=x&scp=0.55&vp=0&op=0&c=-123.6,46.3,5.6,60,-15'],
-    ['gfs-oro', 'vm=GFS&vf=oro&tr=1&vp=0&op=0&c=-122.8,46.9,6,62,75'],
-    ['gfs-cloud-noon', 't=2026-11-13T21:00Z&vm=GFS&vf=cloud&vp=0&op=0&c=-123.6,46.3,5.4,60,-15'],
-    ['gfs-cloud-sunset', 't=2026-11-14T00:00Z&vm=GFS&vf=cloud&vp=0&op=0&c=-123.6,46.3,5.4,60,-15'],
-    ['gfs-cloud-night', 't=2026-11-14T06:00Z&vm=GFS&vf=cloud&vp=0&op=0&c=-123.6,46.3,5.4,60,-15'],
-    ['gfs-wbz', 'vm=GFS&vf=wbz&tr=1&vp=0&op=0&c=-122.4,46.6,6.2,64,55'],
-    ['gfs-thetae', 'vm=GFS&vf=thetae&vp=0&op=0&c=-123.6,46.3,5.4,60,-15'],
-    ['gfs-theta', 'vm=GFS&vf=theta&rm=solid&sol=300&col=rh&vp=0&op=0&c=-124.6,45.6,5.1,58,20'],
-    ['gfs-turb', 'vm=GFS&vf=turb&vp=0&op=0&c=-123.6,46.4,4.9,58,-15'],
+    ['radar-scan', 'vm=MRMS%20radar&vf=dbz&sc=x&scp=0.55&vp=0&c=-124.4,46.4,5.25,58,-18'],
+    ['radar-volume', 'vm=MRMS%20radar&vf=dbz&vp=0&c=-124.4,46.4,5.25,58,-18'],
+    ['gfs-oro', 'vm=GFS&vf=oro&tr=1&vp=0&c=-124.4,46.4,5.25,58,-18'],
+    ['gfs-oro-near', 'vm=GFS&vf=oro&vp=0&zr=0,4&c=-122.6,46.6,6.2,62,70'],
+    ['gfs-cloud-night', 't=2026-11-14T06:00Z&vm=GFS&vf=cloud&vp=0&c=-124.4,46.4,5.25,58,-18'],
+    ['preset-isen', 'vm=GFS&vf=theta&rm=solid&sol=300&col=rh&vp=0&c=-124.6,45.6,5.1,58,20'],
   ]
   for (const [name, q] of shots) {
     const p = await b.newPage({ viewport: { width: 1400, height: 900 } })

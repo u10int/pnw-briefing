@@ -94,9 +94,9 @@ export function sunLight(ms: number, lat: number, lon: number): VolumeLight & { 
   const r = Math.PI / 180, up = Math.max(8, el) * r
   const dir: [number, number, number] = [Math.sin(az * r) * Math.cos(up), -Math.cos(az * r) * Math.cos(up), Math.sin(up)]
   const mix = (a: number[], b: number[], t: number) => a.map((x, i) => x + (b[i] - x) * Math.min(1, Math.max(0, t))) as [number, number, number]
-  const day = [1, 1, 1], low = [1, 0.74, 0.5], night = [0.3, 0.36, 0.5]
+  const day = [1, 1, 1], low = [1, 0.74, 0.5], night = [0.42, 0.47, 0.62]
   const color = el >= 2 ? mix(low, day, (el - 2) / 16) : mix(night, low, (el + 8) / 10)
-  const ambient = el >= 0 ? 1 : 0.62 + 0.38 * Math.min(1, Math.max(0, (el + 12) / 12))
+  const ambient = el >= 0 ? 1 : 0.75 + 0.25 * Math.min(1, Math.max(0, (el + 12) / 12))
   return { dir, color, ambient, az, el }
 }
 
@@ -300,9 +300,11 @@ void main() {
         float vs = valAt(pp);
         tPlane = 1e9;
         if (vs < 254.5 / 255.0 && !(uHasGround && pp.z < groundZ(pp.xy))) {
-          vec3 col = uColorMode == 0 ? texture(uPLut, vec2((vs * 255.0 + 0.5) / 256.0, 0.5)).rgb : colourAt(pp, vec3(0.5));
-          acc.rgb += (1.0 - acc.a) * 0.9 * col;
-          acc.a += (1.0 - acc.a) * 0.9;
+          vec4 pc = texture(uPLut, vec2((vs * 255.0 + 0.5) / 256.0, 0.5));
+          vec3 col = uColorMode == 0 ? pc.rgb : colourAt(pp, vec3(0.5));
+          float pa = 0.9 * pc.a;                                 // clear where the view has nothing (no echo)
+          acc.rgb += (1.0 - acc.a) * pa * col;
+          acc.a += (1.0 - acc.a) * pa;
         }
       }
       // the rest of the volume dims while scanning
@@ -756,7 +758,8 @@ export class VolumeLayer implements CustomLayerInterface {
     for (let t = tn; t <= tf; t += dt) {
       if (t >= tPlane) {
         const p = [ro[0] + rd[0] * tPlane, ro[1] + rd[1] * tPlane, ro[2] + rd[2] * tPlane]
-        if (p[2] >= this.groundAt(p[0], p[1])) return { x: p[0], y: p[1], z: p[2], byte: at(p[0], p[1], p[2]), what: "scan" }
+        const pv = at(p[0], p[1], p[2])
+        if (p[2] >= this.groundAt(p[0], p[1]) && d.scan!.lut[Math.round(pv) * 4 + 3] > 0) return { x: p[0], y: p[1], z: p[2], byte: pv, what: "scan" }
         tPlane = Infinity
       }
       const x = ro[0] + rd[0] * t, y = ro[1] + rd[1] * t, z = ro[2] + rd[2] * t
