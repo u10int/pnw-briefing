@@ -7,8 +7,9 @@ import { MISSING, mercY, program, type Program } from "./util"
  * Falling precipitation for the 3D view, from the map's radar layer: where the model's precipitation
  * rate (or, without one, its simulated reflectivity or precipitation type) shows precipitation,
  * streaks of rain or drifting flakes of snow fall from a few kilometres up to the ground, as many as
- * the intensity calls for: rain as blue streaks a few pixels wide, snow as white flakes with a dark
- * rim (so they show over a light map), freezing rain, sleet and mixes in the radar legend's hues. Rain falls fast in streaks; snow slowly, wobbling; sleet and
+ * the intensity calls for: rain as blue streaks a few pixels wide (freezing rain the same, in pink),
+ * snow as soft white flakes over a faint shadow (so they show over a light map), sleet as small hard
+ * ice pellets (orange), and mixes as short purple streaks. Rain falls fast in streaks; snow slowly, wobbling; sleet and
  * freezing rain in between. Positions are in the volume box's coordinates (0 – 1 each way, z up).
  */
 
@@ -59,15 +60,24 @@ out vec4 vCol;
 void main() { vCol = aCol; gl_Position = uMVP * vec4(aPos, 1.0); gl_PointSize = uPoint * (0.7 + 0.6 * aCol.a); }`
 const FLAKE_FS = /* glsl */ `#version 300 es
 precision highp float;
+uniform bool uSoft;
 in vec4 vCol;
 out vec4 fragColor;
 void main() {
   float r = length(gl_PointCoord - 0.5) * 2.0;
   if (r > 1.0) discard;
+  float a = vCol.a;
+  if (uSoft) {
+    // a snowflake: a soft, fuzzy white glow fading to nothing, over a fainter grey shadow a little
+    // wider, so it still shows over a light map
+    float glow = exp(-r * r * 5.0);
+    float shade = exp(-r * r * 2.2) * (1.0 - glow) * 0.28;
+    fragColor = vec4(vCol.rgb * glow * a + vec3(0.12, 0.15, 0.22) * shade * a, (glow + shade) * a);
+    return;
+  }
+  // an ice pellet: a small, hard bead with a dark rim (premultiplied)
   float core = 1.0 - smoothstep(0.5, 0.68, r);
   float rim = (1.0 - smoothstep(0.82, 1.0, r)) * (1.0 - core);
-  float a = vCol.a;
-  // premultiplied: the colour in the middle, a grey-blue edge around it
   fragColor = vec4(vCol.rgb * core * a + vec3(0.16, 0.2, 0.3) * rim * 0.55 * a, (core + rim * 0.55) * a);
 }`
 
@@ -76,13 +86,15 @@ const PER_CELL = 4          // per cell with precipitation, before weighting by 
 const START_KM = 3.5        // where they appear (roughly cloud base and below)
 
 type Kind = "rain" | "snow" | "freezing rain" | "sleet" | "mix"
-/** Seconds to fall from START_KM, streak length (km) and wobble, by type. */
-const FALL: Record<Kind, { secs: number; streak: number; wobble: number }> = {
-  rain: { secs: 1.4, streak: 0.35, wobble: 0 },
-  "freezing rain": { secs: 1.5, streak: 0.3, wobble: 0 },
-  sleet: { secs: 2.0, streak: 0.12, wobble: 0.002 },
-  mix: { secs: 3.0, streak: 0.08, wobble: 0.004 },
-  snow: { secs: 6.0, streak: 0, wobble: 0.006 },
+/** Seconds to fall from START_KM, how it's drawn (a streak of this length in km, a soft flake or a
+ *  hard pellet) and wobble, by type. Freezing rain is rain that freezes on landing, so it falls as
+ *  rain does; sleet is ice pellets, bouncing beads a little smaller than flakes. */
+const FALL: Record<Kind, { secs: number; streak: number; look: "streak" | "flake" | "pellet"; wobble: number }> = {
+  rain: { secs: 1.4, streak: 0.35, look: "streak", wobble: 0 },
+  "freezing rain": { secs: 1.5, streak: 0.3, look: "streak", wobble: 0 },
+  sleet: { secs: 2.0, streak: 0, look: "pellet", wobble: 0.001 },
+  mix: { secs: 3.0, streak: 0.08, look: "streak", wobble: 0.004 },
+  snow: { secs: 6.0, streak: 0, look: "flake", wobble: 0.006 },
 }
 const rgb = (h: string) => { const n = parseInt(h.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((c) => c / 255) }
 /** Rain blue and snow white, as they look; the mixed types keep the radar legend's hues. */
@@ -120,7 +132,8 @@ export class PrecipFx {
   private ground: ((x: number, y: number) => number) | null = null
   private last = 0
   private streaks = new Float32Array(MAX * 10)        // head xyz, tail xyz, rgba (premultiplied)
-  private points = new Float32Array(MAX * 7)
+  private points = new Float32Array(MAX * 7)        // flakes
+  private pellets = new Float32Array(MAX * 7)
 
   constructor(gl: WebGL2RenderingContext) {
     this.streakProg = program(gl, STREAK_VS, STREAK_FS)
@@ -253,7 +266,7 @@ export class PrecipFx {
     const dt = this.last ? Math.min(0.05, (now - this.last) / 1000) : 1 / 60
     this.last = now
     const kinds: Kind[] = ["rain", "snow", "freezing rain", "sleet", "mix"]
-    let nl = 0, np = 0
+    let nl = 0, np = 0, ne = 0
     for (let i = 0; i < this.n; i++) {
       const k = kinds[this.kind[i]], f = FALL[k]
       this.pz[i] -= (this.top[i] / f.secs) * dt
@@ -262,12 +275,15 @@ export class PrecipFx {
       const z = this.pz[i]
       if (z < zr[0] || z > zr[1]) continue
       const c = COL[k] ?? COL.rain
-      // rain lighter (it's dense), flakes nearly solid
-      const a = f.streak > 0 ? 0.32 + 0.4 * this.inten[i] : 0.7 + 0.3 * this.inten[i]
-      if (f.streak > 0) {
+      // rain lighter (it's dense), flakes and pellets nearly solid
+      const a = f.look === "streak" ? 0.32 + 0.4 * this.inten[i] : 0.75 + 0.25 * this.inten[i]
+      if (f.look === "streak") {
         const z1 = Math.min(zr[1], z + (f.streak * (0.7 + 0.8 * this.inten[i])) / box.topKm)
         this.streaks.set([this.px[i], this.py[i], z, this.px[i], this.py[i], z1, c[0] * a, c[1] * a, c[2] * a, a], nl * 10)
         nl++
+      } else if (f.look === "pellet") {
+        this.pellets.set([this.px[i], this.py[i], z, c[0] * a, c[1] * a, c[2] * a, a], ne * 7)
+        ne++
       } else {
         this.points.set([this.px[i], this.py[i], z, c[0] * a, c[1] * a, c[2] * a, a], np * 7)
         np++
@@ -286,15 +302,18 @@ export class PrecipFx {
       gl.bufferData(gl.ARRAY_BUFFER, this.streaks.subarray(0, nl * 10), gl.STREAM_DRAW)
       gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, nl)
     }
-    if (np) {
+    // soft flakes, larger, then small hard pellets
+    for (const [arr, n, size, soft] of [[this.points, np, 6.5, true], [this.pellets, ne, 3.0, false]] as const) {
+      if (!n) continue
       const p = this.flakeProg
       gl.useProgram(p.program)
       gl.uniformMatrix4fv(p.u("uMVP"), false, mvp)
-      gl.uniform1f(p.u("uPoint"), 4.2 * dpr)
+      gl.uniform1f(p.u("uPoint"), size * dpr)
+      gl.uniform1i(p.u("uSoft"), soft ? 1 : 0)
       gl.bindVertexArray(this.flakeVao)
       gl.bindBuffer(gl.ARRAY_BUFFER, this.flakeBuf)
-      gl.bufferData(gl.ARRAY_BUFFER, this.points.subarray(0, np * 7), gl.STREAM_DRAW)
-      gl.drawArrays(gl.POINTS, 0, np)
+      gl.bufferData(gl.ARRAY_BUFFER, arr.subarray(0, n * 7), gl.STREAM_DRAW)
+      gl.drawArrays(gl.POINTS, 0, n)
     }
     gl.bindVertexArray(null)
     return true

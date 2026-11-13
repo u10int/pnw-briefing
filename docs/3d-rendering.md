@@ -361,8 +361,9 @@ their vertex data in `xyz + premultiplied rgba` (28-byte) buffers.
   the model shows precipitation, up to 14,000 drops and flakes fall from about 3.5 km, as many
   as the intensity calls for. Rain is drawn as blue streaks: instanced quads a fixed number of
   pixels wide, bright at the head and fading up the trail (WebGL lines are only a pixel wide).
-  Snow is drawn as wobbling white flakes, point sprites with a soft grey-blue rim so they show
-  over a light map. Freezing rain, sleet and mixes keep the radar legend's hues.
+  Freezing rain falls the same way in pink. Snow is drawn as wobbling soft white flakes (point
+  sprites with a gaussian glow over a fainter, wider grey shadow, so they show over a light map),
+  sleet as small, hard orange ice pellets, and mixes as short purple streaks.
 - **Level maps** (`levelOverlay`) draw a pressure level at its mean height. They show its height
   contours, from the `hgt` departures (every 3 dam at 850 and 700 mb, 6 dam above), labelled in
   decametres, with wind arrows sampled at that height.
