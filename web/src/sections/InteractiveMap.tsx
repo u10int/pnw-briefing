@@ -838,7 +838,7 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
   }, [volKey, vol?.data, vol?.colorData])
   React.useEffect(() => () => layers.current?.volume.setPoints(null), [])
   // the sun over the box's middle at the map's time
-  const lightMode = vol?.light ?? "sun", lightEntry = vol?.entry
+  const lightMode = vol?.light ?? "fixed", lightEntry = vol?.entry
   React.useEffect(() => {
     const L = layers.current?.volume
     if (!L || !lightEntry) return
@@ -2634,7 +2634,7 @@ export function InteractiveMap({ data, request, active = true, standalone = fals
   const scanSink = React.useRef<{ set?: (pos: number) => void }>({})
   const [colorPick, setColorPick] = React.useState<"own" | "height" | VolVar>(() => qs<"own" | "height" | VolVar>("col", "own"))
   const [shadowOn, setShadowOn] = React.useState(() => qb("sh", true))
-  const [lightPick, setLightPick] = React.useState<"sun" | "fixed">(() => qs<"sun" | "fixed">("lt", "sun"))
+  const [lightPick, setLightPick] = React.useState<"sun" | "fixed">(() => qs<"sun" | "fixed">("lt", "fixed"))
   const [hoverOn, setHoverOn] = React.useState(() => qb("hv", true))
   // a pressure level as a map (contours and arrows), and trajectories
   const [levelHPa, setLevelHPa] = React.useState<number | null>(() => (q.has("lvl") ? qn("lvl", NaN) || null : null))
@@ -2813,7 +2813,7 @@ export function InteractiveMap({ data, request, active = true, standalone = fals
       put("vw", volWindPick); put("vp", volPrecip, true)
       if (solidAt != null) p.set("sol", String(solidAt))
       if (renderMode !== "solid") put("rm", renderMode, "volume")
-      put("dn", density, 1); put("th", showFrom, 0); put("so", solidAlpha, 1); put("lt", lightPick, "sun"); put("hv", hoverOn, true)
+      put("dn", density, 1); put("th", showFrom, 0); put("so", solidAlpha, 1); put("lt", lightPick, "fixed"); put("hv", hoverOn, true)
       if (scanAxis !== "off") { p.set("sc", scanAxis); p.set("scp", scanPos.toFixed(3)) }
       put("col", colorPick, "own"); put("sh", shadowOn, true); put("lvl", level); put("trj", trajOn, false)
       put("t3", terr3d, false); put("sn", snowOn, true)
@@ -3114,12 +3114,12 @@ export function InteractiveMap({ data, request, active = true, standalone = fals
             )}
             {(solidAt != null || (LIT_VIEWS.includes(volName) && (renderMode === "volume" || renderMode === "cloud"))) && (
               <>
-                <Row label="Light" help="The sun where it is over the region at the map's time (low and warm near sunrise and sunset, a dim, cool light at night), or a fixed light from the south-west.">
+                <Row label="Light" help="A fixed light from the south-west, or the sun where it is over the region at the map's time (low and warm near sunrise and sunset, a dim, cool light at night).">
                   <Select value={lightPick} onValueChange={(x) => setLightPick(x as "sun" | "fixed")}>
                     <SelectTrigger className="h-8 w-full min-w-0" aria-label="Light"><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="sun">Sun at the map time</SelectItem>
                       <SelectItem value="fixed">Fixed, from the south-west</SelectItem>
+                      <SelectItem value="sun">Sun at the map time</SelectItem>
                     </SelectContent>
                   </Select>
                 </Row>

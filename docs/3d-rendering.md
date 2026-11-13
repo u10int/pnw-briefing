@@ -278,7 +278,8 @@ surfaces are the picture.
 ## 7. Lighting and shadows
 
 The light (`LW`, a uniform) is a direction in true proportions (x east, y south, z up). By
-default it's **the sun at the map's time** over the middle of the box. `sunPosition` uses NOAA's
+default it's a **fixed light** from the south-west, `(−0.5, 0.42, 0.76)`. The **Light** control can
+switch it to **the sun at the map's time** over the middle of the box. `sunPosition` uses NOAA's
 low-precision formulas, good to a few tenths of a degree, and `sunLight` turns that into the
 direction, the colour (`uSunCol`) and how much sky light fills the shade (`uAmb`):
 
@@ -290,8 +291,7 @@ direction, the colour (`uSunCol`) and how much sky light fills the shade (`uAmb`
 
 ![GFS clouds lit by the setting sun](img/3d/sun-sunset.png)
 
-The **Light** control can switch to a fixed light from the south-west instead,
-`(−0.5, 0.42, 0.76)`. In box units the direction is rescaled to climb one box height
+In box units the direction is rescaled to climb one box height
 (`lightBox()`), which keeps the light's angle the same at any exaggeration.
 
 **Lit volumes** (cloud, water, ice, humidity, moisture flow, snow growth zone, icing). At each

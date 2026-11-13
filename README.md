@@ -289,8 +289,8 @@ surfaces** (θ, with a solid that can be coloured by humidity to show isentropic
 lift** (the wind times the terrain's slope, fading with height) and **turbulence** (the
 Richardson number, shown where shear can overturn the air). **Observed radar** is a model choice
 of its own: NOAA's MRMS 3D reflectivity mosaic, read from the public bucket in the browser, about
-10 MB a frame, downloaded as the clock reaches each frame. Volumes are **lit by the sun** at the
-map's time (low and warm near sunset, dim and cool at night) unless set to a fixed light, and
+10 MB a frame, downloaded as the clock reaches each frame. Volumes are lit from a fixed direction by default, or can be **lit by the sun** at the
+map's time (low and warm near sunset, dim and cool at night), and
 **Readout on hover** shows the value, height and pressure under the cursor.
 
 A **render mode** sets how a volume draws: see-through (**Volume**), lit white like real cloud
