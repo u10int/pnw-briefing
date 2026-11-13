@@ -1,4 +1,4 @@
-import { fromArrayBuffer } from "geotiff"
+import { decodeTiff } from "./fields-pool"
 
 export interface Raster {
   width: number; height: number; data: Float32Array
@@ -11,12 +11,8 @@ const cache = new Map<string, Promise<Raster>>()
 export function loadCog(url: string): Promise<Raster> {
   if (!cache.has(url)) {
     cache.set(url, (async () => {
-      const buf = await (await fetch(url)).arrayBuffer()
-      const tiff = await fromArrayBuffer(buf)
-      const img = await tiff.getImage()
-      const [west, south, east, north] = img.getBoundingBox()
-      const [band] = (await img.readRasters({ samples: [0] })) as unknown as Float32Array[]
-      return { width: img.getWidth(), height: img.getHeight(), data: Float32Array.from(band), west, south, east, north }
+      const { width, height, west, south, east, north, bands: [band] } = await decodeTiff(url, true)
+      return { width, height, data: band instanceof Float32Array ? band : Float32Array.from(band), west, south, east, north }
     })())
   }
   return cache.get(url)!
