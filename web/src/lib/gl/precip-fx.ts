@@ -68,10 +68,11 @@ void main() {
   if (r > 1.0) discard;
   float a = vCol.a;
   if (uSoft) {
-    // a snowflake: a soft, fuzzy white glow fading to nothing, over a fainter grey shadow a little
-    // wider, so it still shows over a light map
-    float glow = exp(-r * r * 5.0);
-    float shade = exp(-r * r * 2.2) * (1.0 - glow) * 0.28;
+    // a snowflake: a solid white middle that softens out to nothing at the edge (no hard rim), with
+    // a faint grey halo just outside it so it still shows over a light map
+    float glow = 1.0 - smoothstep(0.2, 0.85, r);
+    glow *= glow * (3.0 - 2.0 * glow);
+    float shade = (1.0 - smoothstep(0.7, 1.0, r)) * (1.0 - glow) * 0.18;
     fragColor = vec4(vCol.rgb * glow * a + vec3(0.12, 0.15, 0.22) * shade * a, (glow + shade) * a);
     return;
   }
@@ -82,7 +83,8 @@ void main() {
 }`
 
 const MAX = 14000           // drops and flakes at most
-const PER_CELL = 4          // per cell with precipitation, before weighting by intensity
+const PER_MM = 1.6          // per cell, for each mm/h of precipitation (liquid equivalent)
+const SNOW_BOOST = 4        // snow falls as far more flakes than its water would make drops
 const START_KM = 3.5        // where they appear (roughly cloud base and below)
 
 type Kind = "rain" | "snow" | "freezing rain" | "sleet" | "mix"
@@ -224,7 +226,7 @@ export class PrecipFx {
         const code = types ? Math.round(types[i]) : 1
         const name = (PTYPE_NAMES[code] ?? "rain") as string
         const kind = name === "none" ? 0 : Math.max(0, (["rain", "snow", "freezing rain", "sleet", "mix"] as string[]).indexOf(name))
-        xs.push((lon - box.lon[0]) / (box.lon[1] - box.lon[0])); ys.push(y); ws.push(Math.sqrt(w)); ks.push(kind)
+        xs.push((lon - box.lon[0]) / (box.lon[1] - box.lon[0])); ys.push(y); ws.push(kind === 1 ? w * SNOW_BOOST : w); ks.push(kind)
       }
     }
     const cdf = new Float32Array(ws.length)
@@ -232,8 +234,8 @@ export class PrecipFx {
     for (let i = 0; i < ws.length; i++) { s += ws[i]; cdf[i] = s }
     this.src = { x: Float32Array.from(xs), y: Float32Array.from(ys), w: Float32Array.from(ws), kind: Uint8Array.from(ks), cdf, total: s }
     this.srcKey = key
-    // how many: a few per wet cell, more where it's heavier
-    this.n = Math.min(MAX, Math.round(s * PER_CELL))
+    // how many: in proportion to the rate, so heavy cells are many times denser than light ones
+    this.n = Math.min(MAX, Math.round(s * PER_MM))
     for (let i = 0; i < this.n; i++) this.spawn(i, box, true)
     return this.src
   }
@@ -252,7 +254,7 @@ export class PrecipFx {
     this.top[i] = (START_KM * (0.7 + 0.3 * Math.random())) / box.topKm
     this.pz[i] = scatter ? Math.random() * this.top[i] : this.top[i]
     this.kind[i] = s.kind[lo]
-    this.inten[i] = Math.min(1, s.w[lo] / 4)
+    this.inten[i] = Math.min(1, Math.sqrt(s.w[lo] / 12))
     this.phase[i] = Math.random() * Math.PI * 2
   }
 
@@ -276,7 +278,7 @@ export class PrecipFx {
       if (z < zr[0] || z > zr[1]) continue
       const c = COL[k] ?? COL.rain
       // rain lighter (it's dense), flakes and pellets nearly solid
-      const a = f.look === "streak" ? 0.32 + 0.4 * this.inten[i] : 0.75 + 0.25 * this.inten[i]
+      const a = f.look === "streak" ? 0.32 + 0.4 * this.inten[i] : f.look === "flake" ? 0.95 : 0.75 + 0.25 * this.inten[i]
       if (f.look === "streak") {
         const z1 = Math.min(zr[1], z + (f.streak * (0.7 + 0.8 * this.inten[i])) / box.topKm)
         this.streaks.set([this.px[i], this.py[i], z, this.px[i], this.py[i], z1, c[0] * a, c[1] * a, c[2] * a, a], nl * 10)
@@ -303,7 +305,7 @@ export class PrecipFx {
       gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, nl)
     }
     // soft flakes, larger, then small hard pellets
-    for (const [arr, n, size, soft] of [[this.points, np, 6.5, true], [this.pellets, ne, 3.0, false]] as const) {
+    for (const [arr, n, size, soft] of [[this.points, np, 6.0, true], [this.pellets, ne, 3.0, false]] as const) {
       if (!n) continue
       const p = this.flakeProg
       gl.useProgram(p.program)
