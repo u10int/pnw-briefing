@@ -12,13 +12,16 @@ windows:
   - {days: 14, label: Next 14 days}
 
 # Map / GRIB subset box (degrees, lon in -180..180). Wider than the comparison regions so the
-# maps show southern B.C. (to Whistler), central Washington and Oregon, and a few hundred km of
-# the Pacific, where the wind, rain and pressure systems come from.
+# maps show all of Vancouver Island (Cape Scott, 50.8 N 128.4 W) and southern B.C. to Whistler,
+# eastern Washington to Spokane, Oregon south to Medford and Crescent City, and the Pacific out to
+# 130 W, where the wind, rain and pressure systems come from. 130 W is MRMS radar's western edge;
+# HRRR's north edge slopes from 51 N at Spokane to 49 N at 130 W, so the north-west corner (north
+# Vancouver Island and the ocean off it) is outside it and drawn from the other models.
 domain:
-  lat_min: 43.0
+  lat_min: 41.5
   lat_max: 51.0
-  lon_min: -128.3
-  lon_max: -118.5
+  lon_min: -130.0
+  lon_max: -116.5
 
 # Comparison regions, west of the Cascade crest. Coarse hand-drawn polygons
 # (lon, lat), coastline-ish on the west so ocean grid points are excluded.
