@@ -173,3 +173,64 @@ export function trajectories(e: VolumeEntry, points: { lat: number; lon: number 
   }
   return { verts: Float32Array.from(out), labels: [] }
 }
+
+/** A small, fixed hash of two integers to [0, 1): the same cell keeps the same dots as time moves. */
+function hash01(a: number, b: number) {
+  let h = Math.imul(a ^ 0x9e3779b9, 0x85ebca6b) ^ Math.imul(b + 0x632be5ab, 0xc2b2ae35)
+  h ^= h >>> 15; h = Math.imul(h, 0x2c1b3c6d); h ^= h >>> 12; h = Math.imul(h, 0x297a2d39); h ^= h >>> 15
+  return (h >>> 0) / 4294967296
+}
+
+/**
+ * The field as a cloud of dots: each cell gets dots in proportion to how thick it draws (the
+ * view's opacity table), scattered through the cell and coloured by `rgb` (0–1 for a cell and the
+ * blended value's byte). At most about `cap` dots; returns [x, y, z, r, g, b, a] per dot.
+ */
+export function pointCloud(e: VolumeEntry, data: Uint8Array, lut: Uint8Array, i0: number, i1: number, t: number,
+                           range: [number, number], rgb: (cell: number, b: number, km: number) => [number, number, number], cap = 120000): Float32Array {
+  const { nx, ny, nz } = e
+  const per = nx * ny * nz
+  const a0 = Math.min(i0, e.times.length - 1) * per, a1 = Math.min(i1, e.times.length - 1) * per
+  const k0 = Math.max(0, Math.ceil((range[0] / e.topKm) * (nz - 1))), k1 = Math.min(nz - 1, Math.floor((range[1] / e.topKm) * (nz - 1)))
+  const pr = new Float32Array(per), bb = new Uint8Array(per)
+  let sum = 0
+  for (let k = k0; k <= k1; k++) {
+    for (let i = k * nx * ny, end = i + nx * ny; i < end; i++) {
+      const b0 = data[a0 + i], b1 = data[a1 + i]
+      if (b0 === 255 || b1 === 255) continue
+      const b = Math.round(b0 * (1 - t) + b1 * t)
+      const ext = (lut[b * 4 + 3] / 255) * 4
+      if (ext <= 0) continue
+      const p = 1 - Math.exp(-ext * 1.5)
+      pr[i] = p; bb[i] = b; sum += p
+    }
+  }
+  if (!sum) return new Float32Array(0)
+  const K = Math.min(14, cap / sum)                       // dots for a fully thick cell
+  const out = new Float32Array(Math.ceil(sum * K + per) * 7)
+  let o = 0
+  const yN = mercY(e.lat[1]), yS = mercY(e.lat[0])
+  const rowY = new Float32Array(ny * 2 + 1)                // box y at half-row steps
+  for (let h = 0; h <= ny * 2; h++) rowY[h] = (mercY(e.lat[0] + ((h / 2 - 0.5) / (ny - 1)) * (e.lat[1] - e.lat[0])) - yN) / (yS - yN)
+  for (let i = 0; i < per; i++) {
+    const p = pr[i]
+    if (!p) continue
+    const n = p * K
+    const c = i % nx, r = Math.floor(i / nx) % ny, k = Math.floor(i / (nx * ny))
+    for (let j = 0; j < Math.ceil(n); j++) {
+      if (j >= Math.floor(n) && hash01(i, j * 4) >= n - Math.floor(n)) break
+      const jx = hash01(i, j * 4 + 1) - 0.5, jy = hash01(i, j * 4 + 2) - 0.5, jz = hash01(i, j * 4 + 3) - 0.5
+      const x = Math.min(1, Math.max(0, (c + jx) / (nx - 1)))
+      const fy = Math.min(ny * 2, Math.max(0, (r + 0.5 + jy) * 2))
+      const y = rowY[Math.floor(fy)] + (rowY[Math.min(ny * 2, Math.floor(fy) + 1)] - rowY[Math.floor(fy)]) * (fy - Math.floor(fy))
+      const z = Math.min(1, Math.max(0, (k + jz) / (nz - 1)))
+      const km = z * e.topKm
+      if (km < range[0] || km > range[1]) continue
+      const col = rgb(i, bb[i], km)
+      const a = 0.2 + 0.75 * p
+      out[o++] = x; out[o++] = Math.min(1, Math.max(0, y)); out[o++] = z
+      out[o++] = col[0] * a; out[o++] = col[1] * a; out[o++] = col[2] * a; out[o++] = a
+    }
+  }
+  return out.subarray(0, o)
+}

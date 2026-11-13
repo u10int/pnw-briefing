@@ -38,6 +38,14 @@ export interface VolumeDraw {
   shadow?: boolean
   /** No field to draw: only the box and what goes in it (particles, precipitation, overlays). */
   empty?: boolean
+  /** How the volume is drawn: in its colours, as white cloud, or the most along each ray. */
+  mode?: "volume" | "cloud" | "max"
+  /** The solid's opacity (0 – 1), and a scale on the volume's thickness (1 as designed). */
+  solidAlpha?: number
+  density?: number
+  /** A scan plane through the box (axis and position, 0 – 1 along it) with the rest dimmed, and the
+   *  colours it shows every value in (256 RGBA). */
+  scan?: { axis: "z" | "x" | "y"; pos: number; rest: number; lut: Uint8Array } | null
 }
 
 /** Wind for the particles: u and v (m/s) packed like the other fields, every time step. */
@@ -134,8 +142,17 @@ uniform sampler2D uCLut;
 uniform bool uSolid;
 uniform float uSolidAt;
 uniform vec3 uSolidCol;
+uniform float uSolidA;          // the solid's opacity (1: opaque; less lets the map show through)
 // shadows on the ground, from the solid surface or the lit field
 uniform bool uShadow;
+// how the volume is drawn: 0 a see-through volume in its colours, 1 white cloud lit from above,
+// 2 the most of the field along each ray (the column's strongest value)
+uniform int uMode;
+// a scan plane: 0 none, 1 at a height, 2 west–east position (x), 3 south–north position (y); the
+// plane shows the field's colours at every point (uPLut) and the rest of the volume dims to uRest
+uniform int uScan;
+uniform float uScanPos, uRest;
+uniform sampler2D uPLut;
 out vec4 fragColor;
 const float PI = 3.141592653589793;
 // the light: from the south-west and fairly high, in the box's true proportions (x east, y south, z up)
@@ -216,13 +233,42 @@ void main() {
     float t = tn + dt * hash(gl_FragCoord.xy);
     float prev = -1.0;
     vec3 prevP = ro + rd * t;
+    // where the ray meets the scan plane (a large number when it doesn't)
+    float tPlane = 1e9;
+    if (uScan > 0) {
+      int ax = uScan == 1 ? 2 : uScan == 2 ? 0 : 1;
+      float tp = (uScanPos - ro[ax]) / rd[ax];
+      if (tp > tn && tp < tf) tPlane = tp;
+    }
+    float vmax = -1.0;
+    vec3 pmax = vec3(0.0);
     for (int i = 0; i < 512; i++) {
       if (t > tf || acc.a > 0.97) break;
       vec3 p = ro + rd * t;
       vec3 q = texPos(p);
       if (uHasGround && p.z < groundZ(p.xy)) { hitGround = true; pg = p; break; }   // into the mountains
+      // the scan plane, once the ray passes it: every value in its colours, nearly opaque
+      if (t >= tPlane) {
+        vec3 pp = ro + rd * tPlane;
+        float vs = valAt(pp);
+        tPlane = 1e9;
+        if (vs < 254.5 / 255.0 && !(uHasGround && pp.z < groundZ(pp.xy))) {
+          vec3 col = uColorMode == 0 ? texture(uPLut, vec2((vs * 255.0 + 0.5) / 256.0, 0.5)).rgb : colourAt(pp, vec3(0.5));
+          acc.rgb += (1.0 - acc.a) * 0.9 * col;
+          acc.a += (1.0 - acc.a) * 0.9;
+        }
+      }
+      // the rest of the volume dims while scanning
+      float w = 1.0;
+      if (uScan > 0) w = uRest;
       if (q.y >= 0.0 && q.y <= 1.0) {
         float v = val(q);
+        // the most along the ray: just note it, and draw it at the end
+        if (uMode == 2) {
+          if (v < 254.5 / 255.0 && v > vmax && texture(uLut, vec2((v * 255.0 + 0.5) / 256.0, 0.5)).a > 0.0) { vmax = v; pmax = p; }
+          t += dt;
+          continue;
+        }
         // the solid surface: find where the ray crosses it, light it and stop
         if (uSolid && v >= uSolidAt) {
           vec3 a = prevP, b = p;
@@ -238,8 +284,9 @@ void main() {
           float spec = pow(max(dot(nrm, normalize(Lw + V)), 0.0), 40.0) * 0.22;
           vec3 base = uColorMode == 0 ? uSolidCol : colourAt(ps, uSolidCol);
           vec3 col = base * (0.36 + 0.14 * (nrm.z * 0.5 + 0.5) + 0.62 * diff * sh) + spec * sh;
-          acc.rgb += (1.0 - acc.a) * col;
-          acc.a = 1.0;
+          float sa = uSolidA * w;
+          acc.rgb += (1.0 - acc.a) * sa * col;
+          acc.a += (1.0 - acc.a) * sa;
           hitSolid = true;
           break;
         }
@@ -254,18 +301,23 @@ void main() {
               float lam = 0.5 + 0.5 * abs(dot(normalAt(ph), Lw));
               vec4 ic = uIsoCol[k];
               vec3 col = uIsoByHeight ? texture(uHeight, vec2(clamp(ph.z, 0.0, 1.0), 0.5)).rgb : ic.rgb;
-              acc.rgb += (1.0 - acc.a) * ic.a * col * lam;
-              acc.a += (1.0 - acc.a) * ic.a;
+              acc.rgb += (1.0 - acc.a) * ic.a * w * col * lam;
+              acc.a += (1.0 - acc.a) * ic.a * w;
             }
           }
         }
         prev = v;
         prevP = p;
         vec4 c = texture(uLut, vec2((v * 255.0 + 0.5) / 256.0, 0.5));
-        float a = 1.0 - exp(-c.a * 4.0 * uDensity * worldStep);
+        float a = (1.0 - exp(-c.a * 4.0 * uDensity * worldStep)) * w;
         if (a > 0.002) {
           vec3 col = colourAt(p, c.rgb);
-          if (uLit) {
+          if (uMode == 1) {
+            // cloud: white and gray by the light that gets through, whatever the field's colours
+            float L = lightAt(p, 0.008);
+            float fwd = pow(max(dot(normalize(rd * uScale), Lw), 0.0), 6.0);
+            col = vec3(0.95, 0.96, 0.985) * (0.3 + 0.12 * p.z + 0.66 * L + 0.2 * fwd * L);
+          } else if (uLit) {
             // light that gets through the field towards the sun, a sky fill from above, and
             // forward scattering where we look towards the light (bright cloud edges)
             float L = lightAt(p, 0.008);
@@ -279,6 +331,14 @@ void main() {
         }
       }
       t += dt;
+    }
+    // the most along the ray, in its colour, fairly solid where the field shows at all
+    if (uMode == 2 && vmax >= 0.0) {
+      vec4 c = texture(uLut, vec2((vmax * 255.0 + 0.5) / 256.0, 0.5));
+      float a = smoothstep(0.0, 0.12, c.a) * 0.9 * (uScan > 0 ? uRest : 1.0);
+      vec3 col = colourAt(pmax, c.rgb) * mix(0.78, 1.0, pmax.z);
+      acc.rgb += (1.0 - acc.a) * a * col;
+      acc.a += (1.0 - acc.a) * a;
     }
   }
   // the shadow on the ground (or the map), where the light passes through the field or the solid
@@ -343,13 +403,21 @@ const TRAIL_VS = /* glsl */ `#version 300 es
 layout(location = 0) in vec3 aPos;
 layout(location = 1) in vec4 aCol;
 uniform mat4 uMVP;
+uniform float uPointSize;
 out vec4 vCol;
-void main() { vCol = aCol; gl_Position = uMVP * vec4(aPos, 1.0); }`
+void main() { vCol = aCol; gl_Position = uMVP * vec4(aPos, 1.0); gl_PointSize = uPointSize; }`
 const TRAIL_FS = /* glsl */ `#version 300 es
 precision highp float;
 in vec4 vCol;
+uniform bool uRound;            // points: round dots, soft at the edge
 out vec4 fragColor;
-void main() { fragColor = vCol; }`
+void main() {
+  if (uRound) {
+    float r = length(gl_PointCoord - 0.5) * 2.0;
+    if (r > 1.0) discard;
+    fragColor = vCol * (1.0 - smoothstep(0.55, 1.0, r));
+  } else fragColor = vCol;
+}`
 
 const TRAIL = 7               // positions kept per particle
 const PER_LAYER = 650         // particles per height
@@ -412,6 +480,8 @@ export class VolumeLayer implements CustomLayerInterface {
   private colorTextures = new Map<number, WebGLTexture>()
   private cLut?: WebGLTexture
   private cLutData: Uint8Array | null = null
+  private pLut?: WebGLTexture
+  private pLutData: Uint8Array | null = null
   private i0 = 0
   private i1 = 0
   private t = 0
@@ -440,6 +510,11 @@ export class VolumeLayer implements CustomLayerInterface {
   private ovBuf?: WebGLBuffer
   private ovCount = 0
   private ovDirty = false
+  private ptVao?: WebGLVertexArrayObject
+  private ptBuf?: WebGLBuffer
+  private ptCount = 0
+  private ptData: Float32Array | null = null
+  private ptDirty = false
   private pos = new Float32Array(0)       // [particle, history, xyz] in box coordinates, newest first
   private age = new Float32Array(0)
   private life = new Float32Array(0)
@@ -486,6 +561,16 @@ export class VolumeLayer implements CustomLayerInterface {
     gl.vertexAttribPointer(1, 4, gl.FLOAT, false, 28, 12)
     gl.bindVertexArray(null)
     this.ovDirty = true
+    this.ptVao = gl.createVertexArray()!
+    gl.bindVertexArray(this.ptVao)
+    this.ptBuf = gl.createBuffer()!
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.ptBuf)
+    gl.enableVertexAttribArray(0)
+    gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 28, 0)
+    gl.enableVertexAttribArray(1)
+    gl.vertexAttribPointer(1, 4, gl.FLOAT, false, 28, 12)
+    gl.bindVertexArray(null)
+    this.ptDirty = true
     this.vao = unitQuad(gl)
     const vao = (data: Float32Array) => {
       const v = gl.createVertexArray()!
@@ -499,6 +584,11 @@ export class VolumeLayer implements CustomLayerInterface {
       return v
     }
     this.lineVao = vao(EDGES)
+    this.pLut = gl.createTexture()!
+    gl.bindTexture(gl.TEXTURE_2D, this.pLut)
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, 256, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, null)
+    for (const [k, v] of [[gl.TEXTURE_MIN_FILTER, gl.LINEAR], [gl.TEXTURE_MAG_FILTER, gl.LINEAR], [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE]])
+      gl.texParameteri(gl.TEXTURE_2D, k, v)
     this.cLut = gl.createTexture()!
     gl.bindTexture(gl.TEXTURE_2D, this.cLut)
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, 256, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, null)
@@ -527,12 +617,15 @@ export class VolumeLayer implements CustomLayerInterface {
     if (this.trailBuf) gl.deleteBuffer(this.trailBuf)
     if (this.ovBuf) gl.deleteBuffer(this.ovBuf)
     if (this.ovVao) gl.deleteVertexArray(this.ovVao)
+    if (this.ptBuf) gl.deleteBuffer(this.ptBuf)
+    if (this.ptVao) gl.deleteVertexArray(this.ptVao)
     if (this.fbo) gl.deleteFramebuffer(this.fbo)
     if (this.fboTex) gl.deleteTexture(this.fboTex)
     if (this.vao) gl.deleteVertexArray(this.vao)
     if (this.lineVao) gl.deleteVertexArray(this.lineVao)
     if (this.lut) gl.deleteTexture(this.lut)
     if (this.cLut) gl.deleteTexture(this.cLut)
+    if (this.pLut) gl.deleteTexture(this.pLut)
   }
 
   private clearTextures(which: "main" | "color" | "both" = "both") {
@@ -547,6 +640,13 @@ export class VolumeLayer implements CustomLayerInterface {
     this.draw = d
     this.levels = levels
     if (!d) this.onAxis?.([])
+    this.map?.triggerRepaint()
+  }
+  /** Move the scan plane without anything else changing (for the sweep). */
+  setScanPos(pos: number) {
+    if (!this.draw?.scan || this.draw.scan.pos === pos) return
+    this.draw = { ...this.draw, scan: { ...this.draw.scan, pos } }
+    this.dataChanged = true
     this.map?.triggerRepaint()
   }
   /** The two steps to blend and how far between them. */
@@ -656,6 +756,34 @@ export class VolumeLayer implements CustomLayerInterface {
     gl.drawArrays(gl.LINES, 0, count)
     gl.bindVertexArray(null)
     this.map?.triggerRepaint()                               // keep them moving
+  }
+
+  /** The point cloud: dots in the box, xyz + premultiplied rgba each, or null for none. */
+  setPoints(v: Float32Array | null) {
+    this.ptData = v
+    this.ptDirty = true
+    this.map?.triggerRepaint()
+  }
+  private drawPoints(gl: WebGL2RenderingContext, mvp: M4) {
+    if (!this.trailProg || !this.ptVao || !this.ptBuf) return
+    if (this.ptDirty) {
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.ptBuf)
+      gl.bufferData(gl.ARRAY_BUFFER, this.ptData ?? new Float32Array(0), gl.DYNAMIC_DRAW)
+      this.ptCount = (this.ptData?.length ?? 0) / 7
+      this.ptDirty = false
+    }
+    if (!this.ptCount) return
+    const dpr = window.devicePixelRatio || 1
+    gl.useProgram(this.trailProg.program)
+    gl.uniformMatrix4fv(this.trailProg.u("uMVP"), false, Float32Array.from(mvp))
+    gl.uniform1f(this.trailProg.u("uPointSize"), 2.6 * dpr)
+    gl.uniform1i(this.trailProg.u("uRound"), 1)
+    gl.enable(gl.BLEND)
+    gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA)
+    gl.bindVertexArray(this.ptVao)
+    gl.drawArrays(gl.POINTS, 0, this.ptCount)
+    gl.bindVertexArray(null)
+    gl.uniform1i(this.trailProg.u("uRound"), 0)
   }
 
   /** Lines in the box under a name ("level", "traj"), or null to remove them. */
@@ -819,6 +947,7 @@ export class VolumeLayer implements CustomLayerInterface {
     gl.drawArrays(gl.TRIANGLES, 0, 6)
 
     this.drawCurtain(gl, mvp, g)
+    this.drawPoints(gl, mvp)
     this.drawOverlays(gl, mvp)
     this.drawParticles(gl, mvp)
     if (this.precipOn && this.precip?.render(gl, Float32Array.from(mvp), { lon: g.lon, lat: g.lat, topKm: g.topKm }, this.zr, window.devicePixelRatio || 1))
@@ -862,7 +991,7 @@ export class VolumeLayer implements CustomLayerInterface {
     gl.uniform2f(p.u("uViewport"), fw, fh)
     gl.uniform1f(p.u("uT"), this.i0 === this.i1 ? 0 : this.t)
     gl.uniform1f(p.u("uOpacity"), this.opacity)
-    gl.uniform1f(p.u("uDensity"), 30)
+    gl.uniform1f(p.u("uDensity"), 30 * (d.density ?? 1))
     gl.uniform3f(p.u("uScale"), sx, sy, sz)
     gl.uniform2f(p.u("uMercY"), yN, yS)
     gl.uniform2f(p.u("uLat"), g.lat[0], g.lat[1])
@@ -898,6 +1027,20 @@ export class VolumeLayer implements CustomLayerInterface {
     gl.uniform1f(p.u("uSolidAt"), d.solid?.at ?? 2)
     gl.uniform3f(p.u("uSolidCol"), ...(d.solid?.rgb ?? [1, 1, 1]))
     gl.uniform1i(p.u("uShadow"), d.shadow ? 1 : 0)
+    gl.uniform1f(p.u("uSolidA"), d.solidAlpha ?? 1)
+    gl.uniform1i(p.u("uMode"), d.mode === "cloud" ? 1 : d.mode === "max" ? 2 : 0)
+    const sc = d.scan
+    gl.uniform1i(p.u("uScan"), sc ? (sc.axis === "z" ? 1 : sc.axis === "x" ? 2 : 3) : 0)
+    gl.uniform1f(p.u("uScanPos"), sc?.pos ?? 0)
+    gl.uniform1f(p.u("uRest"), sc?.rest ?? 1)
+    gl.activeTexture(gl.TEXTURE8)
+    gl.bindTexture(gl.TEXTURE_2D, this.pLut!)
+    if (sc && sc.lut !== this.pLutData) {
+      resetUnpack(gl)
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 256, 1, gl.RGBA, gl.UNSIGNED_BYTE, sc.lut)
+      this.pLutData = sc.lut
+    }
+    gl.uniform1i(p.u("uPLut"), 8)
     // always bound to its own unit: a 2D sampler left on unit 0 would share it with uA's 3D texture,
     // which WebGL refuses to draw
     gl.activeTexture(gl.TEXTURE3)
