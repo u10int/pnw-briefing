@@ -7,30 +7,72 @@ import { MISSING, mercY, program, type Program } from "./util"
  * Falling precipitation for the 3D view, from the map's radar layer: where the model's precipitation
  * rate (or, without one, its simulated reflectivity or precipitation type) shows precipitation,
  * streaks of rain or drifting flakes of snow fall from a few kilometres up to the ground, as many as
- * the intensity calls for, coloured by precipitation type
- * (the radar legend's colours). Rain falls fast in streaks; snow slowly, wobbling; sleet and
+ * the intensity calls for: rain as blue streaks a few pixels wide, snow as white flakes with a dark
+ * rim (so they show over a light map), freezing rain, sleet and mixes in the radar legend's hues. Rain falls fast in streaks; snow slowly, wobbling; sleet and
  * freezing rain in between. Positions are in the volume box's coordinates (0 – 1 each way, z up).
  */
 
-const VS = /* glsl */ `#version 300 es
+// streaks: one quad per drop, instanced, a few pixels wide on screen whatever the zoom, bright at
+// the drop's head and fading up its trail, soft at the sides
+const STREAK_VS = /* glsl */ `#version 300 es
+layout(location = 0) in vec2 aCorner;      // x: 0 head .. 1 tail; y: -1 .. 1 across
+layout(location = 1) in vec3 aHead;
+layout(location = 2) in vec3 aTail;
+layout(location = 3) in vec4 aCol;
+uniform mat4 uMVP;
+uniform vec2 uViewport;
+uniform float uWidth;                      // device pixels
+out vec4 vCol;
+out vec2 vUv;
+void main() {
+  vec4 h = uMVP * vec4(aHead, 1.0), t = uMVP * vec4(aTail, 1.0);
+  vec2 hs = h.xy / h.w * uViewport, ts = t.xy / t.w * uViewport;
+  vec2 dir = ts - hs;
+  float len = length(dir);
+  dir = len > 1e-3 ? dir / len : vec2(0.0, 1.0);
+  vec2 n = vec2(-dir.y, dir.x);
+  vec4 p = mix(h, t, aCorner.x);
+  // at least a couple of pixels long, so drops seen end-on still show
+  vec2 ext = (aCorner.x > 0.5 && len < 3.0 ? dir * (3.0 - len) : vec2(0.0)) + n * aCorner.y * uWidth * 0.5;
+  p.xy += ext / uViewport * p.w;
+  gl_Position = p;
+  vCol = aCol;
+  vUv = aCorner;
+}`
+const STREAK_FS = /* glsl */ `#version 300 es
+precision highp float;
+in vec4 vCol;
+in vec2 vUv;
+out vec4 fragColor;
+void main() {
+  float side = 1.0 - smoothstep(0.45, 1.0, abs(vUv.y));
+  float along = mix(1.0, 0.15, vUv.x);
+  fragColor = vCol * side * along;
+}`
+// flakes and pellets: round sprites with a soft dark rim, so white snow shows on a light map
+const FLAKE_VS = /* glsl */ `#version 300 es
 layout(location = 0) in vec3 aPos;
 layout(location = 1) in vec4 aCol;
 uniform mat4 uMVP;
 uniform float uPoint;
 out vec4 vCol;
-void main() { vCol = aCol; gl_Position = uMVP * vec4(aPos, 1.0); gl_PointSize = uPoint; }`
-const FS = /* glsl */ `#version 300 es
+void main() { vCol = aCol; gl_Position = uMVP * vec4(aPos, 1.0); gl_PointSize = uPoint * (0.7 + 0.6 * aCol.a); }`
+const FLAKE_FS = /* glsl */ `#version 300 es
 precision highp float;
-uniform bool uRound;
 in vec4 vCol;
 out vec4 fragColor;
 void main() {
-  if (uRound) { vec2 d = gl_PointCoord - 0.5; if (dot(d, d) > 0.25) discard; }
-  fragColor = vCol;
+  float r = length(gl_PointCoord - 0.5) * 2.0;
+  if (r > 1.0) discard;
+  float core = 1.0 - smoothstep(0.5, 0.68, r);
+  float rim = (1.0 - smoothstep(0.82, 1.0, r)) * (1.0 - core);
+  float a = vCol.a;
+  // premultiplied: the colour in the middle, a grey-blue edge around it
+  fragColor = vec4(vCol.rgb * core * a + vec3(0.16, 0.2, 0.3) * rim * 0.55 * a, (core + rim * 0.55) * a);
 }`
 
-const MAX = 7000            // drops and flakes at most
-const PER_CELL = 3          // per cell with precipitation, before weighting by intensity
+const MAX = 14000           // drops and flakes at most
+const PER_CELL = 4          // per cell with precipitation, before weighting by intensity
 const START_KM = 3.5        // where they appear (roughly cloud base and below)
 
 type Kind = "rain" | "snow" | "freezing rain" | "sleet" | "mix"
@@ -43,7 +85,11 @@ const FALL: Record<Kind, { secs: number; streak: number; wobble: number }> = {
   snow: { secs: 6.0, streak: 0, wobble: 0.006 },
 }
 const rgb = (h: string) => { const n = parseInt(h.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((c) => c / 255) }
-const COL: Record<Kind, number[]> = Object.fromEntries(Object.entries(PTYPE_COLORS).map(([k, v]) => [k, rgb(v)])) as Record<Kind, number[]>
+/** Rain blue and snow white, as they look; the mixed types keep the radar legend's hues. */
+const COL: Record<Kind, number[]> = {
+  ...(Object.fromEntries(Object.entries(PTYPE_COLORS).map(([k, v]) => [k, rgb(v)])) as Record<Kind, number[]>),
+  rain: [0.16, 0.42, 0.88], snow: [1, 1, 1],
+}
 
 /** Rain rate (mm/h) from reflectivity (dBZ), Marshall – Palmer. */
 const rate = (dbz: number) => Math.pow(Math.pow(10, dbz / 10) / 200, 1 / 1.6)
@@ -53,9 +99,13 @@ interface Source { x: Float32Array; y: Float32Array; w: Float32Array; kind: Uint
 export interface PrecipBox { lon: [number, number]; lat: [number, number]; topKm: number }
 
 export class PrecipFx {
-  private prog: Program
-  private vao: WebGLVertexArrayObject
-  private buf: WebGLBuffer
+  private streakProg: Program
+  private flakeProg: Program
+  private streakVao: WebGLVertexArrayObject
+  private flakeVao: WebGLVertexArrayObject
+  private cornerBuf: WebGLBuffer
+  private streakBuf: WebGLBuffer
+  private flakeBuf: WebGLBuffer
   private draw: GridDraw | null = null
   private gen = 0             // bumped with each new radar grid, so the sources are rebuilt
   private t = 0
@@ -69,15 +119,32 @@ export class PrecipFx {
   private n = 0
   private ground: ((x: number, y: number) => number) | null = null
   private last = 0
-  private lines = new Float32Array(MAX * 2 * 7)
+  private streaks = new Float32Array(MAX * 10)        // head xyz, tail xyz, rgba (premultiplied)
   private points = new Float32Array(MAX * 7)
 
   constructor(gl: WebGL2RenderingContext) {
-    this.prog = program(gl, VS, FS)
-    this.vao = gl.createVertexArray()!
-    gl.bindVertexArray(this.vao)
-    this.buf = gl.createBuffer()!
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.buf)
+    this.streakProg = program(gl, STREAK_VS, STREAK_FS)
+    this.flakeProg = program(gl, FLAKE_VS, FLAKE_FS)
+    // streaks: a unit quad per drop, the drop's ends and colour per instance
+    this.streakVao = gl.createVertexArray()!
+    gl.bindVertexArray(this.streakVao)
+    this.cornerBuf = gl.createBuffer()!
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.cornerBuf)
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, -1, 1, -1, 1, 1, 0, -1, 1, 1, 0, 1]), gl.STATIC_DRAW)
+    gl.enableVertexAttribArray(0)
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 8, 0)
+    this.streakBuf = gl.createBuffer()!
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.streakBuf)
+    for (const [loc, size, off] of [[1, 3, 0], [2, 3, 12], [3, 4, 24]] as const) {
+      gl.enableVertexAttribArray(loc)
+      gl.vertexAttribPointer(loc, size, gl.FLOAT, false, 40, off)
+      gl.vertexAttribDivisor(loc, 1)
+    }
+    // flakes: points
+    this.flakeVao = gl.createVertexArray()!
+    gl.bindVertexArray(this.flakeVao)
+    this.flakeBuf = gl.createBuffer()!
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.flakeBuf)
     gl.enableVertexAttribArray(0)
     gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 28, 0)
     gl.enableVertexAttribArray(1)
@@ -86,9 +153,11 @@ export class PrecipFx {
   }
 
   dispose(gl: WebGL2RenderingContext) {
-    gl.deleteProgram(this.prog.program)
-    gl.deleteVertexArray(this.vao)
-    gl.deleteBuffer(this.buf)
+    gl.deleteProgram(this.streakProg.program)
+    gl.deleteProgram(this.flakeProg.program)
+    gl.deleteVertexArray(this.streakVao)
+    gl.deleteVertexArray(this.flakeVao)
+    for (const b of [this.cornerBuf, this.streakBuf, this.flakeBuf]) gl.deleteBuffer(b)
   }
 
   /** The radar layer's grid (reflectivity with precipitation type, or type alone), or null. */
@@ -193,32 +262,37 @@ export class PrecipFx {
       const z = this.pz[i]
       if (z < zr[0] || z > zr[1]) continue
       const c = COL[k] ?? COL.rain
-      const a = 0.35 + 0.6 * this.inten[i]
+      // rain lighter (it's dense), flakes nearly solid
+      const a = f.streak > 0 ? 0.32 + 0.4 * this.inten[i] : 0.7 + 0.3 * this.inten[i]
       if (f.streak > 0) {
-        const z1 = Math.min(zr[1], z + (f.streak * (0.6 + 0.6 * this.inten[i])) / box.topKm)
-        this.lines.set([this.px[i], this.py[i], z, c[0] * a, c[1] * a, c[2] * a, a,
-                        this.px[i], this.py[i], z1, 0, 0, 0, 0], nl * 14)
+        const z1 = Math.min(zr[1], z + (f.streak * (0.7 + 0.8 * this.inten[i])) / box.topKm)
+        this.streaks.set([this.px[i], this.py[i], z, this.px[i], this.py[i], z1, c[0] * a, c[1] * a, c[2] * a, a], nl * 10)
         nl++
       } else {
         this.points.set([this.px[i], this.py[i], z, c[0] * a, c[1] * a, c[2] * a, a], np * 7)
         np++
       }
     }
-    gl.useProgram(this.prog.program)
-    gl.uniformMatrix4fv(this.prog.u("uMVP"), false, mvp)
     gl.enable(gl.BLEND)
     gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA)
-    gl.bindVertexArray(this.vao)
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.buf)
     if (nl) {
-      gl.uniform1i(this.prog.u("uRound"), 0)
-      gl.uniform1f(this.prog.u("uPoint"), 1)
-      gl.bufferData(gl.ARRAY_BUFFER, this.lines.subarray(0, nl * 14), gl.STREAM_DRAW)
-      gl.drawArrays(gl.LINES, 0, nl * 2)
+      const p = this.streakProg
+      gl.useProgram(p.program)
+      gl.uniformMatrix4fv(p.u("uMVP"), false, mvp)
+      gl.uniform2f(p.u("uViewport"), gl.drawingBufferWidth / 2, gl.drawingBufferHeight / 2)
+      gl.uniform1f(p.u("uWidth"), 1.8 * dpr)
+      gl.bindVertexArray(this.streakVao)
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.streakBuf)
+      gl.bufferData(gl.ARRAY_BUFFER, this.streaks.subarray(0, nl * 10), gl.STREAM_DRAW)
+      gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, nl)
     }
     if (np) {
-      gl.uniform1i(this.prog.u("uRound"), 1)
-      gl.uniform1f(this.prog.u("uPoint"), 2.6 * dpr)
+      const p = this.flakeProg
+      gl.useProgram(p.program)
+      gl.uniformMatrix4fv(p.u("uMVP"), false, mvp)
+      gl.uniform1f(p.u("uPoint"), 4.2 * dpr)
+      gl.bindVertexArray(this.flakeVao)
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.flakeBuf)
       gl.bufferData(gl.ARRAY_BUFFER, this.points.subarray(0, np * 7), gl.STREAM_DRAW)
       gl.drawArrays(gl.POINTS, 0, np)
     }

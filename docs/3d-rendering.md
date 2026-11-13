@@ -358,8 +358,11 @@ their vertex data in `xyz + premultiplied rgba` (28-byte) buffers.
   in and out over their life, and respawn when they leave the box or go under the terrain. They're
   coloured by speed, or by the drawn field's value where they are (for example moisture flow).
 - **Falling precipitation** (`lib/gl/precip-fx.ts`) comes from the 2D map's radar layer. Where
-  the model shows precipitation, up to 7,000 streaks of rain or wobbling flakes of snow fall from
-  about 3.5 km, as many as the intensity calls for and coloured by type.
+  the model shows precipitation, up to 14,000 drops and flakes fall from about 3.5 km, as many
+  as the intensity calls for. Rain is drawn as blue streaks: instanced quads a fixed number of
+  pixels wide, bright at the head and fading up the trail (WebGL lines are only a pixel wide).
+  Snow is drawn as wobbling white flakes, point sprites with a soft grey-blue rim so they show
+  over a light map. Freezing rain, sleet and mixes keep the radar legend's hues.
 - **Level maps** (`levelOverlay`) draw a pressure level at its mean height. They show its height
   contours, from the `hgt` departures (every 3 dam at 850 and 700 mb, 6 dam above), labelled in
   decametres, with wind arrows sampled at that height.
