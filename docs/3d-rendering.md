@@ -364,7 +364,7 @@ their vertex data in `xyz + premultiplied rgba` (28-byte) buffers.
   pixels wide, bright at the head and fading up the trail (WebGL lines are only a pixel wide).
   Freezing rain falls the same way in pink. Snow is drawn as wobbling soft white flakes (point
   sprites with a gaussian glow over a fainter, wider grey shadow, so they show over a light map),
-  sleet as small, hard icy-blue pellets, and mixes as short purple streaks. They're hidden behind
+  sleet as small, hard icy-blue pellets that bounce twice where they land, and mixes as short purple streaks. They're hidden behind
   the 3D field: the ray march writes a second image (multiple render targets) with the distance
   along each ray at which the field turns about a third opaque, packed into two bytes. The drop
   and flake shaders compare their own distance from the eye with it, and fade by the field's

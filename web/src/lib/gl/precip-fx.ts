@@ -128,6 +128,7 @@ void main() {
 
 const MAX = 20000           // drops and flakes at most
 const PER_CELL = 6          // per cell, times the square root of its rate (mm/h, liquid equivalent)
+const BOUNCE_G = 0.5         // gravity for bouncing pellets, box heights a second squared (a hop of ~0.35 s)
 const SNOW_BOOST = 1.5        // snow falls as far more flakes than its water would make drops
 const START_KM = 3.5        // where they appear (roughly cloud base and below)
 
@@ -174,6 +175,10 @@ export class PrecipFx {
   private px = new Float32Array(MAX); private py = new Float32Array(MAX); private pz = new Float32Array(MAX)
   private top = new Float32Array(MAX); private kind = new Uint8Array(MAX); private inten = new Float32Array(MAX)
   private phase = new Float32Array(MAX)
+  // ice pellets bounce: their upward speed (box heights a second) and drift while bouncing, and how
+  // many bounces they've made
+  private vz = new Float32Array(MAX); private vx = new Float32Array(MAX); private vy = new Float32Array(MAX)
+  private hops = new Uint8Array(MAX)
   private n = 0
   private ground: ((x: number, y: number) => number) | null = null
   private last = 0
@@ -301,6 +306,7 @@ export class PrecipFx {
     this.kind[i] = s.kind[lo]
     this.inten[i] = Math.min(1, s.w[lo] / 3.5)
     this.phase[i] = Math.random() * Math.PI * 2
+    this.vz[i] = 0; this.hops[i] = 0
   }
 
   /** Step and draw. `zr` is the slab of the box being drawn (fractions of its height). */
@@ -318,9 +324,33 @@ export class PrecipFx {
     let nl = 0, np = 0, ne = 0
     for (let i = 0; i < this.n; i++) {
       const k = kinds[this.kind[i]], f = FALL[k]
-      this.pz[i] -= (this.top[i] / f.secs) * dt
-      if (f.wobble) { this.phase[i] += dt * 2.2; this.px[i] += Math.cos(this.phase[i]) * f.wobble * dt }
-      if (this.pz[i] <= (this.ground ? this.ground(this.px[i], this.py[i]) : 0)) { this.spawn(i, box); continue }
+      const gz = () => (this.ground ? this.ground(this.px[i], this.py[i]) : 0)
+      if (this.hops[i]) {
+        // bouncing: up and back down under gravity, drifting a little, twice, then gone
+        this.vz[i] -= BOUNCE_G * dt
+        this.pz[i] += this.vz[i] * dt
+        this.px[i] += this.vx[i] * dt; this.py[i] += this.vy[i] * dt
+        const g = gz()
+        if (this.pz[i] <= g) {
+          if (this.hops[i] >= 2) { this.spawn(i, box); continue }
+          this.pz[i] = g
+          this.vz[i] = -this.vz[i] * 0.4
+          this.hops[i]++
+        }
+      } else {
+        this.pz[i] -= (this.top[i] / f.secs) * dt
+        if (f.wobble) { this.phase[i] += dt * 2.2; this.px[i] += Math.cos(this.phase[i]) * f.wobble * dt }
+        const g = gz()
+        if (this.pz[i] <= g) {
+          if (f.look !== "pellet") { this.spawn(i, box); continue }
+          // a pellet hits the ground and bounces back up at about half its fall speed
+          this.pz[i] = g
+          this.vz[i] = (this.top[i] / f.secs) * (0.5 + 0.2 * Math.random())
+          const a = Math.random() * Math.PI * 2, sp = 0.004 + 0.006 * Math.random()
+          this.vx[i] = Math.cos(a) * sp; this.vy[i] = Math.sin(a) * sp
+          this.hops[i] = 1
+        }
+      }
       const z = this.pz[i]
       if (z < zr[0] || z > zr[1]) continue
       const c = COL[k] ?? COL.rain
