@@ -131,7 +131,7 @@ const MAX = 20000           // drops and flakes at most
 const PER_CELL = 6          // per cell, times the square root of its rate (mm/h, liquid equivalent)
 const SNOW_REST = 1.6        // seconds a landed snowflake lies on the ground (± 30%) before it's gone
 const BOUNCE_G = 0.5         // gravity for bouncing pellets, box heights a second squared (a hop of ~0.35 s)
-const SNOW_BOOST = 1.5        // snow falls as far more flakes than its water would make drops
+const SNOW_SHARE = 0.5      // snow at the original density: 3 per cell × √rate, half the 6 rain gets
 const START_KM = 3.5        // where they appear (roughly cloud base and below)
 
 type Kind = "rain" | "snow" | "freezing rain" | "sleet" | "mix"
@@ -279,7 +279,7 @@ export class PrecipFx {
         const code = types ? Math.round(types[i]) : 1
         const name = (PTYPE_NAMES[code] ?? "rain") as string
         const kind = name === "none" ? 0 : Math.max(0, (["rain", "snow", "freezing rain", "sleet", "mix"] as string[]).indexOf(name))
-        xs.push((lon - box.lon[0]) / (box.lon[1] - box.lon[0])); ys.push(y); ws.push(Math.sqrt(kind === 1 ? w * SNOW_BOOST : w)); ks.push(kind)
+        xs.push((lon - box.lon[0]) / (box.lon[1] - box.lon[0])); ys.push(y); ws.push(Math.sqrt(w) * (kind === 1 ? SNOW_SHARE : 1)); ks.push(kind)
       }
     }
     const cdf = new Float32Array(ws.length)
