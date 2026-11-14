@@ -35,13 +35,25 @@ flowchart LR
 ```
 
 `python -m briefing.volume` runs in its own workflow after the briefing publishes, so the edition
-never waits for it. For every model with `volume:` in `config.yaml` (GFS and ECMWF IFS; HRRR has no
-volume), it reads every `step` hours (3) over the first `hours` (48) of the briefing:
+never waits for it. For every model with `volume:` in `config.yaml` (GFS, ECMWF IFS, HRRR and
+RRFS), it reads every `step` hours (3) over the first `hours` (48) of the briefing:
 
-| | Levels read (hPa) |
-|---|---|
-| GFS | 1000, 950, 900, 850, 800, 750, 700, 600, 500, 400, 300, 250, 200 |
-| ECMWF IFS | 1000, 925, 850, 700, 600, 500, 400, 300, 250, 200 |
+| | Levels read (hPa) | Grid |
+|---|---|---|
+| GFS | 1000, 950, 900, 850, 800, 750, 700, 600, 500, 400, 300, 250, 200 | 0.25° |
+| ECMWF IFS | 1000, 925, 850, 700, 600, 500, 400, 300, 250, 200 | 0.25° |
+| HRRR (`prs`), RRFS (`prslev`) | as GFS | 3 km Lambert, regridded to 0.05° |
+
+**HRRR and RRFS** are on projected 3 km grids (2-D latitude and longitude). `fetch` puts their raw
+records on a regular 0.05° grid over the domain first (nearest neighbour, missing where the model
+doesn't reach, such as the north end of Vancouver Island), so every volume is a lat/lon box. They
+publish no cloud cover on pressure levels, so `cloud: condensate` takes cloud from their own cloud
+water plus ice: none below 0.001 g/kg, full by 0.1 g/kg, log-spaced in between. That's the
+microphysics their simulated radar comes from, so the 3D cloud lines up with the 2D radar and the
+falling precipitation. To keep the files small, `vars` keeps only cloud, water, ice, temperature
+and wind (u, v), about 20 MB a model. Their humidity, vertical motion and PV are noisy at this
+scale and would triple it. HRRR's cloud ice (CIMIXR) has no name in eccodes, so it's read with
+`more: CIMIXR` and arrives as `unknown`, mapped by `unknown: icmr`.
 
 From these it derives the variables the page draws:
 

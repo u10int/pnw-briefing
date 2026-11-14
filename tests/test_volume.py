@@ -130,3 +130,44 @@ def test_demo_volume_has_pv_and_level_heights():
     v = demo_volume({}, None, dom, "ncep", hours=6, step=3)
     assert "pv" in v["vars"] and v["hgt"]["hPa"] == [p for p in (850, 700, 500, 300) if p in HGT_LEVELS]
     assert v["hgt"]["values"].shape[1] == len(v["hgt"]["hPa"])
+
+
+def test_cloud_from_condensate():
+    qc = np.array([0, 1e-6, 1e-5, 1e-4, 1e-3]) * 1e-0      # kg/kg
+    c = volume.cloud_from_condensate(qc, np.zeros(5))
+    assert np.allclose(c, [0, 0, 50, 100, 100])
+    d = volume.derive({"t": np.full((1, 1, 1), 270.0), "r": np.full((1, 1, 1), 50.0), "clwmr": np.full((1, 1, 1), 1e-5),
+                       "icmr": np.zeros((1, 1, 1))}, "ncep", cloud="condensate")
+    assert np.allclose(d["cloud"], 50)                    # not from the 50% humidity
+
+
+
+
+def test_fetch_regrids_projected_grids():
+    """A projected model (2-D latitude and longitude) lands on a regular grid over the domain,
+    missing where it doesn't reach."""
+    levels = [1000, 850, 700, 500]
+    ny, nx = 6, 6
+    la = np.linspace(47.0, 47.3, ny)[:, None] + np.zeros((1, nx)) + 0.01 * np.arange(nx)[None, :]
+    lo = np.linspace(237.0, 237.3, nx)[None, :] + np.zeros((ny, 1))
+    shape = (len(levels), ny, nx)
+    hgt = np.array([100, 1500, 3000, 5600], dtype="float32")[:, None, None] * np.ones(shape)
+    mk = lambda v, name: xr.DataArray(v.astype("float32"), dims=("isobaricInhPa", "y", "x"),
+                                      coords={"isobaricInhPa": levels, "latitude": (("y", "x"), la), "longitude": (("y", "x"), lo)},
+                                      attrs={"GRIB_shortName": name})
+    ds = xr.Dataset({"gh": mk(hgt, "gh"), "t": mk(np.full(shape, 270.0), "t"), "r": mk(np.full(shape, 90.0), "r"),
+                     "u": mk(np.full(shape, 10.0), "u"), "v": mk(np.zeros(shape), "v"),
+                     "clwmr": mk(np.full(shape, 1e-4), "clwmr"), "unknown": mk(np.zeros(shape), "unknown")})
+    H = mock.Mock()
+    H.xarray.return_value = [ds]
+    spec = {"label": "HRRR", "family": "ncep", "max_hours": 48}
+    with mock.patch("briefing.grib._H", return_value=H):
+        vol = volume.fetch(spec, datetime(2026, 11, 11, 0), 0, DOM, hours=3, step=3, cloud="condensate", res=0.1,
+                           unknown="icmr", vars=["cloud", "temp"], more="CIMIXR")
+    assert "CIMIXR|" in H.xarray.call_args[0][0]
+    assert sorted(vol["vars"]) == ["cloud", "temp"]
+    assert np.ndim(vol["lat"]) == 1 and np.allclose(vol["lat"], [47.0, 47.1, 47.2, 47.3, 47.4, 47.5])
+    c = vol["vars"]["cloud"][0]                            # [z, y, x]
+    assert np.allclose(c[:, 1, 1], 100)                    # inside: full cloud from the condensate
+    assert np.isnan(c[:, -1, -1]).all()                    # 47.5 N, 122.5 W: beyond the model's grid
+    assert vol["family"] == "condensate"
