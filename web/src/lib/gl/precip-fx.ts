@@ -412,7 +412,7 @@ export class PrecipFx {
       gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, nl)
     }
     // soft flakes, larger, then small hard pellets
-    for (const [arr, n, size, soft] of [[this.points, np, 9.5, true], [this.pellets, ne, 3.0, false]] as const) {
+    for (const [arr, n, size, soft] of [[this.points, np, 9.5, true], [this.pellets, ne, 6.5, false]] as const) {
       if (!n) continue
       const p = this.flakeProg
       gl.useProgram(p.program)
