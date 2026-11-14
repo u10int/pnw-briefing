@@ -196,7 +196,10 @@ uniform int uMode;
 uniform int uScan;
 uniform float uScanPos, uRest;
 uniform sampler2D uPLut;
-out vec4 fragColor;
+layout(location = 0) out vec4 fragColor;
+// how far along the ray the field turns mostly opaque (box widths / 16, packed in two bytes), so
+// what's drawn into the box afterwards (falling precipitation) can hide behind it; 1 for nothing
+layout(location = 1) out vec4 depthOut;
 const float PI = 3.141592653589793;
 // the light, in the box's true proportions (x east, y south, z up): the sun at the map's time, or
 // a fixed light from the south-west; its colour (warmer and dimmer near the horizon, moonlight
@@ -269,6 +272,9 @@ void main() {
   float tf = min(min(thi.x, thi.y), thi.z);
   bool inBox = tf > tn;
   if (!inBox && !uShadow) discard;
+  depthOut = vec4(1.0);
+  float dFront = -1.0;
+  #define FRONT(q) if (dFront < 0.0 && acc.a > 0.35) dFront = length(((q) - ro) * uScale) / uScale.x;
   vec4 acc = vec4(0.0);
   vec3 Lw = normalize(LW);
   bool hitGround = false, hitSolid = false;
@@ -305,6 +311,7 @@ void main() {
           float pa = 0.9 * pc.a;                                 // clear where the view has nothing (no echo)
           acc.rgb += (1.0 - acc.a) * pa * col;
           acc.a += (1.0 - acc.a) * pa;
+          FRONT(pp)
         }
       }
       // the rest of the volume dims while scanning
@@ -336,6 +343,7 @@ void main() {
           float sa = uSolidA * w;
           acc.rgb += (1.0 - acc.a) * sa * col;
           acc.a += (1.0 - acc.a) * sa;
+          FRONT(ps)
           hitSolid = true;
           break;
         }
@@ -352,6 +360,7 @@ void main() {
               vec3 col = uIsoByHeight ? texture(uHeight, vec2(clamp(ph.z, 0.0, 1.0), 0.5)).rgb : ic.rgb;
               acc.rgb += (1.0 - acc.a) * ic.a * w * col * lam;
               acc.a += (1.0 - acc.a) * ic.a * w;
+              FRONT(ph)
             }
           }
         }
@@ -377,6 +386,7 @@ void main() {
           }
           acc.rgb += (1.0 - acc.a) * a * col;
           acc.a += (1.0 - acc.a) * a;
+          FRONT(p)
         }
       }
       t += dt;
@@ -388,8 +398,10 @@ void main() {
       vec3 col = colourAt(pmax, c.rgb) * mix(0.78, 1.0, pmax.z);
       acc.rgb += (1.0 - acc.a) * a * col;
       acc.a += (1.0 - acc.a) * a;
+      FRONT(pmax)
     }
   }
+  if (dFront >= 0.0) { float v = clamp(dFront / 16.0, 0.0, 0.9999) * 255.0; depthOut = vec4(floor(v) / 255.0, fract(v), 0.0, 1.0); }
   // the shadow on the ground (or the map), where the light passes through the field or the solid
   if (uShadow && !hitSolid && acc.a < 0.97) {
     if (!hitGround) {
@@ -513,6 +525,7 @@ export class VolumeLayer implements CustomLayerInterface {
   private blitProg?: Program
   private fbo?: WebGLFramebuffer
   private fboTex?: WebGLTexture
+  private fboDepth?: WebGLTexture
   private fboSize = [0, 0]
   private lastKey = ""
   private heightTex?: WebGLTexture
@@ -586,6 +599,7 @@ export class VolumeLayer implements CustomLayerInterface {
     this.curtainTex = gl.createTexture()!
     this.fbo = gl.createFramebuffer()!
     this.fboTex = gl.createTexture()!
+    this.fboDepth = gl.createTexture()!
     this.heightTex = gl.createTexture()!
     this.groundTex = gl.createTexture()!
     gl.bindTexture(gl.TEXTURE_2D, this.heightTex)
@@ -673,6 +687,7 @@ export class VolumeLayer implements CustomLayerInterface {
     if (this.ptVao) gl.deleteVertexArray(this.ptVao)
     if (this.fbo) gl.deleteFramebuffer(this.fbo)
     if (this.fboTex) gl.deleteTexture(this.fboTex)
+    if (this.fboDepth) gl.deleteTexture(this.fboDepth)
     if (this.vao) gl.deleteVertexArray(this.vao)
     if (this.lineVao) gl.deleteVertexArray(this.lineVao)
     if (this.lut) gl.deleteTexture(this.lut)
@@ -1076,6 +1091,10 @@ export class VolumeLayer implements CustomLayerInterface {
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, fw, fh, 0, gl.RGBA, gl.UNSIGNED_BYTE, null)
       for (const [k, v] of [[gl.TEXTURE_MIN_FILTER, gl.LINEAR], [gl.TEXTURE_MAG_FILTER, gl.LINEAR], [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE]])
         gl.texParameteri(gl.TEXTURE_2D, k, v)
+      gl.bindTexture(gl.TEXTURE_2D, this.fboDepth!)
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, fw, fh, 0, gl.RGBA, gl.UNSIGNED_BYTE, null)
+      for (const [k, v] of [[gl.TEXTURE_MIN_FILTER, gl.NEAREST], [gl.TEXTURE_MAG_FILTER, gl.NEAREST], [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE]])
+        gl.texParameteri(gl.TEXTURE_2D, k, v)
       this.fboSize = [fw, fh]
       this.lastKey = ""
     }
@@ -1086,10 +1105,13 @@ export class VolumeLayer implements CustomLayerInterface {
       const prevVp = gl.getParameter(gl.VIEWPORT) as Int32Array
       gl.bindFramebuffer(gl.FRAMEBUFFER, this.fbo!)
       gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.fboTex!, 0)
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, this.fboDepth!, 0)
+      gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1])
       gl.viewport(0, 0, fw, fh)
-      gl.clearColor(0, 0, 0, 0)
-      gl.clear(gl.COLOR_BUFFER_BIT)
+      gl.clearBufferfv(gl.COLOR, 0, [0, 0, 0, 0])
+      gl.clearBufferfv(gl.COLOR, 1, [1, 1, 1, 1])
       if (!d.empty) this.march(gl, d, mvp, inv, fw, fh, x1 - x0, yS - yN, zTop, yN, yS)
+      gl.drawBuffers([gl.COLOR_ATTACHMENT0])
       gl.bindFramebuffer(gl.FRAMEBUFFER, prevFb)
       gl.viewport(prevVp[0], prevVp[1], prevVp[2], prevVp[3])
     }
@@ -1110,7 +1132,9 @@ export class VolumeLayer implements CustomLayerInterface {
     this.drawPoints(gl, mvp)
     this.drawOverlays(gl, mvp)
     this.drawParticles(gl, mvp)
-    if (this.precipOn && this.precip?.render(gl, Float32Array.from(mvp), { lon: g.lon, lat: g.lat, topKm: g.topKm }, this.zr, window.devicePixelRatio || 1))
+    // the field's front and its opacity, so drops and flakes behind cloud are hidden by it
+    const occ = d.empty ? null : { depth: this.fboDepth!, img: this.fboTex!, inv: Float32Array.from(inv), scale: [x1 - x0, yS - yN, zTop] as [number, number, number] }
+    if (this.precipOn && this.precip?.render(gl, Float32Array.from(mvp), { lon: g.lon, lat: g.lat, topKm: g.topKm }, this.zr, window.devicePixelRatio || 1, occ))
       this.map?.triggerRepaint()                             // keep it falling
 
     if (this.lineProg && this.lineVao) {

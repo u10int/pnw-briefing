@@ -9,7 +9,8 @@ import { MISSING, mercY, program, type Program } from "./util"
  * streaks of rain or drifting flakes of snow fall from a few kilometres up to the ground, as many as
  * the intensity calls for: rain as blue streaks a few pixels wide (freezing rain the same, in pink),
  * snow as soft white flakes over a faint shadow (so they show over a light map), sleet as small hard
- * ice pellets (orange), and mixes as short purple streaks. Rain falls fast in streaks; snow slowly, wobbling; sleet and
+ * ice pellets (icy blue), and mixes as short purple streaks. Drops and flakes behind the 3D field's
+ * opaque front (from the volume layer's depth image) fade out with it. Rain falls fast in streaks; snow slowly, wobbling; sleet and
  * freezing rain in between. Positions are in the volume box's coordinates (0 – 1 each way, z up).
  */
 
@@ -25,6 +26,14 @@ uniform vec2 uViewport;
 uniform float uWidth;                      // device pixels
 out vec4 vCol;
 out vec2 vUv;
+uniform mat4 uInv;                         // clip -> box, for the distance from the eye
+uniform vec3 uScale;
+out float vDist;
+float eyeDist(vec4 clip, vec3 p) {
+  vec2 ndc = clip.xy / clip.w;
+  vec4 n = uInv * vec4(ndc, -1.0, 1.0);
+  return length((p - n.xyz / n.w) * uScale) / uScale.x;
+}
 void main() {
   vec4 h = uMVP * vec4(aHead, 1.0), t = uMVP * vec4(aTail, 1.0);
   vec2 hs = h.xy / h.w * uViewport, ts = t.xy / t.w * uViewport;
@@ -37,6 +46,7 @@ void main() {
   vec2 ext = (aCorner.x > 0.5 && len < 3.0 ? dir * (3.0 - len) : vec2(0.0)) + n * aCorner.y * uWidth * 0.5;
   p.xy += ext / uViewport * p.w;
   gl_Position = p;
+  vDist = eyeDist(p, mix(aHead, aTail, aCorner.x));
   vCol = aCol;
   vUv = aCorner;
 }`
@@ -45,10 +55,23 @@ precision highp float;
 in vec4 vCol;
 in vec2 vUv;
 out vec4 fragColor;
+uniform bool uOcc;
+uniform sampler2D uDepth, uImg;
+uniform vec2 uFull;                        // drawing buffer size
+in float vDist;
+// how much of the field's (mostly opaque) front lies between the eye and this fragment
+float hidden() {
+  if (!uOcc) return 0.0;
+  vec2 uv = gl_FragCoord.xy / uFull;
+  vec4 d = texture(uDepth, uv);
+  float front = (d.r * 255.0 + d.g) / 255.0 * 16.0;
+  if (d.a < 0.5 || front >= 15.9) return 0.0;
+  return min(1.0, texture(uImg, uv).a * 1.4) * smoothstep(front - 0.004, front + 0.02, vDist);
+}
 void main() {
   float side = 1.0 - smoothstep(0.45, 1.0, abs(vUv.y));
   float along = mix(1.0, 0.15, vUv.x);
-  fragColor = vCol * side * along;
+  fragColor = vCol * side * along * (1.0 - 0.95 * hidden());
 }`
 // flakes and pellets: round sprites with a soft dark rim, so white snow shows on a light map
 const FLAKE_VS = /* glsl */ `#version 300 es
@@ -57,16 +80,37 @@ layout(location = 1) in vec4 aCol;
 uniform mat4 uMVP;
 uniform float uPoint;
 out vec4 vCol;
-void main() { vCol = aCol; gl_Position = uMVP * vec4(aPos, 1.0); gl_PointSize = uPoint * (0.7 + 0.6 * aCol.a); }`
+uniform mat4 uInv;                         // clip -> box, for the distance from the eye
+uniform vec3 uScale;
+out float vDist;
+float eyeDist(vec4 clip, vec3 p) {
+  vec2 ndc = clip.xy / clip.w;
+  vec4 n = uInv * vec4(ndc, -1.0, 1.0);
+  return length((p - n.xyz / n.w) * uScale) / uScale.x;
+}
+void main() { vCol = aCol; gl_Position = uMVP * vec4(aPos, 1.0); vDist = eyeDist(gl_Position, aPos); gl_PointSize = uPoint * (0.7 + 0.6 * aCol.a); }`
 const FLAKE_FS = /* glsl */ `#version 300 es
 precision highp float;
 uniform bool uSoft;
 in vec4 vCol;
 out vec4 fragColor;
+uniform bool uOcc;
+uniform sampler2D uDepth, uImg;
+uniform vec2 uFull;                        // drawing buffer size
+in float vDist;
+// how much of the field's (mostly opaque) front lies between the eye and this fragment
+float hidden() {
+  if (!uOcc) return 0.0;
+  vec2 uv = gl_FragCoord.xy / uFull;
+  vec4 d = texture(uDepth, uv);
+  float front = (d.r * 255.0 + d.g) / 255.0 * 16.0;
+  if (d.a < 0.5 || front >= 15.9) return 0.0;
+  return min(1.0, texture(uImg, uv).a * 1.4) * smoothstep(front - 0.004, front + 0.02, vDist);
+}
 void main() {
   float r = length(gl_PointCoord - 0.5) * 2.0;
   if (r > 1.0) discard;
-  float a = vCol.a;
+  float a = vCol.a * (1.0 - 0.95 * hidden());
   if (uSoft) {
     // a snowflake: a solid white middle that softens out to nothing at the edge (no hard rim), with
     // a faint grey halo just outside it so it still shows over a light map
@@ -83,8 +127,8 @@ void main() {
 }`
 
 const MAX = 20000           // drops and flakes at most
-const PER_CELL = 8          // per cell, times the square root of its rate (mm/h, liquid equivalent)
-const SNOW_BOOST = 4        // snow falls as far more flakes than its water would make drops
+const PER_CELL = 6          // per cell, times the square root of its rate (mm/h, liquid equivalent)
+const SNOW_BOOST = 1.5        // snow falls as far more flakes than its water would make drops
 const START_KM = 3.5        // where they appear (roughly cloud base and below)
 
 type Kind = "rain" | "snow" | "freezing rain" | "sleet" | "mix"
@@ -102,7 +146,7 @@ const rgb = (h: string) => { const n = parseInt(h.slice(1), 16); return [(n >> 1
 /** Rain blue and snow white, as they look; the mixed types keep the radar legend's hues. */
 const COL: Record<Kind, number[]> = {
   ...(Object.fromEntries(Object.entries(PTYPE_COLORS).map(([k, v]) => [k, rgb(v)])) as Record<Kind, number[]>),
-  rain: [0.16, 0.42, 0.88], snow: [1, 1, 1],
+  rain: [0.16, 0.42, 0.88], snow: [1, 1, 1], sleet: rgb("#75cfde"),
 }
 
 /** Rain rate (mm/h) from reflectivity (dBZ), Marshall – Palmer. */
@@ -260,7 +304,9 @@ export class PrecipFx {
   }
 
   /** Step and draw. `zr` is the slab of the box being drawn (fractions of its height). */
-  render(gl: WebGL2RenderingContext, mvp: Float32Array, box: PrecipBox, zr: [number, number], dpr: number): boolean {
+  /** Step and draw. `occ`: the field's front (packed distances) and image, to hide what's behind it. */
+  render(gl: WebGL2RenderingContext, mvp: Float32Array, box: PrecipBox, zr: [number, number], dpr: number,
+         occ: { depth: WebGLTexture; img: WebGLTexture; inv: Float32Array; scale: [number, number, number] } | null = null): boolean {
     if (!this.draw) return false
     if (!this.box || this.box.lon[0] !== box.lon[0] || this.box.lat[0] !== box.lat[0] || this.box.topKm !== box.topKm) { this.srcKey = ""; this.box = box }
     const s = this.source(box)
@@ -294,12 +340,27 @@ export class PrecipFx {
     }
     gl.enable(gl.BLEND)
     gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA)
+    const setOcc = (p: Program) => {
+      gl.uniform1i(p.u("uOcc"), occ ? 1 : 0)
+      if (!occ) return
+      gl.uniformMatrix4fv(p.u("uInv"), false, occ.inv)
+      gl.uniform3f(p.u("uScale"), ...occ.scale)
+      gl.uniform2f(p.u("uFull"), gl.drawingBufferWidth, gl.drawingBufferHeight)
+      gl.activeTexture(gl.TEXTURE6)
+      gl.bindTexture(gl.TEXTURE_2D, occ.depth)
+      gl.uniform1i(p.u("uDepth"), 6)
+      gl.activeTexture(gl.TEXTURE7)
+      gl.bindTexture(gl.TEXTURE_2D, occ.img)
+      gl.uniform1i(p.u("uImg"), 7)
+      gl.activeTexture(gl.TEXTURE0)
+    }
     if (nl) {
       const p = this.streakProg
       gl.useProgram(p.program)
       gl.uniformMatrix4fv(p.u("uMVP"), false, mvp)
       gl.uniform2f(p.u("uViewport"), gl.drawingBufferWidth / 2, gl.drawingBufferHeight / 2)
       gl.uniform1f(p.u("uWidth"), 1.8 * dpr)
+      setOcc(p)
       gl.bindVertexArray(this.streakVao)
       gl.bindBuffer(gl.ARRAY_BUFFER, this.streakBuf)
       gl.bufferData(gl.ARRAY_BUFFER, this.streaks.subarray(0, nl * 10), gl.STREAM_DRAW)
@@ -313,6 +374,7 @@ export class PrecipFx {
       gl.uniformMatrix4fv(p.u("uMVP"), false, mvp)
       gl.uniform1f(p.u("uPoint"), size * dpr)
       gl.uniform1i(p.u("uSoft"), soft ? 1 : 0)
+      setOcc(p)
       gl.bindVertexArray(this.flakeVao)
       gl.bindBuffer(gl.ARRAY_BUFFER, this.flakeBuf)
       gl.bufferData(gl.ARRAY_BUFFER, arr.subarray(0, n * 7), gl.STREAM_DRAW)
