@@ -48,7 +48,11 @@ RRFS), it reads every `step` hours (3) over the first `hours` (48) of the briefi
 records on a regular 0.05° grid over the domain first (nearest neighbour, missing where the model
 doesn't reach, such as the north end of Vancouver Island), so every volume is a lat/lon box. They
 publish no cloud cover on pressure levels, so `cloud: condensate` takes cloud from their own cloud
-water plus ice: none below 0.001 g/kg, full by 0.1 g/kg, log-spaced in between. That's the
+water, cloud ice and snow (in their schemes most cloud aloft is carried as snow; cloud ice stays
+tiny): none below 0.001 g/kg, full by 0.1 g/kg, log-spaced in between. It also takes the cloud
+the humidity implies (Sundqvist, relative to ice below freezing), whichever is more, so thin
+cirrus still shows. These ingredients are averaged over 3×3 native cells (9 km) before regridding,
+which takes out the cell-to-cell speckle. That's the
 microphysics their simulated radar comes from, so the 3D cloud lines up with the 2D radar and the
 falling precipitation. To keep the files small, `vars` keeps only cloud, water, ice, temperature
 and wind (u, v), about 20 MB a model. Their humidity, vertical motion and PV are noisy at this

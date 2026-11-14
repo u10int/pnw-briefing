@@ -116,14 +116,23 @@ def to_heights(values, heights, targets=HEIGHTS_M):
     return (v0 + w * (v1 - v0)).astype("float32")
 
 
-def cloud_from_condensate(qc, qi):
-    """Cloud (%) from cloud water and cloud ice mixing ratios (kg/kg), for models whose pressure
-    levels carry no cloud cover (HRRR, RRFS): none below 0.001 g/kg of condensate, full by 0.1 g/kg,
-    log-spaced in between, so it follows the same microphysics as the model's radar."""
-    q = 1000 * (np.nan_to_num(np.asarray(qc, dtype="float32")) + np.nan_to_num(np.asarray(qi, dtype="float32")))
+def cloud_from_condensate(qc, qi, qs=None, rh=None, t=None):
+    """Cloud (%) for models whose pressure levels carry no cloud cover (HRRR, RRFS), from the same
+    microphysics as their radar: cloud water, cloud ice and snow (kg/kg; in their Thompson-type
+    schemes most of the cloud aloft is carried as snow, cloud ice stays tiny), none below 0.001 g/kg,
+    full by 0.1 g/kg, log-spaced in between. With humidity and temperature (K) it also takes the
+    cloud humidity alone implies (Sundqvist, relative to ice below freezing), so thin cirrus and
+    cloud edges the condensate misses still show; whichever is more."""
+    q = sum(1000 * np.nan_to_num(np.asarray(a, dtype="float32")) for a in (qc, qi, qs) if a is not None)
     with np.errstate(divide="ignore"):
         x = (np.log10(np.maximum(q, 1e-9)) + 3) / 2
-    return (100 * np.clip(x, 0, 1)).astype("float32")
+    c = (100 * np.clip(x, 0, 1)).astype("float32")
+    if rh is not None and t is not None:
+        tc = np.asarray(t, dtype="float32") - 273.15
+        # saturation over water / over ice (Magnus forms): humidity relative to ice is higher when cold
+        ratio = np.where(tc < 0, np.exp(17.62 * tc / (243.12 + tc) - 22.46 * tc / (272.62 + tc)), 1.0)
+        c = np.maximum(c, cloud_from_rh(np.clip(np.asarray(rh, dtype="float32") * ratio, 0, 100)))
+    return c
 
 
 def cloud_from_rh(rh, rh_crit=80.0):
@@ -167,7 +176,7 @@ def derive(got, family, levels=None, lat=None, lon=None, cloud="auto"):
     if "r" in got:
         out["rh"] = np.clip(got["r"], 0, 100)
     if cloud == "condensate" and "clwmr" in got and "icmr" in got:
-        out["cloud"] = cloud_from_condensate(got["clwmr"], got["icmr"])
+        out["cloud"] = cloud_from_condensate(got["clwmr"], got["icmr"], got.get("snmr"), got.get("r"), got.get("t"))
     elif "tcc" in got:
         out["cloud"] = np.clip(got["tcc"], 0, 100)
     elif "r" in got:
@@ -273,6 +282,12 @@ def fetch(spec, run, lead0, dom, hours=48, step=3, cloud="auto", res=0.05, unkno
                         vals = full
                     got[k] = vals
             if lat is not None and np.ndim(lat) == 2:
+                # the 3 km fields are speckled cell to cell; average the cloud ingredients over 3×3
+                # cells (9 km) before sampling them onto the coarser grid
+                from scipy.ndimage import uniform_filter
+                for k in ("clwmr", "icmr", "snmr", "grle", "rwmr", "r"):
+                    if k in got:
+                        got[k] = uniform_filter(np.nan_to_num(got[k]), size=(1, 3, 3), mode="nearest")
                 rg, lat, lon = regular(lat, lon)
                 got = {k: rg(v) for k, v in got.items()}
             if "gh" not in got or "t" not in got:

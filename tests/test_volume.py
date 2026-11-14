@@ -139,6 +139,9 @@ def test_cloud_from_condensate():
     d = volume.derive({"t": np.full((1, 1, 1), 270.0), "r": np.full((1, 1, 1), 50.0), "clwmr": np.full((1, 1, 1), 1e-5),
                        "icmr": np.zeros((1, 1, 1))}, "ncep", cloud="condensate")
     assert np.allclose(d["cloud"], 50)                    # not from the 50% humidity
+    # snow counts; and saturated air with no condensate is still cloud (relative to ice when cold)
+    assert np.allclose(volume.cloud_from_condensate(np.zeros(1), np.zeros(1), np.array([1e-5])), 50)
+    assert volume.cloud_from_condensate(np.zeros(1), np.zeros(1), rh=np.array([85.0]), t=np.array([243.0]))[0] > 60
 
 
 
