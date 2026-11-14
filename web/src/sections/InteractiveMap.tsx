@@ -15,7 +15,7 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrig
 import { Slider } from "@/components/ui/slider"
 import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { FALLBACK, STYLE_URL, withKey } from "@/lib/basemap"
+import { FALLBACK, forDark, setBasemapDark, setPaint, STYLE_URL, withKey } from "@/lib/basemap"
 import { loadCog } from "@/lib/cog"
 import { MRMS_MODEL } from "@/lib/mrms-name"
 import type { Md } from "@/lib/spcmd"
@@ -397,7 +397,7 @@ export interface PaneTerrain { exaggeration: number; snow: { entry: VolumeEntry;
 /** The cross-section on the map: its line (and the points picked so far while drawing one). */
 interface PaneSection { line: SectionLine | null; picked: LonLat[] | null; sink: React.MutableRefObject<{ set?: (img: HTMLCanvasElement) => void }> }
 
-function MapPane({ data, view, clock, opacity, smooth, particles, particleColor, sync, terrain, sat, fronts, reports, fires, vol = null, xsec = null, onPick = null, terrain3d = null, tall = false, insetTitle = false }: {
+function MapPane({ data, view, clock, opacity, smooth, particles, particleColor, sync, terrain, sat, fronts, reports, fires, vol = null, xsec = null, onPick = null, terrain3d = null, tall = false, insetTitle = false, dark = false }: {
   data: Briefing; view: View | null; clock: Clock; opacity: number; smooth: boolean
   particles: boolean; particleColor: [number, number, number, number]; sync: ReturnType<typeof useCameraSync>
   terrain: boolean; sat: { kind: SatKind; times: SatTimes } | null; fronts: Fronts | null; reports: ObsReport[] | null
@@ -408,6 +408,8 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
   tall?: boolean
   /** room at the top left for the map page's Controls button */
   insetTitle?: boolean
+  /** the dark basemap */
+  dark?: boolean
 }) {
   const el = React.useRef<HTMLDivElement>(null)
   const axisEl = React.useRef<HTMLDivElement>(null)
@@ -429,6 +431,31 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
   const [hover, setHover] = React.useState<{ x: number; y: number; text: string | null; place: string | null; vol?: string | null } | null>(null)
   const volRef = React.useRef(vol)
   volRef.current = vol
+  // light or dark basemap: the basemap's own layers recoloured in place, and the data layers' dark
+  // inks and white halos swapped (their light colours are kept from when they were added)
+  const lightPaint = React.useRef<Map<string, Record<string, unknown>> | null>(null)
+  const wasDark = React.useRef(false)
+  React.useEffect(() => {
+    if (!dark && !wasDark.current) return                 // light as loaded: nothing to undo
+    wasDark.current = dark
+    let live = true
+    ready.current?.then(async (m) => {
+      if (!live) return
+      if (!lightPaint.current) {
+        const base = new Set<string>()
+        try { (await (await fetch(STYLE_URL)).json() as { layers: { id: string }[] }).layers.forEach((l) => base.add(l.id)) } catch { /* fallback style */ }
+        lightPaint.current = new Map(m.getStyle().layers.filter((l) => !base.has(l.id) && l.id !== "bg" && "paint" in l && l.paint)
+          .map((l) => [l.id, { ...(l as { paint: Record<string, unknown> }).paint }]))
+      }
+      if (!live) return
+      await setBasemapDark(m, dark).catch(() => {})
+      for (const [id, paint] of lightPaint.current) {
+        if (!m.getLayer(id)) continue
+        for (const [k, v] of Object.entries(paint)) setPaint(m, id, k, dark ? forDark(v) : v)
+      }
+    })
+    return () => { live = false }
+  }, [dark])
   const [status, setStatus] = React.useState<Status>({ kind: "loading" })
   const [sub, setSub] = React.useState<string | undefined>()
 
@@ -2344,6 +2371,7 @@ function TimeBar({ times, clock, playing, setPlaying, className = "border bg-mut
 // so its particles are a mid ink; other layers get a darker one.
 const DARK_INK: [number, number, number, number] = [24, 28, 34, 0.62]
 const WIND_INK: [number, number, number, number] = [24, 28, 34, 0.5]
+const LIGHT_INK: [number, number, number, number] = [236, 238, 242, 0.6]
 
 // ------------------------------------------------------------------ the card
 
@@ -2388,6 +2416,7 @@ export function InteractiveMap({ data, request, active = true, standalone = fals
   const [smooth, setSmooth] = useStoredFlag("pnw-briefing.map.smooth", false, q.has("sm") ? qb("sm", false) : undefined)
   const [particles, setParticles] = useStoredFlag("pnw-briefing.map.particles", true, q.has("pa") ? qb("pa", true) : undefined)
   const [terrain, setTerrain] = useStoredFlag("pnw-briefing.map.terrain", true, q.has("tr") ? qb("tr", true) : undefined)
+  const [darkMap, setDarkMap] = useStoredFlag("pnw-briefing.map.dark", false, q.has("dk") ? qb("dk", false) : undefined)
   const [satKind, setSatKind] = React.useState<SatKind | "off">(() => (q.get("sat") && q.get("sat")! in SAT_KINDS ? q.get("sat") as SatKind : "off"))
   const [showPairs, setShowPairs] = useStoredFlag("pnw-briefing.map.pairs", true, q.has("pr") ? qb("pr", true) : undefined)
   const [showFronts, setShowFronts] = useStoredFlag("pnw-briefing.map.fronts", false, q.has("fr") ? qb("fr", false) : undefined)
@@ -2786,7 +2815,7 @@ export function InteractiveMap({ data, request, active = true, standalone = fals
   const entriesA = hA ? byModel.get(hA)!.entries : {}
   const hasWind = mode === "hourly" && [hA, showB ? hB : undefined].some((m) => m && flowOf(layer, byModel.get(m)!.entries))
   const showParticles = particles && hasWind && active      // no animation while the Map tab is hidden
-  const ink = layer === "wind" ? WIND_INK : DARK_INK
+  const ink = darkMap ? LIGHT_INK : layer === "wind" ? WIND_INK : DARK_INK
 
   // ---- the settings as a query string: kept in the map page's URL (so a link opens the same view)
   // and handed to the briefing for its link to the map page
@@ -2806,7 +2835,7 @@ export function InteractiveMap({ data, request, active = true, standalone = fals
     if (compare) { p.set("cmp", "1"); if (mode === "totals") put("o", other); else put("ho", hOther) }
     put("op", Math.round(opacity * 100) / 100, 0.85)
     // switches that are remembered per browser go in either way, so the link opens as it looks here
-    put("sm", smooth); put("pa", particles); put("tr", terrain); put("pr", showPairs); put("fr", showFronts); put("rp", showReports); put("fi", showFires)
+    put("sm", smooth); put("pa", particles); put("tr", terrain); put("dk", darkMap, false); put("pr", showPairs); put("fr", showFronts); put("rp", showReports); put("fi", showFires)
     if (mode === "hourly" && threeD) {
       p.set("3d", "1"); put("vf", volVar, "cloud"); put("vm", volModel); put("ex", exag, 25)
       if (zRange) p.set("zr", zRange.join(","))
@@ -3019,6 +3048,7 @@ export function InteractiveMap({ data, request, active = true, standalone = fals
           ] : [])].filter(Boolean)}
           active={(frontsOn ? 1 : 0) + (reportsOn ? 1 : 0) + (firesOn ? 1 : 0) + (mode === "hourly" ? [entriesA.mslp && isobars, pairList.length > 0 && showPairs, hasWind && particles, satAll && satKind !== "off"].filter(Boolean).length : 0)}
           display={<>
+            <OptionRow id="dark-map" label="Dark map" checked={darkMap} onChange={setDarkMap} />
             <OptionRow id="terrain" label="Terrain" checked={terrain} onChange={setTerrain} />
             <OptionRow id="smooth" label="Smooth" checked={smooth} onChange={setSmooth} />
             <div className="flex items-center justify-between gap-4 py-1.5">
@@ -3242,9 +3272,9 @@ export function InteractiveMap({ data, request, active = true, standalone = fals
   const mapArea = (
     <div className={full ? `fixed inset-0 z-50 m-0! grid bg-background ${showB ? "grid-rows-2 gap-px lg:grid-cols-2 lg:grid-rows-1" : ""}` : standalone ? `relative grid h-full ${showB ? "grid-rows-2 gap-px lg:grid-cols-2 lg:grid-rows-1" : ""}` : `relative grid gap-3 ${showB ? "lg:grid-cols-2" : ""}`}
       role={full ? "dialog" : undefined} aria-modal={full || undefined} aria-label={full ? "Map, full screen" : undefined}>
-      <MapPane data={data} view={viewA} clock={clock} opacity={opacity} smooth={smooth} particles={showParticles} particleColor={ink} sync={sync} terrain={terrain} sat={sat} fronts={frontsOn} reports={reportsOn} fires={firesOn} vol={paneVol}
+      <MapPane data={data} view={viewA} clock={clock} opacity={opacity} smooth={smooth} particles={showParticles} particleColor={ink} sync={sync} terrain={terrain} sat={sat} fronts={frontsOn} reports={reportsOn} fires={firesOn} vol={paneVol} dark={darkMap}
         xsec={volOn && xsecOn ? { line: xsecLine, picked: picking, sink: xsecSink } : null} onPick={volOn && xsecOn && picking ? onPick : volOn && profileOn ? pickProfile : null} terrain3d={paneTerrain} tall={full || standalone} insetTitle={standalone && !panelOpen && !full} />
-      {showB && <MapPane data={data} view={viewB} clock={clock} opacity={opacity} smooth={smooth} particles={showParticles} particleColor={ink} sync={sync} terrain={terrain} sat={sat} fronts={frontsOn} reports={reportsOn} fires={firesOn} tall={full || standalone} />}
+      {showB && <MapPane data={data} view={viewB} clock={clock} opacity={opacity} smooth={smooth} particles={showParticles} particleColor={ink} sync={sync} terrain={terrain} sat={sat} fronts={frontsOn} reports={reportsOn} fires={firesOn} tall={full || standalone} dark={darkMap} />}
       {/* left of the zoom buttons, so it doesn't cover them */}
       <Button variant="outline" size="icon" onClick={() => setFull((f) => !f)} aria-pressed={full}
         aria-label={full ? "Exit full screen" : "Full screen map"} title={full ? "Exit full screen (Esc)" : "Full screen"}

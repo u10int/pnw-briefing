@@ -242,7 +242,7 @@ grids to object storage such as Cloudflare R2; only the publish step changes.
 panel that folds away (over the map on a phone), and the legend, timeline, cross-section and
 profile float over the map. Its settings live in the address: the mode, layer and model, the window or
 the time, the overlays, the 3D view and its options, and the camera (`c=lon,lat,zoom,pitch,bearing`),
-updated as you change them, so the address is always a link to the view on screen. "Copy link"
+the light or dark basemap (`dk`), updated as you change them, so the address is always a link to the view on screen. "Copy link"
 copies it; the briefing's map card has an "Open map page" link that carries its current settings
 over. On a phone the map and its timeline come first, with the controls under them.
 
