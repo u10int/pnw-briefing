@@ -90,21 +90,14 @@ NAMES = {
 }
 
 
-# GRIB parameters eccodes has no name for, by (discipline, category, number): HRRR's cloud ice
-# (NCEP's local CIMIXR, 0/1/82) comes through cfgrib as "unknown"
-BY_NUMBER = {(0, 1, 82): "icmr"}
-
-
 def _key(name, da):
-    """Which of NAMES a cfgrib variable is, by its name or its GRIB name (or, for a parameter
-    eccodes can't name, its GRIB numbers)."""
+    """Which of NAMES a cfgrib variable is, by its name or its GRIB name."""
     cands = {name.lower(), str(da.attrs.get("GRIB_shortName", "")).lower(), str(da.attrs.get("GRIB_name", "")).lower(),
              str(da.attrs.get("GRIB_cfVarName", "")).lower()}
     for k, aliases in NAMES.items():
         if cands & set(aliases):
             return k
-    nums = tuple(da.attrs.get(f"GRIB_{a}") for a in ("discipline", "parameterCategory", "parameterNumber"))
-    return BY_NUMBER.get(nums) if None not in nums else None
+    return None
 
 
 def to_heights(values, heights, targets=HEIGHTS_M):
@@ -222,13 +215,15 @@ def unpack(b, var):
     return v
 
 
-def fetch(spec, run, lead0, dom, hours=48, step=3, cloud="auto", res=0.05):
+def fetch(spec, run, lead0, dom, hours=48, step=3, cloud="auto", res=0.05, unknown=None, vars=None, more=None):
     """{"hours", "lat", "lon", "levels": {hPa: mean height m}, "vars": {var: [t, z, y, x]}}, or None.
 
     Projected grids (HRRR, RRFS: 2-D latitude and longitude) are put on a regular `res`° grid over
     the domain first (nearest neighbour, missing outside the model's coverage), so every volume is
     a lat/lon box the page can draw. `cloud="condensate"` takes cloud from the model's cloud water
-    and ice instead of cloud cover or humidity."""
+    and ice instead of cloud cover or humidity. `unknown` names the one record eccodes can't (HRRR's
+    cloud ice, CIMIXR, arrives as "unknown"); `vars` keeps only those variables (and the heights);
+    `more` adds GRIB names to the records read (e.g. "CIMIXR")."""
     import threading
 
     from .analysis import Regridder
@@ -247,6 +242,8 @@ def fetch(spec, run, lead0, dom, hours=48, step=3, cloud="auto", res=0.05):
     fam = spec["family"]
     levels = LEVELS[fam]
     pattern = PATTERN[fam].format(levels="|".join(map(str, levels)))
+    if more:
+        pattern = pattern.replace(":(", f":({more}|", 1)
     want = [h for h in range(lead0, lead0 + hours + 1) if h > 0 and h % step == 0 and h <= spec["max_hours"]]
     why = {}                                    # forecast hour -> why it couldn't be read
 
@@ -260,7 +257,7 @@ def fetch(spec, run, lead0, dom, hours=48, step=3, cloud="auto", res=0.05):
                     da = d[name]
                     if "isobaricInhPa" not in da.dims:
                         continue
-                    k = _key(name, da)
+                    k = _key(name, da) or (unknown if name == "unknown" else None)
                     if not k or k in got:
                         continue
                     da = da.sel(isobaricInhPa=[p for p in levels if p in da["isobaricInhPa"].values])
@@ -283,7 +280,8 @@ def fetch(spec, run, lead0, dom, hours=48, step=3, cloud="auto", res=0.05):
                 why[h] = f"no heights or temperature among {', '.join(seen) or 'no fields'}"
                 return h, None
             heights = got.pop("gh")
-            return h, (lat, lon, levs, heights, {k: to_heights(v, heights) for k, v in derive(got, fam, levs, lat, lon, cloud).items()})
+            return h, (lat, lon, levs, heights, {k: to_heights(v, heights) for k, v in derive(got, fam, levs, lat, lon, cloud).items()
+                                                 if not vars or k in vars})
         except Exception as e:
             why[h] = f"{type(e).__name__}: {e}"
             log.debug("%s volume f%03d: %s", spec["label"], h, e)

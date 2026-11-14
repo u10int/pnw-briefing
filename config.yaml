@@ -147,15 +147,18 @@ grib_models:
   - {id: hrrr, label: HRRR, tier: regional, family: ncep, herbie: {model: hrrr, product: sfc},
      cycles: [0, 6, 12, 18], max_hours: 48, range_days: 2, sample_hours: 3, chain_step: 1,
      extremes: {step: 1, wind: max},                          # no 2 m max/min: hourly temperature
-     # the 3D view on its pressure-level file (prs), regridded to 0.05°; cloud from its own cloud
-     # water and ice, so it lines up with its radar
-     volume: {hours: 48, step: 3, cloud: condensate, herbie: {product: prs}},
+     # the 3D view on its pressure-level file (prs), regridded to 0.05°: cloud from its own cloud
+     # water and ice, so it lines up with its radar, and the fields that go with it (its humidity,
+     # vertical motion and PV are noisy at this scale and would triple the size). Its cloud ice
+     # (CIMIXR) has no name in eccodes and arrives as "unknown".
+     volume: {hours: 48, step: 3, cloud: condensate, more: CIMIXR, unknown: icmr,
+              vars: [cloud, water, ice, temp, u, v], herbie: {product: prs}},
      fields: {hourly: [refc, ptype, prate, t2m, gust, wind, mslp, frz, rh, smoke], hourly_hours: 48, stepped: [wind, mslp, frz, rh]}}
   - {id: rrfs, label: RRFS, tier: regional, family: ncep,
      herbie: {model: rrfs, product: 2dfld, domain: conus},   # operational RRFS: deterministic = no member
      cycles: [0, 6, 12, 18], max_hours: 84, range_days: 3, sample_hours: 3, chain_step: 1,
      extremes: {step: 1, temp: maxmin, wind: max},
-     volume: {hours: 48, step: 3, cloud: condensate, herbie: {product: prslev}},
+     volume: {hours: 48, step: 3, cloud: condensate, vars: [cloud, water, ice, temp, u, v], herbie: {product: prslev}},
      fields: {hourly: [refc, ptype, prate, t2m, gust, wind, mslp, frz, rh, smoke], hourly_hours: 48,
               stepped: [wind, mslp, frz, rh, refc, ptype, prate, smoke]}}           # every 3 h from 48 h to 84 h
   # NAM 3 km (namnest) was retired by NWS on 2026-11-03 12Z (SCN 26-47), replaced by RRFS.
