@@ -112,11 +112,12 @@ void main() {
   if (r > 1.0) discard;
   float a = vCol.a * (1.0 - 0.95 * hidden());
   if (uSoft) {
-    // a snowflake: a solid white middle that softens out to nothing at the edge (no hard rim), with
-    // a faint grey halo just outside it so it still shows over a light map
-    float glow = 1.0 - smoothstep(0.2, 0.85, r);
+    // a snowflake: a white middle that fades out softly (no edge to it), over a wide, faint grey
+    // shadow that thins out gradually to the sprite's edge, so it still reads on a light map
+    // without looking outlined. The flake itself only fills the middle 60% of the sprite.
+    float glow = 1.0 - smoothstep(0.06, 0.6, r);
     glow *= glow * (3.0 - 2.0 * glow);
-    float shade = (1.0 - smoothstep(0.7, 1.0, r)) * (1.0 - glow) * 0.18;
+    float shade = pow(1.0 - smoothstep(0.15, 1.0, r), 1.8) * 0.3 * (1.0 - glow);
     fragColor = vec4(vCol.rgb * glow * a + vec3(0.12, 0.15, 0.22) * shade * a, (glow + shade) * a);
     return;
   }
@@ -397,7 +398,7 @@ export class PrecipFx {
       gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, nl)
     }
     // soft flakes, larger, then small hard pellets
-    for (const [arr, n, size, soft] of [[this.points, np, 6.0, true], [this.pellets, ne, 3.0, false]] as const) {
+    for (const [arr, n, size, soft] of [[this.points, np, 9.5, true], [this.pellets, ne, 3.0, false]] as const) {
       if (!n) continue
       const p = this.flakeProg
       gl.useProgram(p.program)
