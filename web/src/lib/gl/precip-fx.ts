@@ -158,6 +158,8 @@ const rate = (dbz: number) => Math.pow(Math.pow(10, dbz / 10) / 200, 1 / 1.6)
 interface Source { x: Float32Array; y: Float32Array; w: Float32Array; kind: Uint8Array; cdf: Float32Array; total: number }
 
 export interface PrecipBox { lon: [number, number]; lat: [number, number]; topKm: number }
+/** The map's view: its bounds and zoom, so drops go where they're seen, as many as the zoom calls for. */
+export interface PrecipView { west: number; south: number; east: number; north: number; zoom: number }
 
 export class PrecipFx {
   private streakProg: Program
@@ -172,6 +174,9 @@ export class PrecipFx {
   private t = 0
   private srcKey = ""
   private src: Source | null = null
+  private sel: { idx: Int32Array; cdf: Float32Array; total: number } | null = null
+  private selKey = ""
+  private selAt = 0
   private box: PrecipBox | null = null
   // particles
   private px = new Float32Array(MAX); private py = new Float32Array(MAX); private pz = new Float32Array(MAX)
@@ -287,19 +292,54 @@ export class PrecipFx {
     for (let i = 0; i < ws.length; i++) { s += ws[i]; cdf[i] = s }
     this.src = { x: Float32Array.from(xs), y: Float32Array.from(ys), w: Float32Array.from(ws), kind: Uint8Array.from(ks), cdf, total: s }
     this.srcKey = key
-    // how many: by the square root of the rate (sixteen times the rate, four times the drops), so
-    // heavy cells stand out without light rain vanishing
-    this.n = Math.min(MAX, Math.round(s * PER_CELL))
-    for (let i = 0; i < this.n; i++) this.spawn(i, box, true)
+    this.selKey = ""
+    this.n = 0
     return this.src
   }
 
-  private spawn(i: number, box: PrecipBox, scatter = false) {
+  /**
+   * Which wet cells are on screen, and how many drops to give them. Drops only start where the map
+   * shows, and their number follows the zoom: the cells' screen area grows about fourfold for
+   * each zoom level, so the count per cell grows with it (by 2^(1.6 Δzoom) from zoom 6.5), keeping
+   * the look on screen about the same zoomed out over the region or in close on a valley.
+   */
+  private select(box: PrecipBox, view: PrecipView | null) {
     const s = this.src!
-    if (!s.total) return
-    const u = Math.random() * s.total
-    let lo = 0, hi = s.cdf.length - 1
-    while (lo < hi) { const m = (lo + hi) >> 1; if (s.cdf[m] < u) lo = m + 1; else hi = m }
+    const key = view ? `${s.cdf.length}|${view.west.toFixed(2)}|${view.east.toFixed(2)}|${view.south.toFixed(2)}|${view.north.toFixed(2)}|${view.zoom.toFixed(1)}` : `${s.cdf.length}|all`
+    if (key === this.selKey) return
+    const now = performance.now()
+    if (this.selKey && now - this.selAt < 200) return            // at most five times a second while the map moves
+    this.selKey = key
+    this.selAt = now
+    let x0 = -1, x1 = 2, y0 = -1, y1 = 2
+    if (view) {
+      const yN = mercY(box.lat[1]), yS = mercY(box.lat[0])
+      const mx = 0.06 * (view.east - view.west), my = 0.06 * (view.north - view.south)   // a little beyond the edges
+      x0 = (view.west - mx - box.lon[0]) / (box.lon[1] - box.lon[0]); x1 = (view.east + mx - box.lon[0]) / (box.lon[1] - box.lon[0])
+      y0 = (mercY(Math.min(85, view.north + my)) - yN) / (yS - yN); y1 = (mercY(Math.max(-85, view.south - my)) - yN) / (yS - yN)
+    }
+    const idx: number[] = [], cdf: number[] = []
+    let t = 0
+    for (let i = 0; i < s.x.length; i++) {
+      if (s.x[i] < x0 || s.x[i] > x1 || s.y[i] < y0 || s.y[i] > y1) continue
+      t += s.w[i]; idx.push(i); cdf.push(t)
+    }
+    this.sel = { idx: Int32Array.from(idx), cdf: Float32Array.from(cdf), total: t }
+    const zoomScale = view ? Math.min(12, Math.max(0.08, 2 ** (1.6 * (view.zoom - 6.5)))) : 1
+    // how many: by the square root of the rate (sixteen times the rate, four times the drops), so
+    // heavy cells stand out without light rain vanishing
+    const n = Math.min(MAX, Math.round(t * PER_CELL * zoomScale))
+    for (let i = this.n; i < n; i++) this.spawn(i, box, true)       // new drops start anywhere in the column
+    this.n = n
+  }
+
+  private spawn(i: number, box: PrecipBox, scatter = false) {
+    const s = this.src!, sel = this.sel
+    if (!sel || !sel.total) { this.pz[i] = -1; this.top[i] = 0; return }
+    const u = Math.random() * sel.total
+    let k = 0, hi = sel.cdf.length - 1
+    while (k < hi) { const m = (k + hi) >> 1; if (sel.cdf[m] < u) k = m + 1; else hi = m }
+    const lo = sel.idx[k]
     const g = this.draw!.grid
     const cw = (g.east - g.west) / g.width / (box.lon[1] - box.lon[0])
     const ch = (g.north - g.south) / g.height / (box.lat[1] - box.lat[0])
@@ -316,11 +356,14 @@ export class PrecipFx {
   /** Step and draw. `zr` is the slab of the box being drawn (fractions of its height). */
   /** Step and draw. `occ`: the field's front (packed distances) and image, to hide what's behind it. */
   render(gl: WebGL2RenderingContext, mvp: Float32Array, box: PrecipBox, zr: [number, number], dpr: number,
-         occ: { depth: WebGLTexture; img: WebGLTexture; inv: Float32Array; scale: [number, number, number] } | null = null): boolean {
+         occ: { depth: WebGLTexture; img: WebGLTexture; inv: Float32Array; scale: [number, number, number] } | null = null,
+         view: PrecipView | null = null): boolean {
     if (!this.draw) return false
     if (!this.box || this.box.lon[0] !== box.lon[0] || this.box.lat[0] !== box.lat[0] || this.box.topKm !== box.topKm) { this.srcKey = ""; this.box = box }
     const s = this.source(box)
-    if (!s || !s.total || !this.n) return false
+    if (!s || !s.total) return false
+    this.select(box, view)
+    if (!this.n) return true
     const now = performance.now()
     const dt = this.last ? Math.min(0.05, (now - this.last) / 1000) : 1 / 60
     this.last = now

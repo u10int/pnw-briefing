@@ -1134,7 +1134,9 @@ export class VolumeLayer implements CustomLayerInterface {
     this.drawParticles(gl, mvp)
     // the field's front and its opacity, so drops and flakes behind cloud are hidden by it
     const occ = d.empty ? null : { depth: this.fboDepth!, img: this.fboTex!, inv: Float32Array.from(inv), scale: [x1 - x0, yS - yN, zTop] as [number, number, number] }
-    if (this.precipOn && this.precip?.render(gl, Float32Array.from(mvp), { lon: g.lon, lat: g.lat, topKm: g.topKm }, this.zr, window.devicePixelRatio || 1, occ))
+    const vb = this.map.getBounds()
+    const view = { west: vb.getWest(), east: vb.getEast(), south: vb.getSouth(), north: vb.getNorth(), zoom: this.map.getZoom() }
+    if (this.precipOn && this.precip?.render(gl, Float32Array.from(mvp), { lon: g.lon, lat: g.lat, topKm: g.topKm }, this.zr, window.devicePixelRatio || 1, occ, view))
       this.map?.triggerRepaint()                             // keep it falling
 
     if (this.lineProg && this.lineVao) {

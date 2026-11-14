@@ -375,7 +375,7 @@ their vertex data in `xyz + premultiplied rgba` (28-byte) buffers.
   coloured by speed, or by the drawn field's value where they are (for example moisture flow).
 - **Falling precipitation** (`lib/gl/precip-fx.ts`) comes from the 2D map's radar layer. Where
   the model shows precipitation, up to 20,000 drops and flakes fall from about 3.5 km, 6 per cell
-  times the square root of its rate in mm/h (snow at half that, 3 per cell, as it was originally). Rain is drawn as blue streaks: instanced quads a fixed number of
+  times the square root of its rate in mm/h (snow at half that, 3 per cell, as it was originally). Drops only start inside the map's view, and their number follows the zoom (× 2^(1.6 Δzoom) from zoom 6.5, since each cell's screen area grows about fourfold a level), so the density on screen stays about the same zoomed out or in close. Rain is drawn as blue streaks: instanced quads a fixed number of
   pixels wide, bright at the head and fading up the trail (WebGL lines are only a pixel wide).
   Freezing rain falls the same way in pink. Snow is drawn as wobbling soft white flakes that lie where they land for about 1.6 s, fading out, (point
   sprites with a gaussian glow over a fainter, wider grey shadow, so they show over a light map),
