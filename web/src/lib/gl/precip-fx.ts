@@ -300,7 +300,7 @@ export class PrecipFx {
   /**
    * Which wet cells are on screen, and how many drops to give them. Drops only start where the map
    * shows, and their number follows the zoom: the cells' screen area grows about fourfold for
-   * each zoom level, so the count per cell grows with it (by 2^(1.6 Δzoom) from zoom 6.5), keeping
+   * each zoom level, so the count per cell follows it (by 2^(1.6 Δzoom) below zoom 6.5, 2^(Δzoom) above, up to 4×), keeping
    * the look on screen about the same zoomed out over the region or in close on a valley.
    */
   private select(box: PrecipBox, view: PrecipView | null) {
@@ -325,7 +325,10 @@ export class PrecipFx {
       t += s.w[i]; idx.push(i); cdf.push(t)
     }
     this.sel = { idx: Int32Array.from(idx), cdf: Float32Array.from(cdf), total: t }
-    const zoomScale = view ? Math.min(12, Math.max(0.08, 2 ** (1.6 * (view.zoom - 6.5)))) : 1
+    // thinning out quickly as the map zooms out, but growing more slowly (and only to 4×) zoomed in,
+    // where a pitched view takes in fewer cells and the drops themselves look bigger
+    const dz = view ? view.zoom - 6.5 : 0
+    const zoomScale = view ? Math.min(4, Math.max(0.08, 2 ** ((dz < 0 ? 1.6 : 1.0) * dz))) : 1
     // how many: by the square root of the rate (sixteen times the rate, four times the drops), so
     // heavy cells stand out without light rain vanishing
     const n = Math.min(MAX, Math.round(t * PER_CELL * zoomScale))
