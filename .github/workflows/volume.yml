@@ -1,6 +1,6 @@
 name: 3D volumes
 
-# The interactive map's 3D view: GFS and ECMWF IFS on pressure levels (briefing/volume.py). These
+# The interactive map's 3D view: GFS, ECMWF IFS, HRRR and RRFS on pressure levels (briefing/volume.py). These
 # are a couple of thousand extra downloads, so they run here, after the briefing is published,
 # rather than holding up the edition. Until they land, the page keeps the previous volumes.
 

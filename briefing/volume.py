@@ -38,6 +38,7 @@ import argparse
 import gzip
 import json
 import logging
+import warnings
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta, timezone
 from pathlib import Path
@@ -71,7 +72,8 @@ VARS = {
 }
 # drawn on the page as contours on these levels (when the model has them)
 HGT_LEVELS = (850, 700, 500, 300)
-NOTES = {"cloud": {"ecmwf": "Estimated from relative humidity (ECMWF publishes no cloud on pressure levels)."}}
+NOTES = {"cloud": {"ecmwf": "Estimated from relative humidity (ECMWF publishes no cloud on pressure levels).",
+                   "condensate": "From the model's own cloud water and ice (it publishes no cloud cover on pressure levels), so it lines up with its simulated radar."}}
 
 # GRIB records to read, and the cfgrib names (or GRIB names) each lands under
 PATTERN = {"ncep": r":(HGT|TMP|RH|UGRD|VGRD|SPFH|DZDT|CLMR|ICMR|RWMR|SNMR|GRLE|TCDC):({levels}) mb:",
@@ -82,7 +84,7 @@ NAMES = {
     "q": ["q", "specific humidity"],
     # vertical motion: GFS's geometric velocity (m/s, DZDT); ECMWF's is pressure velocity (Pa/s)
     "wz": ["wz", "dzdt", "geometric vertical velocity"], "omega": ["w", "vertical velocity"],
-    "clwmr": ["clwmr", "clmr", "cloud mixing ratio"], "icmr": ["icmr", "ice water mixing ratio", "ice mixing ratio"],
+    "clwmr": ["clwmr", "clmr", "cloud mixing ratio"], "icmr": ["icmr", "cimixr", "ice water mixing ratio", "ice mixing ratio", "cloud ice mixing ratio"],
     "rwmr": ["rwmr", "rain mixing ratio"], "snmr": ["snmr", "snow mixing ratio"],
     "grle": ["grle", "graupel", "graupel (snow pellets)"], "tcc": ["tcc", "tcdc", "total cloud cover", "cloud cover"],
 }
@@ -114,6 +116,16 @@ def to_heights(values, heights, targets=HEIGHTS_M):
     return (v0 + w * (v1 - v0)).astype("float32")
 
 
+def cloud_from_condensate(qc, qi):
+    """Cloud (%) from cloud water and cloud ice mixing ratios (kg/kg), for models whose pressure
+    levels carry no cloud cover (HRRR, RRFS): none below 0.001 g/kg of condensate, full by 0.1 g/kg,
+    log-spaced in between, so it follows the same microphysics as the model's radar."""
+    q = 1000 * (np.nan_to_num(np.asarray(qc, dtype="float32")) + np.nan_to_num(np.asarray(qi, dtype="float32")))
+    with np.errstate(divide="ignore"):
+        x = (np.log10(np.maximum(q, 1e-9)) + 3) / 2
+    return (100 * np.clip(x, 0, 1)).astype("float32")
+
+
 def cloud_from_rh(rh, rh_crit=80.0):
     """Cloud fraction (%) from relative humidity (%), Sundqvist et al. (1989)."""
     x = np.clip((100 - np.asarray(rh, dtype="float32")) / (100 - rh_crit), 0, 1)
@@ -142,7 +154,7 @@ def potential_vorticity(t, u, v, levels, lat, lon):
     return (pv * 1e6).astype("float32")
 
 
-def derive(got, family, levels=None, lat=None, lon=None):
+def derive(got, family, levels=None, lat=None, lon=None, cloud="auto"):
     """{var: [level, y, x]} in display units from the raw records on pressure levels (`levels`,
     hPa, for turning ECMWF's pressure velocity into m/s and for potential vorticity, which also
     needs the grid's `lat` and `lon`)."""
@@ -154,7 +166,9 @@ def derive(got, family, levels=None, lat=None, lon=None):
         out["u"], out["v"] = got["u"], got["v"]
     if "r" in got:
         out["rh"] = np.clip(got["r"], 0, 100)
-    if "tcc" in got:
+    if cloud == "condensate" and "clwmr" in got and "icmr" in got:
+        out["cloud"] = cloud_from_condensate(got["clwmr"], got["icmr"])
+    elif "tcc" in got:
         out["cloud"] = np.clip(got["tcc"], 0, 100)
     elif "r" in got:
         out["cloud"] = cloud_from_rh(got["r"])
@@ -201,12 +215,35 @@ def unpack(b, var):
     return v
 
 
-def fetch(spec, run, lead0, dom, hours=48, step=3):
-    """{"hours", "lat", "lon", "levels": {hPa: mean height m}, "vars": {var: [t, z, y, x]}}, or None."""
+def fetch(spec, run, lead0, dom, hours=48, step=3, cloud="auto", res=0.05, unknown=None, vars=None, more=None):
+    """{"hours", "lat", "lon", "levels": {hPa: mean height m}, "vars": {var: [t, z, y, x]}}, or None.
+
+    Projected grids (HRRR, RRFS: 2-D latitude and longitude) are put on a regular `res`° grid over
+    the domain first (nearest neighbour, missing outside the model's coverage), so every volume is
+    a lat/lon box the page can draw. `cloud="condensate"` takes cloud from the model's cloud water
+    and ice instead of cloud cover or humidity. `unknown` names the one record eccodes can't (HRRR's
+    cloud ice, CIMIXR, arrives as "unknown"); `vars` keeps only those variables (and the heights);
+    `more` adds GRIB names to the records read (e.g. "CIMIXR")."""
+    import threading
+
+    from .analysis import Regridder
     from .grib import _H, _crop, _retry
+    regrid = {}
+    lock = threading.Lock()
+
+    def regular(la, lo):
+        """A regridder from this projected grid to the regular one, made once."""
+        with lock:
+            if "r" not in regrid:
+                glat = np.arange(dom["lat_min"], dom["lat_max"] + res / 2, res)
+                glon = np.arange(dom["lon_min"], dom["lon_max"] + res / 2, res)
+                regrid["r"], regrid["lat"], regrid["lon"] = Regridder(la, lo, glat, glon), glat, glon
+            return regrid["r"], regrid["lat"], regrid["lon"]
     fam = spec["family"]
     levels = LEVELS[fam]
     pattern = PATTERN[fam].format(levels="|".join(map(str, levels)))
+    if more:
+        pattern = pattern.replace(":(", f":({more}|", 1)
     want = [h for h in range(lead0, lead0 + hours + 1) if h > 0 and h % step == 0 and h <= spec["max_hours"]]
     why = {}                                    # forecast hour -> why it couldn't be read
 
@@ -220,7 +257,7 @@ def fetch(spec, run, lead0, dom, hours=48, step=3):
                     da = d[name]
                     if "isobaricInhPa" not in da.dims:
                         continue
-                    k = _key(name, da)
+                    k = _key(name, da) or (unknown if name == "unknown" else None)
                     if not k or k in got:
                         continue
                     da = da.sel(isobaricInhPa=[p for p in levels if p in da["isobaricInhPa"].values])
@@ -235,12 +272,16 @@ def fetch(spec, run, lead0, dom, hours=48, step=3):
                                 full[levs.index(x)] = vals[i]
                         vals = full
                     got[k] = vals
+            if lat is not None and np.ndim(lat) == 2:
+                rg, lat, lon = regular(lat, lon)
+                got = {k: rg(v) for k, v in got.items()}
             if "gh" not in got or "t" not in got:
                 seen = sorted({f"{n}{tuple(d[n].dims)}" for d in ds for n in d.data_vars})
                 why[h] = f"no heights or temperature among {', '.join(seen) or 'no fields'}"
                 return h, None
             heights = got.pop("gh")
-            return h, (lat, lon, levs, heights, {k: to_heights(v, heights) for k, v in derive(got, fam, levs, lat, lon).items()})
+            return h, (lat, lon, levs, heights, {k: to_heights(v, heights) for k, v in derive(got, fam, levs, lat, lon, cloud).items()
+                                                 if not vars or k in vars})
         except Exception as e:
             why[h] = f"{type(e).__name__}: {e}"
             log.debug("%s volume f%03d: %s", spec["label"], h, e)
@@ -255,10 +296,12 @@ def fetch(spec, run, lead0, dom, hours=48, step=3):
         return None
     lat, lon, levs = res[0][1][0], res[0][1][1], res[0][1][2]
     names = sorted(set.intersection(*(set(r[4]) for _, r in res)))
-    mean_h = np.nanmean(np.stack([r[3] for _, r in res]), axis=(0, 2, 3))
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)          # columns outside a regional model's coverage
+        mean_h = np.nanmean(np.stack([r[3] for _, r in res]), axis=(0, 2, 3))
     log.info("%s volume: %d steps, %s", spec["label"], len(res), ", ".join(names))
     keep = [i for i, p in enumerate(levs) if p in HGT_LEVELS]
-    return {"hours": [h for h, _ in res], "lat": lat, "lon": lon, "family": fam,
+    return {"hours": [h for h, _ in res], "lat": lat, "lon": lon, "family": "condensate" if cloud == "condensate" else fam,
             "levels": {int(p): float(z) for p, z in zip(levs, mean_h)},
             "vars": {k: np.stack([r[4][k] for _, r in res]) for k in names},
             # the chosen levels' heights [t, level, y, x], as departures from each level's mean

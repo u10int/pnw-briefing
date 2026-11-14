@@ -266,10 +266,12 @@ edition's cycle (`python -m briefing.volume --cycle …`) and adds them to gh-pa
 `scripts/publish_volume.sh`, which pushes only if gh-pages hasn't moved meanwhile and stops if a
 newer edition is already out. Until then the page keeps the previous volumes (labelled with their
 model run); `assemble_site.sh` carries them over. `volume.py`
-reads GFS and ECMWF IFS on pressure levels (1000 – 200 hPa) every 3 hours for the first 48
-(config `volume` on each model), resamples each column onto a fixed height grid (0 – 12 km every
+reads GFS, ECMWF IFS, HRRR and RRFS on pressure levels (1000 – 200 hPa) every 3 hours for the
+first 48 (config `volume` on each model; HRRR and RRFS regridded from 3 km to 0.05°, with cloud
+from their own cloud water and ice so it lines up with their radar, and only cloud, water, ice,
+temperature and wind to keep them to about 20 MB each), resamples each column onto a fixed height grid (0 – 12 km every
 500 m) with the levels' geopotential heights, and packs each variable into one byte per point:
-`data/volume/<model>_<var>.bin.gz` with a manifest in `data/volume.json` (about 1 – 2 MB per
+`data/volume/<model>_<var>.bin.gz` with a manifest in `data/volume.json` (a few MB per global model per
 edition). Variables: clouds (GFS cloud cover; estimated from humidity for ECMWF), liquid water
 (cloud water plus rain) and ice and snow (cloud ice, snow and graupel), both GFS only, relative
 humidity, temperature and wind speed, both drawn as lit surfaces at set values (isotherms at 50,
