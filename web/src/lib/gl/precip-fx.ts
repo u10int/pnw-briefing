@@ -129,6 +129,7 @@ void main() {
 
 const MAX = 20000           // drops and flakes at most
 const PER_CELL = 6          // per cell, times the square root of its rate (mm/h, liquid equivalent)
+const SNOW_REST = 1.6        // seconds a landed snowflake lies on the ground (± 30%) before it's gone
 const BOUNCE_G = 0.5         // gravity for bouncing pellets, box heights a second squared (a hop of ~0.35 s)
 const SNOW_BOOST = 1.5        // snow falls as far more flakes than its water would make drops
 const START_KM = 3.5        // where they appear (roughly cloud base and below)
@@ -180,6 +181,8 @@ export class PrecipFx {
   // many bounces they've made
   private vz = new Float32Array(MAX); private vx = new Float32Array(MAX); private vy = new Float32Array(MAX)
   private hops = new Uint8Array(MAX)
+  // snowflakes rest on the ground a moment before melting away: seconds left, and how long in all
+  private rest = new Float32Array(MAX); private restFor = new Float32Array(MAX)
   private n = 0
   private ground: ((x: number, y: number) => number) | null = null
   private last = 0
@@ -307,7 +310,7 @@ export class PrecipFx {
     this.kind[i] = s.kind[lo]
     this.inten[i] = Math.min(1, s.w[lo] / 3.5)
     this.phase[i] = Math.random() * Math.PI * 2
-    this.vz[i] = 0; this.hops[i] = 0
+    this.vz[i] = 0; this.hops[i] = 0; this.rest[i] = 0
   }
 
   /** Step and draw. `zr` is the slab of the box being drawn (fractions of its height). */
@@ -326,7 +329,11 @@ export class PrecipFx {
     for (let i = 0; i < this.n; i++) {
       const k = kinds[this.kind[i]], f = FALL[k]
       const gz = () => (this.ground ? this.ground(this.px[i], this.py[i]) : 0)
-      if (this.hops[i]) {
+      if (this.rest[i] > 0) {
+        // a landed flake: lying still, then gone
+        this.rest[i] -= dt
+        if (this.rest[i] <= 0) { this.spawn(i, box); continue }
+      } else if (this.hops[i]) {
         // bouncing: up and back down under gravity, drifting a little, twice, then gone
         this.vz[i] -= BOUNCE_G * dt
         this.pz[i] += this.vz[i] * dt
@@ -343,6 +350,12 @@ export class PrecipFx {
         if (f.wobble) { this.phase[i] += dt * 2.2; this.px[i] += Math.cos(this.phase[i]) * f.wobble * dt }
         const g = gz()
         if (this.pz[i] <= g) {
+          if (f.look === "flake") {
+            // snow settles where it lands for a second or two, fading over the last part
+            this.pz[i] = g
+            this.restFor[i] = this.rest[i] = SNOW_REST * (0.7 + 0.6 * Math.random())
+            continue
+          }
           if (f.look !== "pellet") { this.spawn(i, box); continue }
           // a pellet hits the ground and bounces back up at about half its fall speed
           this.pz[i] = g
@@ -356,7 +369,8 @@ export class PrecipFx {
       if (z < zr[0] || z > zr[1]) continue
       const c = COL[k] ?? COL.rain
       // rain lighter (it's dense), flakes and pellets nearly solid
-      const a = f.look === "streak" ? 0.32 + 0.4 * this.inten[i] : f.look === "flake" ? 0.95 : 0.75 + 0.25 * this.inten[i]
+      const a = (f.look === "streak" ? 0.32 + 0.4 * this.inten[i] : f.look === "flake" ? 0.95 : 0.75 + 0.25 * this.inten[i])
+        * (this.rest[i] > 0 ? Math.min(1, this.rest[i] / (0.45 * this.restFor[i])) : 1)    // a resting flake fades out
       if (f.look === "streak") {
         const z1 = Math.min(zr[1], z + (f.streak * (0.7 + 0.8 * this.inten[i])) / box.topKm)
         this.streaks.set([this.px[i], this.py[i], z, this.px[i], this.py[i], z1, c[0] * a, c[1] * a, c[2] * a, a], nl * 10)

@@ -378,7 +378,7 @@ their vertex data in `xyz + premultiplied rgba` (28-byte) buffers.
   times the square root of its rate in mm/h (snow counted at 1.5 times its water, since flakes
   take far more room than drops). Rain is drawn as blue streaks: instanced quads a fixed number of
   pixels wide, bright at the head and fading up the trail (WebGL lines are only a pixel wide).
-  Freezing rain falls the same way in pink. Snow is drawn as wobbling soft white flakes (point
+  Freezing rain falls the same way in pink. Snow is drawn as wobbling soft white flakes that lie where they land for about 1.6 s, fading out, (point
   sprites with a gaussian glow over a fainter, wider grey shadow, so they show over a light map),
   sleet as small, hard icy-blue pellets that bounce twice where they land, and mixes as short purple streaks. They're hidden behind
   the 3D field: the ray march writes a second image (multiple render targets) with the distance
