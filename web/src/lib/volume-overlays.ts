@@ -4,7 +4,7 @@ import { isolines } from "@/lib/xsection"
 
 /** Lines drawn in the 3D box: [x, y, z, r, g, b, a] per vertex (box coordinates, premultiplied
  *  colour), in pairs; and labels to place on screen at box points. */
-export interface Overlay { verts: Float32Array; labels: { x: number; y: number; z: number; text: string }[] }
+export interface Overlay { verts: Float32Array; tris?: Float32Array; labels: { x: number; y: number; z: number; text: string }[] }
 
 const R_E = 6371008.8
 
@@ -65,6 +65,7 @@ export function levelOverlay(e: VolumeEntry, hPa: number, hgt: Uint8Array, wind:
   const lonOf = (c: number) => e.lon[0] + (c / (nx - 1)) * (e.lon[1] - e.lon[0])
   const out: number[] = []
   const labels: Overlay["labels"] = []
+  const tris: number[] = []
   const step = hPa >= 700 ? 30 : 60
   const line = [0.12, 0.16, 0.24, 0.85]
   for (let lev = Math.ceil(lo / step) * step; lev <= hi; lev += step) {
@@ -101,19 +102,23 @@ export function levelOverlay(e: VolumeEntry, hPa: number, hgt: Uint8Array, wind:
         const dx = ((u / sp) * Lm) / wM, dy = (-(v / sp) * Lm) / hM
         const x0 = bx(lonOf(c)) - dx / 2, y0 = by(latOfRow(r)) - dy / 2, x1 = x0 + dx, y1 = y0 + dy
         const k = Math.min(1, sp / 70)
-        const col = [0.3 + 0.35 * k, 0.25 * (1 - k) + 0.12, 0.75 - 0.3 * k, 0.95].map((x, i) => (i < 3 ? x * 0.95 : x))
-        out.push(x0, y0, z, ...col, x1, y1, z, ...col)
-        // the head
-        // the head: two barbs back from the tip, turned in metres so they keep their shape
-        const hx = -dx * 0.35 * wM, hy = -dy * 0.35 * hM
-        for (const sg of [1, -1]) {
-          const rx = hx * Math.cos(0.45 * sg) - hy * Math.sin(0.45 * sg), ry = hx * Math.sin(0.45 * sg) + hy * Math.cos(0.45 * sg)
-          out.push(x1, y1, z, ...col, x1 + rx / wM, y1 + ry / hM, z, ...col)
-        }
+        const col = [0.3 + 0.35 * k, 0.25 * (1 - k) + 0.12, 0.75 - 0.3 * k].map((x) => x * 0.95)
+        // a solid arrow (a shaft and a triangular head), shaped in metres so it keeps its proportions;
+        // the widths follow the spacing rather than the length, so slow arrows stay slim
+        const ex = dx * wM / Lm, ey = dy * hM / Lm          // unit vector along the wind, in metres
+        const nxm = -ey, nym = ex                           // and across it
+        const cw = cell * wM
+        const shaft = cw * 0.025, half = cw * 0.1, head = Math.min(Lm * 0.45, cw * 0.2)
+        const P = (along: number, across: number): number[] =>
+          [x0 + (ex * along + nxm * across) / wM, y0 + (ey * along + nym * across) / hM, z, ...col, 1]
+        const neck = Lm - head
+        tris.push(...P(0, shaft), ...P(0, -shaft), ...P(neck, shaft),
+                  ...P(neck, shaft), ...P(0, -shaft), ...P(neck, -shaft),
+                  ...P(neck, half), ...P(neck, -half), ...P(Lm, 0))
       }
     }
   }
-  return { verts: Float32Array.from(out), labels }
+  return { verts: Float32Array.from(out), tris: Float32Array.from(tris), labels }
 }
 
 /**

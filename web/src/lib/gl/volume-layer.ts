@@ -102,9 +102,9 @@ export function sunLight(ms: number, lat: number, lon: number): VolumeLight & { 
 
 /** Screen positions (CSS px) of the height and pressure ticks, for the page to label. */
 export interface AxisPoint { x: number; y: number; label: string; side: "left" | "right" | "mid" }
-/** Lines for the box (a level's contours and arrows, trajectories): xyz + premultiplied rgba per
- *  vertex, in pairs; with labels at box points. */
-export interface BoxOverlay { verts: Float32Array; labels: { x: number; y: number; z: number; text: string }[] }
+/** Lines for the box (a level's contours, trajectories): xyz + premultiplied rgba per vertex, in
+ *  pairs; optional filled triangles (the level's wind arrows) in the same layout; and labels at box points. */
+export interface BoxOverlay { verts: Float32Array; tris?: Float32Array; labels: { x: number; y: number; z: number; text: string }[] }
 
 const EARTH_CIRC = 2 * Math.PI * 6371008.8
 const GROUND_KM = 5             // the ground texture's range (above the region's highest peak)
@@ -571,6 +571,7 @@ export class VolumeLayer implements CustomLayerInterface {
   private ovVao?: WebGLVertexArrayObject
   private ovBuf?: WebGLBuffer
   private ovCount = 0
+  private ovTris = 0
   private ovDirty = false
   private light: VolumeLight = FIXED_LIGHT
   private lastInv: M4 | null = null
@@ -963,23 +964,28 @@ export class VolumeLayer implements CustomLayerInterface {
   private drawOverlays(gl: WebGL2RenderingContext, mvp: M4) {
     if (!this.trailProg || !this.ovVao || !this.ovBuf) return
     if (this.ovDirty) {
-      const parts = Object.values(this.overlays).filter((o): o is BoxOverlay => !!o && o.verts.length > 0)
+      // lines first, then the triangles, in one buffer
+      const parts = Object.values(this.overlays).filter((o): o is BoxOverlay => !!o)
       const n = parts.reduce((a, o) => a + o.verts.length, 0)
-      const all = new Float32Array(n)
+      const nt = parts.reduce((a, o) => a + (o.tris?.length ?? 0), 0)
+      const all = new Float32Array(n + nt)
       let k = 0
       for (const o of parts) { all.set(o.verts, k); k += o.verts.length }
+      for (const o of parts) if (o.tris) { all.set(o.tris, k); k += o.tris.length }
       gl.bindBuffer(gl.ARRAY_BUFFER, this.ovBuf)
       gl.bufferData(gl.ARRAY_BUFFER, all, gl.STATIC_DRAW)
       this.ovCount = n / 7
+      this.ovTris = nt / 7
       this.ovDirty = false
     }
-    if (!this.ovCount) return
+    if (!this.ovCount && !this.ovTris) return
     gl.useProgram(this.trailProg.program)
     gl.uniformMatrix4fv(this.trailProg.u("uMVP"), false, Float32Array.from(mvp))
     gl.enable(gl.BLEND)
     gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA)
     gl.bindVertexArray(this.ovVao)
-    gl.drawArrays(gl.LINES, 0, this.ovCount)
+    if (this.ovCount) gl.drawArrays(gl.LINES, 0, this.ovCount)
+    if (this.ovTris) gl.drawArrays(gl.TRIANGLES, this.ovCount, this.ovTris)
     gl.bindVertexArray(null)
   }
 
