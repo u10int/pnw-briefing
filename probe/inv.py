@@ -16,7 +16,7 @@ for model, kw in [("hrrr", {"product": "prs"}), ("rrfs", {"product": "prslev", "
     iso = inv[inv["search_this"].str.contains(" mb:")]
     vars_ = sorted(set(iso["variable"]))
     print("isobaric vars:", vars_)
-    print("levels:", sorted(set(int(re.search(r":(\d+) mb:", s).group(1)) for s in iso["search_this"])))
+    print("levels:", sorted(set(int(m.group(1)) for s in iso["search_this"] for m in [re.search(r":(\d+) mb:", s)] if m)))
     sizes = (iso["end_byte"] - iso["start_byte"]).astype(float)
     print("records", len(iso), "mean size MB", round(sizes.mean() / 1e6, 2))
     pat = r":(HGT|TMP|RH|UGRD|VGRD|DZDT|VVEL|CLMR|CIMIXR|ICMR|RWMR|SNMR|GRLE|TCDC|SPFH):(1000|950|900|850|800|750|700|600|500|400|300|250|200) mb:"
