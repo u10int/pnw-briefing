@@ -45,9 +45,21 @@ jobs:
           print((m.get('cycle') or '').replace(':00Z', 'Z'), 'demo' if m.get('demo') else 'real')")
           echo "cycle=$CYCLE" >> "$GITHUB_OUTPUT"
           echo "demo=$DEMO" >> "$GITHUB_OUTPUT"
-          # a page-only rebuild republishes the same edition; its volumes are already there
+          # a page-only rebuild republishes the same edition; its volumes are already there, unless
+          # the config now asks for a model they don't have (then build them again)
           if [ "${{ github.event_name }}" = "workflow_run" ] && git show FETCH_HEAD:data/volume.json 2>/dev/null \
-               | python3 -c "import json,sys; sys.exit(0 if json.load(sys.stdin).get('cycle') == '$CYCLE' else 1)"; then
+               | python3 -c "
+          import json, sys
+          man = json.load(sys.stdin)
+          if man.get('cycle') != '$CYCLE': sys.exit(1)
+          try:
+              import yaml
+          except ImportError:
+              sys.exit(1)
+          cfg = yaml.safe_load(open('config.yaml'))
+          want = {m['label'] for m in cfg['grib_models'] if m.get('volume') and m.get('enabled', True)}
+          have = {v['model'] for v in man.get('volumes', [])}
+          sys.exit(0 if want <= have else 1)"; then
             echo "the $CYCLE volumes are already published"
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
