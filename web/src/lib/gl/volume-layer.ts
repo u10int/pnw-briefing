@@ -480,7 +480,42 @@ void main() {
   } else fragColor = vCol;
 }`
 
-const TRAIL = 7               // positions kept per particle
+// wind trails as ribbons: a quad per segment, a few pixels wide (GL lines are only ever 1 px)
+const RIBBON_VS = /* glsl */ `#version 300 es
+layout(location = 0) in vec2 aCorner;      // x: 0 start .. 1 end; y: -1 .. 1 across
+layout(location = 1) in vec3 aP0;
+layout(location = 2) in vec4 aC0;
+layout(location = 3) in vec3 aP1;
+layout(location = 4) in vec4 aC1;
+uniform mat4 uMVP;
+uniform vec2 uViewport;                    // device pixels
+uniform float uWidth;                      // device pixels
+out vec4 vCol;
+out float vAcross;
+void main() {
+  vec4 a = uMVP * vec4(aP0, 1.0), b = uMVP * vec4(aP1, 1.0);
+  vec2 as = a.xy / a.w * uViewport * 0.5, bs = b.xy / b.w * uViewport * 0.5;
+  vec2 d = bs - as;
+  float len = length(d);
+  vec2 dir = len > 1e-4 ? d / len : vec2(1.0, 0.0);
+  vec2 n = vec2(-dir.y, dir.x);
+  float hw = uWidth * 0.5 + 0.5;           // half a pixel more, for the soft edge
+  vec4 p = mix(a, b, aCorner.x);
+  // overlap the joins a little so the ribbon has no gaps at the bends
+  p.xy += (n * aCorner.y * hw + dir * (aCorner.x * 2.0 - 1.0) * uWidth * 0.35) / (uViewport * 0.5) * p.w;
+  gl_Position = p;
+  vCol = mix(aC0, aC1, aCorner.x);
+  vAcross = aCorner.y * hw;
+}`
+const RIBBON_FS = /* glsl */ `#version 300 es
+precision highp float;
+uniform float uWidth;
+in vec4 vCol;
+in float vAcross;
+out vec4 fragColor;
+void main() { fragColor = vCol * clamp(uWidth * 0.5 + 0.5 - abs(vAcross), 0.0, 1.0); }`
+
+const TRAIL = 9               // positions kept per particle
 const PER_LAYER = 650         // particles per height
 const SIM_SECONDS = 160       // simulated seconds per 60th of a second
 const WIND_RGB = (() => {     // the wind scale, a little deeper so trails read on a light map
@@ -567,6 +602,8 @@ export class VolumeLayer implements CustomLayerInterface {
   private trailProg?: Program
   private trailVao?: WebGLVertexArrayObject
   private trailBuf?: WebGLBuffer
+  private ribbonProg?: Program
+  private ribbonCorners?: WebGLBuffer
   private overlays: Record<string, BoxOverlay | null> = {}
   private ovVao?: WebGLVertexArrayObject
   private ovBuf?: WebGLBuffer
@@ -609,14 +646,22 @@ export class VolumeLayer implements CustomLayerInterface {
     this.precip = new PrecipFx(gl)
     this.precip.setSource(this.precipDraw, this.precipT)
     if (this.ground) this.precip.setGround((x, y) => this.groundAt(x, y))
+    // the wind trails: a unit quad per segment, the segment's ends and colours per instance
+    this.ribbonProg = program(gl, RIBBON_VS, RIBBON_FS)
     this.trailVao = gl.createVertexArray()!
     gl.bindVertexArray(this.trailVao)
+    this.ribbonCorners = gl.createBuffer()!
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.ribbonCorners)
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, -1, 1, -1, 1, 1, 0, -1, 1, 1, 0, 1]), gl.STATIC_DRAW)
+    gl.enableVertexAttribArray(0)
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 8, 0)
     this.trailBuf = gl.createBuffer()!
     gl.bindBuffer(gl.ARRAY_BUFFER, this.trailBuf)
-    gl.enableVertexAttribArray(0)
-    gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 28, 0)
-    gl.enableVertexAttribArray(1)
-    gl.vertexAttribPointer(1, 4, gl.FLOAT, false, 28, 12)
+    for (const [loc, size, off] of [[1, 3, 0], [2, 4, 12], [3, 3, 28], [4, 4, 40]] as const) {
+      gl.enableVertexAttribArray(loc)
+      gl.vertexAttribPointer(loc, size, gl.FLOAT, false, 56, off)
+      gl.vertexAttribDivisor(loc, 1)
+    }
     gl.bindVertexArray(null)
     this.ovVao = gl.createVertexArray()!
     gl.bindVertexArray(this.ovVao)
@@ -682,6 +727,8 @@ export class VolumeLayer implements CustomLayerInterface {
     if (this.curtainTex) gl.deleteTexture(this.curtainTex)
     if (this.trailProg) gl.deleteProgram(this.trailProg.program)
     if (this.trailBuf) gl.deleteBuffer(this.trailBuf)
+    if (this.ribbonCorners) gl.deleteBuffer(this.ribbonCorners)
+    if (this.ribbonProg) gl.deleteProgram(this.ribbonProg.program)
     if (this.ovBuf) gl.deleteBuffer(this.ovBuf)
     if (this.ovVao) gl.deleteVertexArray(this.ovVao)
     if (this.ptBuf) gl.deleteBuffer(this.ptBuf)
@@ -906,7 +953,8 @@ export class VolumeLayer implements CustomLayerInterface {
       const life = Math.min(1, this.age[i] / 12, (this.life[i] - this.age[i]) / 12)
       const [r, gg, bb] = this.wind!.tint ? this.wind!.tint(this.fieldByte(nx, ny, z, latOf)) : WIND_RGB(this.speed[i])
       for (let k = 0; k < TRAIL - 1; k++) {
-        const a0 = 0.95 * life * (1 - k / (TRAIL - 1)), a1 = 0.95 * life * (1 - (k + 1) / (TRAIL - 1))
+        // full strength at the head, tapering to a quarter at the tail
+        const a0 = life * (1 - 0.75 * k / (TRAIL - 1)), a1 = life * (1 - 0.75 * (k + 1) / (TRAIL - 1))
         const p0 = b + k * 3, p1 = b + (k + 1) * 3
         this.verts.set([P[p0], P[p0 + 1], P[p0 + 2], r * a0, gg * a0, bb * a0, a0, P[p1], P[p1 + 1], P[p1 + 2], r * a1, gg * a1, bb * a1, a1], o)
         o += 14
@@ -915,14 +963,19 @@ export class VolumeLayer implements CustomLayerInterface {
     return o / 7
   }
   private drawParticles(gl: WebGL2RenderingContext, mvp: M4) {
-    if (!this.wind || !this.trailProg || !this.draw || !this.age.length) return
+    if (!this.wind || !this.ribbonProg || !this.draw || !this.age.length) return
     const count = this.stepParticles(performance.now())
-    gl.useProgram(this.trailProg.program)
-    gl.uniformMatrix4fv(this.trailProg.u("uMVP"), false, Float32Array.from(mvp))
+    const p = this.ribbonProg
+    const W = gl.drawingBufferWidth, H = gl.drawingBufferHeight
+    const dpr = W / Math.max(1, this.map?.getCanvas().clientWidth ?? W)
+    gl.useProgram(p.program)
+    gl.uniformMatrix4fv(p.u("uMVP"), false, Float32Array.from(mvp))
+    gl.uniform2f(p.u("uViewport"), W, H)
+    gl.uniform1f(p.u("uWidth"), 2 * dpr)
     gl.bindVertexArray(this.trailVao!)
     gl.bindBuffer(gl.ARRAY_BUFFER, this.trailBuf!)
     gl.bufferData(gl.ARRAY_BUFFER, this.verts.subarray(0, count * 7), gl.STREAM_DRAW)
-    gl.drawArrays(gl.LINES, 0, count)
+    gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, count / 2)
     gl.bindVertexArray(null)
     this.map?.triggerRepaint()                               // keep them moving
   }
