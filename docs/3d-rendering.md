@@ -369,9 +369,10 @@ flowchart TD
 All of these use the same box coordinates and the layer's MVP matrix. The CPU-side ones keep
 their vertex data in `xyz + premultiplied rgba` (28-byte) buffers.
 
-- **Wind particles:** 650 per height layer, each with a 9-point trail drawn as a 2 px
-  ribbon (a quad per segment, since WebGL lines are only 1 px), full strength at the head and
-  tapering to a quarter at the tail. They're advected through
+- **Wind particles:** 1,100 per height layer, drawn the way the 2D map draws its particles: each
+  frame's newest segments (1.3 px ribbons, since WebGL lines are only 1 px) go into a screen image
+  that fades a little every frame, leaving smooth tapering streaks. When the camera moves, the image
+  restarts from each particle's last 9 positions, so nothing smears. They're advected through
   the model's u/v (trilinear in space, blended in time) at 160 simulated seconds per frame, fade
   in and out over their life, and respawn when they leave the box or go under the terrain. They're
   coloured by speed, or by the drawn field's value where they are (for example moisture flow).

@@ -515,8 +515,19 @@ in float vAcross;
 out vec4 fragColor;
 void main() { fragColor = vCol * clamp(uWidth * 0.5 + 0.5 - abs(vAcross), 0.0, 1.0); }`
 
-const TRAIL = 9               // positions kept per particle
-const PER_LAYER = 650         // particles per height
+// the trails' screen image, dimmed a little each frame so each particle leaves a fading streak
+const TRAIL_FADE_FS = /* glsl */ `#version 300 es
+precision highp float;
+uniform sampler2D uTrail;
+uniform float uFade;
+out vec4 o;
+void main() {
+  // subtracting a little more than half a step lets 8-bit trails actually reach zero
+  o = max(texelFetch(uTrail, ivec2(gl_FragCoord.xy), 0) * uFade - 0.6 / 255.0, 0.0);
+}`
+
+const TRAIL = 9               // positions kept per particle (drawn whole when the trail image restarts)
+const PER_LAYER = 1100        // particles per height
 const SIM_SECONDS = 160       // simulated seconds per 60th of a second
 const WIND_RGB = (() => {     // the wind scale, a little deeper so trails read on a light map
   const hex = (h: string) => { const n = parseInt(h.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((c) => (c / 255) * 0.82) }
@@ -603,6 +614,13 @@ export class VolumeLayer implements CustomLayerInterface {
   private trailVao?: WebGLVertexArrayObject
   private trailBuf?: WebGLBuffer
   private ribbonProg?: Program
+  private fadeProg?: Program
+  private trailTex: WebGLTexture[] = []
+  private trailFb: WebGLFramebuffer[] = []
+  private trailSize: [number, number] = [0, 0]
+  private trailCur = 0
+  private trailMvp = new Float64Array(16)
+  private trailTime = 0
   private ribbonCorners?: WebGLBuffer
   private overlays: Record<string, BoxOverlay | null> = {}
   private ovVao?: WebGLVertexArrayObject
@@ -648,6 +666,7 @@ export class VolumeLayer implements CustomLayerInterface {
     if (this.ground) this.precip.setGround((x, y) => this.groundAt(x, y))
     // the wind trails: a unit quad per segment, the segment's ends and colours per instance
     this.ribbonProg = program(gl, RIBBON_VS, RIBBON_FS)
+    this.fadeProg = program(gl, VS, TRAIL_FADE_FS)
     this.trailVao = gl.createVertexArray()!
     gl.bindVertexArray(this.trailVao)
     this.ribbonCorners = gl.createBuffer()!
@@ -729,6 +748,9 @@ export class VolumeLayer implements CustomLayerInterface {
     if (this.trailBuf) gl.deleteBuffer(this.trailBuf)
     if (this.ribbonCorners) gl.deleteBuffer(this.ribbonCorners)
     if (this.ribbonProg) gl.deleteProgram(this.ribbonProg.program)
+    if (this.fadeProg) gl.deleteProgram(this.fadeProg.program)
+    for (const t of this.trailTex) gl.deleteTexture(t)
+    for (const f of this.trailFb) gl.deleteFramebuffer(f)
     if (this.ovBuf) gl.deleteBuffer(this.ovBuf)
     if (this.ovVao) gl.deleteVertexArray(this.ovVao)
     if (this.ptBuf) gl.deleteBuffer(this.ptBuf)
@@ -881,6 +903,7 @@ export class VolumeLayer implements CustomLayerInterface {
     this.speed = new Float32Array(n)
     this.verts = new Float32Array(n * (TRAIL - 1) * 2 * 7)
     for (let i = 0; i < n; i++) this.spawn(i, true)
+    this.trailMvp.fill(Infinity)                             // start the trail image afresh
     this.map?.triggerRepaint()
   }
   private spawn(i: number, scatter = false) {
@@ -926,7 +949,8 @@ export class VolumeLayer implements CustomLayerInterface {
     const i0 = Math.min(this.i0, d.steps - 1), i1 = Math.min(this.i1, d.steps - 1)
     return [one(w.u, i0) * (1 - t) + one(w.u, i1) * t, one(w.v, i0) * (1 - t) + one(w.v, i1) * t]
   }
-  private stepParticles(now: number) {
+  /** Moves the particles on; writes their newest segment, or (`whole`) their whole kept trail. */
+  private stepParticles(now: number, whole: boolean) {
     const d = this.draw!, g = d.grid
     const dtf = this.lastFrame ? Math.min(3, (now - this.lastFrame) / 16.7) : 1
     this.lastFrame = now
@@ -952,9 +976,9 @@ export class VolumeLayer implements CustomLayerInterface {
       // fade in and out over the particle's life, and along the trail
       const life = Math.min(1, this.age[i] / 12, (this.life[i] - this.age[i]) / 12)
       const [r, gg, bb] = this.wind!.tint ? this.wind!.tint(this.fieldByte(nx, ny, z, latOf)) : WIND_RGB(this.speed[i])
-      for (let k = 0; k < TRAIL - 1; k++) {
-        // full strength at the head, tapering to a quarter at the tail
-        const a0 = life * (1 - 0.75 * k / (TRAIL - 1)), a1 = life * (1 - 0.75 * (k + 1) / (TRAIL - 1))
+      for (let k = 0; k < (whole ? TRAIL - 1 : 1); k++) {
+        // the kept trail fades the way the screen image would have faded it
+        const a0 = life * 0.9 ** k, a1 = life * 0.9 ** (k + 1)
         const p0 = b + k * 3, p1 = b + (k + 1) * 3
         this.verts.set([P[p0], P[p0 + 1], P[p0 + 2], r * a0, gg * a0, bb * a0, a0, P[p1], P[p1 + 1], P[p1 + 2], r * a1, gg * a1, bb * a1, a1], o)
         o += 14
@@ -962,20 +986,86 @@ export class VolumeLayer implements CustomLayerInterface {
     }
     return o / 7
   }
+  private ensureTrail(gl: WebGL2RenderingContext, w: number, h: number) {
+    if (this.trailSize[0] === w && this.trailSize[1] === h) return false
+    for (const t of this.trailTex) gl.deleteTexture(t)
+    for (const f of this.trailFb) gl.deleteFramebuffer(f)
+    this.trailTex = []; this.trailFb = []
+    for (let i = 0; i < 2; i++) {
+      const t = gl.createTexture()!
+      gl.bindTexture(gl.TEXTURE_2D, t)
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null)
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
+      const fb = gl.createFramebuffer()!
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fb)
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t, 0)
+      this.trailTex.push(t); this.trailFb.push(fb)
+    }
+    this.trailSize = [w, h]
+    return true
+  }
+  /**
+   * The wind particles, drawn the way the 2D map draws its own: each frame's newest segments go
+   * into a screen image that fades a little every frame, leaving smooth tapering streaks. When the
+   * camera moves the image restarts, from each particle's kept trail, so nothing smears.
+   */
   private drawParticles(gl: WebGL2RenderingContext, mvp: M4) {
-    if (!this.wind || !this.ribbonProg || !this.draw || !this.age.length) return
-    const count = this.stepParticles(performance.now())
-    const p = this.ribbonProg
+    if (!this.wind || !this.ribbonProg || !this.fadeProg || !this.blitProg || !this.draw || !this.age.length) return
     const W = gl.drawingBufferWidth, H = gl.drawingBufferHeight
+    const prevFb = gl.getParameter(gl.FRAMEBUFFER_BINDING) as WebGLFramebuffer | null
+    const prevVp = gl.getParameter(gl.VIEWPORT) as Int32Array
+    const fresh = this.ensureTrail(gl, W, H)
+    let moved = fresh
+    for (let i = 0; i < 16 && !moved; i++) if (Math.abs(mvp[i] - this.trailMvp[i]) > 1e-12 * Math.max(1, Math.abs(mvp[i]))) moved = true
+    this.trailMvp.set(mvp)
+    const now = performance.now()
+    const dt = this.trailTime ? Math.min(0.05, (now - this.trailTime) / 1000) : 1 / 60
+    this.trailTime = now
+    const count = this.stepParticles(now, moved)
+
+    const next = 1 - this.trailCur
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.trailFb[next])
+    gl.viewport(0, 0, W, H)
+    gl.disable(gl.BLEND)
+    if (moved) {
+      gl.clearColor(0, 0, 0, 0)
+      gl.clear(gl.COLOR_BUFFER_BIT)
+    } else {
+      const f = this.fadeProg
+      gl.useProgram(f.program)
+      gl.activeTexture(gl.TEXTURE0)
+      gl.bindTexture(gl.TEXTURE_2D, this.trailTex[this.trailCur])
+      gl.uniform1i(f.u("uTrail"), 0)
+      gl.uniform1f(f.u("uFade"), Math.pow(0.9, dt * 60))
+      gl.bindVertexArray(this.vao!)
+      gl.drawArrays(gl.TRIANGLES, 0, 6)
+    }
+    const p = this.ribbonProg
     const dpr = W / Math.max(1, this.map?.getCanvas().clientWidth ?? W)
+    gl.enable(gl.BLEND)
+    gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA)
     gl.useProgram(p.program)
     gl.uniformMatrix4fv(p.u("uMVP"), false, Float32Array.from(mvp))
     gl.uniform2f(p.u("uViewport"), W, H)
-    gl.uniform1f(p.u("uWidth"), 2 * dpr)
+    gl.uniform1f(p.u("uWidth"), 1.3 * dpr)
     gl.bindVertexArray(this.trailVao!)
     gl.bindBuffer(gl.ARRAY_BUFFER, this.trailBuf!)
     gl.bufferData(gl.ARRAY_BUFFER, this.verts.subarray(0, count * 7), gl.STREAM_DRAW)
-    gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, count / 2)
+    if (count) gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, count / 2)
+    this.trailCur = next
+    gl.bindFramebuffer(gl.FRAMEBUFFER, prevFb)
+    gl.viewport(prevVp[0], prevVp[1], prevVp[2], prevVp[3])
+
+    // and onto the map
+    const bp = this.blitProg
+    gl.useProgram(bp.program)
+    gl.activeTexture(gl.TEXTURE0)
+    gl.bindTexture(gl.TEXTURE_2D, this.trailTex[this.trailCur])
+    gl.uniform1i(bp.u("uImg"), 0)
+    gl.uniform2f(bp.u("uViewport"), W, H)
+    gl.bindVertexArray(this.vao!)
+    gl.drawArrays(gl.TRIANGLES, 0, 6)
     gl.bindVertexArray(null)
     this.map?.triggerRepaint()                               // keep them moving
   }
