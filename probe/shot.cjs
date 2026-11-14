@@ -2,7 +2,6 @@ const { chromium } = require('playwright');
 (async () => {
   const b = await chromium.launch()
   const shots = [
-    ['hrrr-light', 'vm=HRRR&vf=cloud&vp=1&c=-123.4,46.0,5.6,60,-15'],
     ['hrrr-dark', 'vm=HRRR&vf=cloud&vp=1&dk=1&c=-123.4,46.0,5.6,60,-15'],
     ['flat-dark', 'dk=1&3d=0&c=-122.8,46.6,6.0,0,0'],
   ]
