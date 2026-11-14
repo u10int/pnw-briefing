@@ -8,4 +8,4 @@ jobs:
       - uses: mamba-org/setup-micromamba@v2
         with: { environment-file: environment.yml, cache-environment: true }
       - shell: micromamba-shell {0}
-        run: PYTHONPATH=. python probe/vol.py
+        run: python probe/styles.py
