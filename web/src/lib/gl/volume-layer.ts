@@ -528,7 +528,9 @@ void main() {
 
 const TRAIL = 9               // positions kept per particle (drawn whole when the trail image restarts)
 const PER_LAYER = 1100        // particles per height
-const SIM_SECONDS = 160       // simulated seconds per 60th of a second
+// particles move a steady distance on screen per m/s whatever the zoom (as on the 2D map): px per
+// frame per m/s. Half the 2D map's rate, since winds aloft run several times the surface wind.
+const PX_PER_MS = 0.06
 const WIND_RGB = (() => {     // the wind scale, a little deeper so trails read on a light map
   const hex = (h: string) => { const n = parseInt(h.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((c) => (c / 255) * 0.82) }
   return (mph: number) => {
@@ -959,6 +961,9 @@ export class VolumeLayer implements CustomLayerInterface {
     const midLat = (g.lat[0] + g.lat[1]) / 2
     const wM = (g.lon[1] - g.lon[0]) * 111320 * Math.cos((midLat * Math.PI) / 180), hM = (g.lat[1] - g.lat[0]) * 110540
     const n = this.age.length, P = this.pos
+    // metres per screen pixel at the box's middle, for the steady screen speed
+    const mPerPx = (EARTH_CIRC * Math.cos((midLat * Math.PI) / 180)) / (512 * 2 ** (this.map?.getZoom() ?? 6))
+    const sim = PX_PER_MS * mPerPx
     let o = 0
     for (let i = 0; i < n; i++) {
       const b = i * TRAIL * 3
@@ -970,7 +975,7 @@ export class VolumeLayer implements CustomLayerInterface {
       const [u, v] = this.sampleWind(x, y, z, latOf)
       this.speed[i] = Math.hypot(u, v) * 2.23694
       P.copyWithin(b + 3, b, b + (TRAIL - 1) * 3)          // shift the history back one
-      const nx = x + (u * SIM_SECONDS * dtf) / wM, ny = y - (v * SIM_SECONDS * dtf) / hM
+      const nx = x + (u * sim * dtf) / wM, ny = y - (v * sim * dtf) / hM
       if (nx < 0 || nx > 1 || ny < 0 || ny > 1) { this.spawn(i); continue }
       P[b] = nx; P[b + 1] = ny
       // fade in and out over the particle's life, and along the trail
@@ -978,7 +983,7 @@ export class VolumeLayer implements CustomLayerInterface {
       const [r, gg, bb] = this.wind!.tint ? this.wind!.tint(this.fieldByte(nx, ny, z, latOf)) : WIND_RGB(this.speed[i])
       for (let k = 0; k < (whole ? TRAIL - 1 : 1); k++) {
         // the kept trail fades the way the screen image would have faded it
-        const a0 = life * 0.9 ** k, a1 = life * 0.9 ** (k + 1)
+        const a0 = life * 0.86 ** k, a1 = life * 0.86 ** (k + 1)
         const p0 = b + k * 3, p1 = b + (k + 1) * 3
         this.verts.set([P[p0], P[p0 + 1], P[p0 + 2], r * a0, gg * a0, bb * a0, a0, P[p1], P[p1 + 1], P[p1 + 2], r * a1, gg * a1, bb * a1, a1], o)
         o += 14
@@ -1037,7 +1042,7 @@ export class VolumeLayer implements CustomLayerInterface {
       gl.activeTexture(gl.TEXTURE0)
       gl.bindTexture(gl.TEXTURE_2D, this.trailTex[this.trailCur])
       gl.uniform1i(f.u("uTrail"), 0)
-      gl.uniform1f(f.u("uFade"), Math.pow(0.9, dt * 60))
+      gl.uniform1f(f.u("uFade"), Math.pow(0.86, dt * 60))
       gl.bindVertexArray(this.vao!)
       gl.drawArrays(gl.TRIANGLES, 0, 6)
     }
