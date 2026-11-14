@@ -15,7 +15,7 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrig
 import { Slider } from "@/components/ui/slider"
 import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { FALLBACK, STYLE_URL, withKey } from "@/lib/basemap"
+import { FALLBACK, forDark, setBasemapDark, setPaint, STYLE_URL, withKey } from "@/lib/basemap"
 import { loadCog } from "@/lib/cog"
 import { MRMS_MODEL } from "@/lib/mrms-name"
 import type { Md } from "@/lib/spcmd"
@@ -397,7 +397,7 @@ export interface PaneTerrain { exaggeration: number; snow: { entry: VolumeEntry;
 /** The cross-section on the map: its line (and the points picked so far while drawing one). */
 interface PaneSection { line: SectionLine | null; picked: LonLat[] | null; sink: React.MutableRefObject<{ set?: (img: HTMLCanvasElement) => void }> }
 
-function MapPane({ data, view, clock, opacity, smooth, particles, particleColor, sync, terrain, sat, fronts, reports, fires, vol = null, xsec = null, onPick = null, terrain3d = null, tall = false, insetTitle = false }: {
+function MapPane({ data, view, clock, opacity, smooth, particles, particleColor, sync, terrain, sat, fronts, reports, fires, vol = null, xsec = null, onPick = null, terrain3d = null, tall = false, insetTitle = false, dark = false }: {
   data: Briefing; view: View | null; clock: Clock; opacity: number; smooth: boolean
   particles: boolean; particleColor: [number, number, number, number]; sync: ReturnType<typeof useCameraSync>
   terrain: boolean; sat: { kind: SatKind; times: SatTimes } | null; fronts: Fronts | null; reports: ObsReport[] | null
@@ -408,6 +408,8 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
   tall?: boolean
   /** room at the top left for the map page's Controls button */
   insetTitle?: boolean
+  /** the dark basemap */
+  dark?: boolean
 }) {
   const el = React.useRef<HTMLDivElement>(null)
   const axisEl = React.useRef<HTMLDivElement>(null)
@@ -429,6 +431,31 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
   const [hover, setHover] = React.useState<{ x: number; y: number; text: string | null; place: string | null; vol?: string | null } | null>(null)
   const volRef = React.useRef(vol)
   volRef.current = vol
+  // light or dark basemap: the basemap's own layers recoloured in place, and the data layers' dark
+  // inks and white halos swapped (their light colours are kept from when they were added)
+  const lightPaint = React.useRef<Map<string, Record<string, unknown>> | null>(null)
+  const wasDark = React.useRef(false)
+  React.useEffect(() => {
+    if (!dark && !wasDark.current) return                 // light as loaded: nothing to undo
+    wasDark.current = dark
+    let live = true
+    ready.current?.then(async (m) => {
+      if (!live) return
+      if (!lightPaint.current) {
+        const base = new Set<string>()
+        try { (await (await fetch(STYLE_URL)).json() as { layers: { id: string }[] }).layers.forEach((l) => base.add(l.id)) } catch { /* fallback style */ }
+        lightPaint.current = new Map(m.getStyle().layers.filter((l) => !base.has(l.id) && l.id !== "bg" && "paint" in l && l.paint)
+          .map((l) => [l.id, { ...(l as { paint: Record<string, unknown> }).paint }]))
+      }
+      if (!live) return
+      await setBasemapDark(m, dark).catch(() => {})
+      for (const [id, paint] of lightPaint.current) {
+        if (!m.getLayer(id)) continue
+        for (const [k, v] of Object.entries(paint)) setPaint(m, id, k, dark ? forDark(v) : v)
+      }
+    })
+    return () => { live = false }
+  }, [dark])
   const [status, setStatus] = React.useState<Status>({ kind: "loading" })
   const [sub, setSub] = React.useState<string | undefined>()
 
@@ -838,7 +865,7 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
   }, [volKey, vol?.data, vol?.colorData])
   React.useEffect(() => () => layers.current?.volume.setPoints(null), [])
   // the sun over the box's middle at the map's time
-  const lightMode = vol?.light ?? "sun", lightEntry = vol?.entry
+  const lightMode = vol?.light ?? "fixed", lightEntry = vol?.entry
   React.useEffect(() => {
     const L = layers.current?.volume
     if (!L || !lightEntry) return
@@ -1224,20 +1251,22 @@ function volumeNotes({ entry, name, exaggeration, particles, precip, terrain, sn
   return [
     // the note without its own "Moisture flow: " lead-in, since the label says it
     !vol?.none && { label: VIEW_LABEL[name] ?? v?.label ?? "3D field", text: <>{VOL_NOTES[name].replace(/^[A-Z][a-z ]+: (.)/, (_, c: string) => c.toUpperCase())}{!LEVEL_VIEWS.includes(name) && v?.note ? ` ${v.note}` : ""}</> },
-    { label: "The box", text: <>{entry.model} on pressure levels from the ground to {entry.topKm} km, heights stretched ×{exaggeration}: kilometres up one edge, the model's average pressure-level heights up the other. Steps every {hours} hours through {timeLabel(entry.times[steps - 1])}, blended in between.</> },
+    entry.run === "observed"
+      ? { label: "The box", text: <>Observed radar at heights from the ground to {entry.topKm} km above sea level, every 500 m, stretched ×{exaggeration}. {steps} frames through {timeLabel(entry.times[steps - 1])}, hourly and then every 10 minutes over the last hour, blended in between.</> }
+      : { label: "The box", text: <>{entry.model} on pressure levels from the ground to {entry.topKm} km, heights stretched ×{exaggeration}: kilometres up one edge, the model's average pressure-level heights up the other. Steps every {hours} hours through {timeLabel(entry.times[steps - 1])}, blended in between.</> },
     { label: "Tilt and turn", text: <>Right-drag (or Ctrl-drag), or two fingers on a phone. Drag the compass to tilt; click it to face north.</> },
     particles && pk.length > 0 && { label: "Wind particles", text: <>The wind at {pk.map((l) => `${l.hPa}`).join(", ")} mb (about {pk.map((l) => l.km.toFixed(1)).join(", ")} km), coloured by {name === "mflux" ? "moisture flow" : "speed"}.</> },
-    precip && { label: "Falling precipitation", text: <>From the radar layer, wherever the model's rate is 0.01 in/h or more (or its simulated radar about 15 dBZ, without a rate), thicker where it's heavier. Rain falls in streaks, snow drifts, sleet and freezing rain in between, coloured by type, from about 3 km.</> },
+    precip && { label: "Falling precipitation", text: <>From the radar layer, wherever the model's rate is 0.01 in/h or more (or its simulated radar about 15 dBZ, without a rate), with more drops where it's heavier (four times the drops for sixteen times the rate). Rain falls in blue streaks (freezing rain the same, in pink), snow drifts down in soft white flakes, sleet as small icy-blue pellets that bounce where they land and mixes as short purple streaks, from about 3 km. Behind cloud (or whatever the 3D field shows), they're hidden as much as it hides the map.</> },
     terrain && { label: "3D terrain", text: <>Stretched as much as the 3D data (×{exaggeration}), so heights in the air and on the ground line up. The map's colours are draped over it; the 3D data, particles and falling precipitation stop at the ground.</> },
     snow && { label: "Snow level", text: <>Terrain above the model's snow level, about 1,000 ft below where the wet-bulb temperature reaches freezing, is shaded white.</> },
     vol?.solid != null && { label: "Solid surface", text: <>Everywhere the field reaches {solidLabel(name, vol.solid, v?.units ?? "")} or more, drawn as one opaque surface lit from the south-west, so its shape and how it folds read at a glance.{name === "pv" ? " The box is capped at 9 km at first, since the stratosphere above the tropopause is all over 2 PVU; lift the heights slider to see more." : ""}</> },
     vol && !vol.none && vol.solid == null && vol.render === "cloud" && { label: "Cloud", text: <>The field's shape lit white like real cloud: bright on the side facing the light from the south-west, grey underneath and where it's thick.</> },
     vol && !vol.none && vol.solid == null && vol.render === "max" && { label: "Max", text: <>Each pixel shows the strongest value along that line of sight, like a composite radar seen from any angle: the cores stand out, but not how deep they are.</> },
     vol && !vol.none && vol.solid == null && vol.render === "points" && { label: "Points", text: <>Dots scattered through each grid cell, more where the field draws thicker; they keep their places as time moves, so motion reads as change in the field.</> },
-    vol && !vol.none && (vol.from ?? 0) > 0 && v && { label: "Show from", text: <>Values below {fmtVal(unpack(vol.from!, v), v.units)} are hidden.</> },
+    vol && !vol.none && (vol.from ?? 0) > 0 && v && { label: "Show from", text: <>Values {v.min > v.max ? "above" : "below"} {fmtVal(unpack(vol.from!, v), v.units)} are hidden.</> },
     vol?.scan && !vol.none && { label: "Scan", text: <>A slice {vol.scan.axis === "z" ? "at one height" : vol.scan.axis === "x" ? "from south to north at one longitude" : "from west to east at one latitude"}, coloured by the field's own colour scale (grey where it's missing), with the rest of the field faded so the slice reads.</> },
     vol && vol.color !== "own" && { label: "Colour", text: vol.color === "height" ? <>Coloured by height, purple low through teal to yellow and orange high.</> : <>The shape comes from {(VIEW_LABEL[name] ?? v?.label ?? "the field").toLowerCase()}, the colour from {volLabel(entry, vol.color).toLowerCase()} at the same place.</> },
-    vol?.shadow && (vol.solid != null || LIT_VIEWS.includes(name)) && { label: "Shadows", text: <>Cast on the ground by the light from the south-west and fairly high, through {vol.solid != null ? "the solid" : "the field, thicker where it's thicker"}.</> },
+    vol?.shadow && (vol.solid != null || LIT_VIEWS.includes(name)) && { label: "Shadows", text: <>Cast on the ground by the light ({vol.light === "sun" ? "the sun at the map time" : "fixed, from the south-west"}), through {vol.solid != null ? "the solid" : "the field, thicker where it's thicker"}.</> },
     vol?.level && { label: `${vol.level.hPa} mb map`, text: <>The {vol.level.hPa} mb level at its average height ({((entry.vars.hgt?.meanM?.[entry.vars.hgt.hPa!.indexOf(vol.level.hPa)] ?? 0) / 1000).toFixed(1)} km): contours of its height every {vol.level.hPa >= 700 ? 3 : 6} decametres (lows and troughs where they dip; the wind blows along them) and arrows for the wind at that height, longer where it's faster.</> },
     vol?.traj && { label: "Trajectories", text: <>Backward trajectories: the paths the air arriving over each forecast location at about 1.5 and 3 km took over the previous 24 hours (or since the model's first step), through the model's winds{entry.vars.w ? " including its rising and sinking air" : ""}. Coloured by height and fading into the past; a stalk marks each arrival. Lines climbing toward a location show air being lifted, as it is over the mountains and along fronts.</> },
   ]
@@ -2342,6 +2371,7 @@ function TimeBar({ times, clock, playing, setPlaying, className = "border bg-mut
 // so its particles are a mid ink; other layers get a darker one.
 const DARK_INK: [number, number, number, number] = [24, 28, 34, 0.62]
 const WIND_INK: [number, number, number, number] = [24, 28, 34, 0.5]
+const LIGHT_INK: [number, number, number, number] = [236, 238, 242, 0.6]
 
 // ------------------------------------------------------------------ the card
 
@@ -2386,6 +2416,7 @@ export function InteractiveMap({ data, request, active = true, standalone = fals
   const [smooth, setSmooth] = useStoredFlag("pnw-briefing.map.smooth", false, q.has("sm") ? qb("sm", false) : undefined)
   const [particles, setParticles] = useStoredFlag("pnw-briefing.map.particles", true, q.has("pa") ? qb("pa", true) : undefined)
   const [terrain, setTerrain] = useStoredFlag("pnw-briefing.map.terrain", true, q.has("tr") ? qb("tr", true) : undefined)
+  const [darkMap, setDarkMap] = useStoredFlag("pnw-briefing.map.dark", false, q.has("dk") ? qb("dk", false) : undefined)
   const [satKind, setSatKind] = React.useState<SatKind | "off">(() => (q.get("sat") && q.get("sat")! in SAT_KINDS ? q.get("sat") as SatKind : "off"))
   const [showPairs, setShowPairs] = useStoredFlag("pnw-briefing.map.pairs", true, q.has("pr") ? qb("pr", true) : undefined)
   const [showFronts, setShowFronts] = useStoredFlag("pnw-briefing.map.fronts", false, q.has("fr") ? qb("fr", false) : undefined)
@@ -2442,7 +2473,7 @@ export function InteractiveMap({ data, request, active = true, standalone = fals
   })
   const modelVols = useVolumes(threeD)
   // observed 3D radar, over the same box as the models' volumes
-  const radar3d = useRadar3d(data, threeD && mode === "hourly" && active, modelVols?.[0] ?? null)
+  const radar3d = useRadar3d(data, threeD && mode === "hourly" && active && modelVols != null, modelVols?.[0] ?? null)
   const vols = React.useMemo(() => (modelVols ? (radar3d ? [...modelVols, radar3d] : modelVols) : null), [modelVols, radar3d])
 
   React.useEffect(() => { if (!active) setPlaying(false) }, [active])
@@ -2632,7 +2663,7 @@ export function InteractiveMap({ data, request, active = true, standalone = fals
   const scanSink = React.useRef<{ set?: (pos: number) => void }>({})
   const [colorPick, setColorPick] = React.useState<"own" | "height" | VolVar>(() => qs<"own" | "height" | VolVar>("col", "own"))
   const [shadowOn, setShadowOn] = React.useState(() => qb("sh", true))
-  const [lightPick, setLightPick] = React.useState<"sun" | "fixed">(() => qs<"sun" | "fixed">("lt", "sun"))
+  const [lightPick, setLightPick] = React.useState<"sun" | "fixed">(() => qs<"sun" | "fixed">("lt", "fixed"))
   const [hoverOn, setHoverOn] = React.useState(() => qb("hv", true))
   // a pressure level as a map (contours and arrows), and trajectories
   const [levelHPa, setLevelHPa] = React.useState<number | null>(() => (q.has("lvl") ? qn("lvl", NaN) || null : null))
@@ -2784,7 +2815,7 @@ export function InteractiveMap({ data, request, active = true, standalone = fals
   const entriesA = hA ? byModel.get(hA)!.entries : {}
   const hasWind = mode === "hourly" && [hA, showB ? hB : undefined].some((m) => m && flowOf(layer, byModel.get(m)!.entries))
   const showParticles = particles && hasWind && active      // no animation while the Map tab is hidden
-  const ink = layer === "wind" ? WIND_INK : DARK_INK
+  const ink = darkMap ? LIGHT_INK : layer === "wind" ? WIND_INK : DARK_INK
 
   // ---- the settings as a query string: kept in the map page's URL (so a link opens the same view)
   // and handed to the briefing for its link to the map page
@@ -2804,14 +2835,14 @@ export function InteractiveMap({ data, request, active = true, standalone = fals
     if (compare) { p.set("cmp", "1"); if (mode === "totals") put("o", other); else put("ho", hOther) }
     put("op", Math.round(opacity * 100) / 100, 0.85)
     // switches that are remembered per browser go in either way, so the link opens as it looks here
-    put("sm", smooth); put("pa", particles); put("tr", terrain); put("pr", showPairs); put("fr", showFronts); put("rp", showReports); put("fi", showFires)
+    put("sm", smooth); put("pa", particles); put("tr", terrain); put("dk", darkMap, false); put("pr", showPairs); put("fr", showFronts); put("rp", showReports); put("fi", showFires)
     if (mode === "hourly" && threeD) {
       p.set("3d", "1"); put("vf", volVar, "cloud"); put("vm", volModel); put("ex", exag, 25)
       if (zRange) p.set("zr", zRange.join(","))
       put("vw", volWindPick); put("vp", volPrecip, true)
       if (solidAt != null) p.set("sol", String(solidAt))
       if (renderMode !== "solid") put("rm", renderMode, "volume")
-      put("dn", density, 1); put("th", showFrom, 0); put("so", solidAlpha, 1); put("lt", lightPick, "sun"); put("hv", hoverOn, true)
+      put("dn", density, 1); put("th", showFrom, 0); put("so", solidAlpha, 1); put("lt", lightPick, "fixed"); put("hv", hoverOn, true)
       if (scanAxis !== "off") { p.set("sc", scanAxis); p.set("scp", scanPos.toFixed(3)) }
       put("col", colorPick, "own"); put("sh", shadowOn, true); put("lvl", level); put("trj", trajOn, false)
       put("t3", terr3d, false); put("sn", snowOn, true)
@@ -3017,6 +3048,7 @@ export function InteractiveMap({ data, request, active = true, standalone = fals
           ] : [])].filter(Boolean)}
           active={(frontsOn ? 1 : 0) + (reportsOn ? 1 : 0) + (firesOn ? 1 : 0) + (mode === "hourly" ? [entriesA.mslp && isobars, pairList.length > 0 && showPairs, hasWind && particles, satAll && satKind !== "off"].filter(Boolean).length : 0)}
           display={<>
+            <OptionRow id="dark-map" label="Dark map" checked={darkMap} onChange={setDarkMap} />
             <OptionRow id="terrain" label="Terrain" checked={terrain} onChange={setTerrain} />
             <OptionRow id="smooth" label="Smooth" checked={smooth} onChange={setSmooth} />
             <div className="flex items-center justify-between gap-4 py-1.5">
@@ -3112,12 +3144,12 @@ export function InteractiveMap({ data, request, active = true, standalone = fals
             )}
             {(solidAt != null || (LIT_VIEWS.includes(volName) && (renderMode === "volume" || renderMode === "cloud"))) && (
               <>
-                <Row label="Light" help="The sun where it is over the region at the map's time (low and warm near sunrise and sunset, a dim, cool light at night), or a fixed light from the south-west.">
+                <Row label="Light" help="A fixed light from the south-west, or the sun where it is over the region at the map's time (low and warm near sunrise and sunset, a dim, cool light at night).">
                   <Select value={lightPick} onValueChange={(x) => setLightPick(x as "sun" | "fixed")}>
                     <SelectTrigger className="h-8 w-full min-w-0" aria-label="Light"><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="sun">Sun at the map time</SelectItem>
                       <SelectItem value="fixed">Fixed, from the south-west</SelectItem>
+                      <SelectItem value="sun">Sun at the map time</SelectItem>
                     </SelectContent>
                   </Select>
                 </Row>
@@ -3240,9 +3272,9 @@ export function InteractiveMap({ data, request, active = true, standalone = fals
   const mapArea = (
     <div className={full ? `fixed inset-0 z-50 m-0! grid bg-background ${showB ? "grid-rows-2 gap-px lg:grid-cols-2 lg:grid-rows-1" : ""}` : standalone ? `relative grid h-full ${showB ? "grid-rows-2 gap-px lg:grid-cols-2 lg:grid-rows-1" : ""}` : `relative grid gap-3 ${showB ? "lg:grid-cols-2" : ""}`}
       role={full ? "dialog" : undefined} aria-modal={full || undefined} aria-label={full ? "Map, full screen" : undefined}>
-      <MapPane data={data} view={viewA} clock={clock} opacity={opacity} smooth={smooth} particles={showParticles} particleColor={ink} sync={sync} terrain={terrain} sat={sat} fronts={frontsOn} reports={reportsOn} fires={firesOn} vol={paneVol}
+      <MapPane data={data} view={viewA} clock={clock} opacity={opacity} smooth={smooth} particles={showParticles} particleColor={ink} sync={sync} terrain={terrain} sat={sat} fronts={frontsOn} reports={reportsOn} fires={firesOn} vol={paneVol} dark={darkMap}
         xsec={volOn && xsecOn ? { line: xsecLine, picked: picking, sink: xsecSink } : null} onPick={volOn && xsecOn && picking ? onPick : volOn && profileOn ? pickProfile : null} terrain3d={paneTerrain} tall={full || standalone} insetTitle={standalone && !panelOpen && !full} />
-      {showB && <MapPane data={data} view={viewB} clock={clock} opacity={opacity} smooth={smooth} particles={showParticles} particleColor={ink} sync={sync} terrain={terrain} sat={sat} fronts={frontsOn} reports={reportsOn} fires={firesOn} tall={full || standalone} />}
+      {showB && <MapPane data={data} view={viewB} clock={clock} opacity={opacity} smooth={smooth} particles={showParticles} particleColor={ink} sync={sync} terrain={terrain} sat={sat} fronts={frontsOn} reports={reportsOn} fires={firesOn} tall={full || standalone} dark={darkMap} />}
       {/* left of the zoom buttons, so it doesn't cover them */}
       <Button variant="outline" size="icon" onClick={() => setFull((f) => !f)} aria-pressed={full}
         aria-label={full ? "Exit full screen" : "Full screen map"} title={full ? "Exit full screen (Esc)" : "Full screen"}

@@ -85,7 +85,12 @@ export class FieldTextures {
     const gl = this.gl
     const clean = new Float32Array(data.length)
     for (let i = 0; i < data.length; i++) clean[i] = Number.isFinite(data[i]) ? data[i] : MISSING
+    // creating the texture binds it to the active unit; put back whatever was bound there, since
+    // callers fetch textures while binding others (a new band would otherwise replace the one just
+    // bound for the earlier step, and the map would show the later step for a frame)
+    const prev = gl.getParameter(gl.TEXTURE_BINDING_2D) as WebGLTexture | null
     const t = texture(gl, gl.R32F, grid.width, grid.height, gl.RED, gl.FLOAT, clean)
+    gl.bindTexture(gl.TEXTURE_2D, prev)
     this.map.set(data, t)
     while (this.map.size > this.limit) {
       const [k, old] = this.map.entries().next().value!

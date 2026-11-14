@@ -1,11 +1,22 @@
 name: probe-mrms3d
 on: push
+permissions: { contents: write }
 jobs:
   p:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - uses: mamba-org/setup-micromamba@v2
-        with: { environment-file: environment.yml, cache-environment: true }
-      - shell: micromamba-shell {0}
-        run: python probe/styles.py
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: cd web && npm ci >/dev/null 2>&1 && npx vite build --outDir /tmp/site >/dev/null
+      - run: |
+          git fetch -q --depth 1 origin gh-pages
+          mkdir -p /tmp/gp && git archive origin/gh-pages data | tar -x -C /tmp/gp
+          cp -r /tmp/gp/data /tmp/site/data
+      - run: mkdir -p /tmp/pw && cd /tmp/pw && npm init -y >/dev/null && npm i playwright@1.56.1 && npx playwright install --with-deps chromium
+      - run: |
+          (cd /tmp/site && python3 -m http.server 8000 >/dev/null 2>&1 &) ; sleep 1
+          mkdir -p probe-out && cp probe/shot.cjs /tmp/pw/shot.cjs && sed -i "s#../probe-out/#$GITHUB_WORKSPACE/probe-out/#" /tmp/pw/shot.cjs && (cd /tmp/pw && node shot.cjs); ls -la probe-out
+      - run: |
+          git config user.name probe && git config user.email probe@users.noreply.github.com
+          git add probe-out && git commit -qm "probe output" && git push -q origin HEAD:probe-mrms3d
