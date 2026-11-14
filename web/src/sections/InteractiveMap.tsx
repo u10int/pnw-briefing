@@ -431,31 +431,6 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
   const [hover, setHover] = React.useState<{ x: number; y: number; text: string | null; place: string | null; vol?: string | null } | null>(null)
   const volRef = React.useRef(vol)
   volRef.current = vol
-  // light or dark basemap: the basemap's own layers recoloured in place, and the data layers' dark
-  // inks and white halos swapped (their light colours are kept from when they were added)
-  const lightPaint = React.useRef<Map<string, Record<string, unknown>> | null>(null)
-  const wasDark = React.useRef(false)
-  React.useEffect(() => {
-    if (!dark && !wasDark.current) return                 // light as loaded: nothing to undo
-    wasDark.current = dark
-    let live = true
-    ready.current?.then(async (m) => {
-      if (!live) return
-      if (!lightPaint.current) {
-        const base = new Set<string>()
-        try { (await (await fetch(STYLE_URL)).json() as { layers: { id: string }[] }).layers.forEach((l) => base.add(l.id)) } catch { /* fallback style */ }
-        lightPaint.current = new Map(m.getStyle().layers.filter((l) => !base.has(l.id) && l.id !== "bg" && "paint" in l && l.paint)
-          .map((l) => [l.id, { ...(l as { paint: Record<string, unknown> }).paint }]))
-      }
-      if (!live) return
-      await setBasemapDark(m, dark).catch(() => {})
-      for (const [id, paint] of lightPaint.current) {
-        if (!m.getLayer(id)) continue
-        for (const [k, v] of Object.entries(paint)) setPaint(m, id, k, dark ? forDark(v) : v)
-      }
-    })
-    return () => { live = false }
-  }, [dark])
   const [status, setStatus] = React.useState<Status>({ kind: "loading" })
   const [sub, setSub] = React.useState<string | undefined>()
 
@@ -620,6 +595,32 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
     })
     return () => { sync.remove(m); m.remove() }
   }, [])
+
+  // (after the map is made, so `ready` is set) light or dark basemap: the basemap's own layers recoloured in place, and the data layers' dark
+  // inks and white halos swapped (their light colours are kept from when they were added)
+  const lightPaint = React.useRef<Map<string, Record<string, unknown>> | null>(null)
+  const wasDark = React.useRef(false)
+  React.useEffect(() => {
+    if (!dark && !wasDark.current) return                 // light as loaded: nothing to undo
+    wasDark.current = dark
+    let live = true
+    ready.current?.then(async (m) => {
+      if (!live) return
+      if (!lightPaint.current) {
+        const base = new Set<string>()
+        try { (await (await fetch(STYLE_URL)).json() as { layers: { id: string }[] }).layers.forEach((l) => base.add(l.id)) } catch { /* fallback style */ }
+        lightPaint.current = new Map(m.getStyle().layers.filter((l) => !base.has(l.id) && l.id !== "bg" && "paint" in l && l.paint)
+          .map((l) => [l.id, { ...(l as { paint: Record<string, unknown> }).paint }]))
+      }
+      if (!live) return
+      await setBasemapDark(m, dark).catch(() => {})
+      for (const [id, paint] of lightPaint.current) {
+        if (!m.getLayer(id)) continue
+        for (const [k, v] of Object.entries(paint)) setPaint(m, id, k, dark ? forDark(v) : v)
+      }
+    })
+    return () => { live = false }
+  }, [dark])
 
   // Follow the clock: each channel loads new data only when the steps it needs change.
   React.useEffect(() => {
