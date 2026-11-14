@@ -103,7 +103,7 @@ export function levelOverlay(e: VolumeEntry, hPa: number, hgt: Uint8Array, wind:
         const x0 = bx(lonOf(c)) - dx / 2, y0 = by(latOfRow(r)) - dy / 2, x1 = x0 + dx, y1 = y0 + dy
         const k = Math.min(1, sp / 70)
         const col = [0.3 + 0.35 * k, 0.25 * (1 - k) + 0.12, 0.75 - 0.3 * k].map((x) => x * 0.95)
-        // a solid arrow (a shaft and a triangular head), shaped in metres so it keeps its proportions;
+        // a solid arrow (a shaft and a barbed head), shaped in metres so it keeps its proportions;
         // the widths follow the spacing rather than the length, so slow arrows stay slim
         const ex = dx * wM / Lm, ey = dy * hM / Lm          // unit vector along the wind, in metres
         const nxm = -ey, nym = ex                           // and across it
@@ -111,10 +111,12 @@ export function levelOverlay(e: VolumeEntry, hPa: number, hgt: Uint8Array, wind:
         const shaft = cw * 0.025, half = cw * 0.1, head = Math.min(Lm * 0.45, cw * 0.2)
         const P = (along: number, across: number): number[] =>
           [x0 + (ex * along + nxm * across) / wM, y0 + (ey * along + nym * across) / hM, z, ...col, 1]
-        const neck = Lm - head
-        tris.push(...P(0, shaft), ...P(0, -shaft), ...P(neck, shaft),
-                  ...P(neck, shaft), ...P(0, -shaft), ...P(neck, -shaft),
-                  ...P(neck, half), ...P(neck, -half), ...P(Lm, 0))
+        // a swept-back head: the wings trail behind a notch on the shaft, so their back edges angle in to it
+        const notch = Lm - head * 0.65, wing = Lm - head
+        tris.push(...P(0, shaft), ...P(0, -shaft), ...P(notch, shaft),
+                  ...P(notch, shaft), ...P(0, -shaft), ...P(notch, -shaft),
+                  ...P(Lm, 0), ...P(wing, half), ...P(notch, 0),
+                  ...P(Lm, 0), ...P(notch, 0), ...P(wing, -half))
       }
     }
   }
