@@ -17,18 +17,26 @@ const inDay = (e: ImpactEvent, d: string) => e.start <= d && d <= e.end
 const lvl = (es: ImpactEvent[]) => (es.some((e) => e.level === "likely") ? "likely" : es.length ? "possible" : null)
 
 /** The headline's hazard as an impact event: the family the headline names (wind, rain, snow…),
- *  else the summary cards' most severe that has one; within it, likely first, then the most models. */
+ *  else the summary cards' most severe that has one. One in the next few days (as the headline
+ *  is) wins over a later one in any family; within a family, likely first, then the earliest.
+ *  A river-flooding headline names no impact event (it's about gauges), so it falls through to
+ *  the cards. */
 export function leadEvent(data: Briefing): ImpactEvent | null {
   const RANK = { alert: 2, watch: 1, quiet: 0 } as const
   const fam: Record<string, string[]> = { wind: ["wind"], coast: ["wind"], precip: ["rain"], flood: ["flood", "rain"], snow: ["snow"], temp: ["temp"] }
   const h = (data.summary?.headline ?? "").toLowerCase()
-  const named = /wind|gust/.test(h) ? ["wind"] : /atmospheric river|flood/.test(h) ? ["flood", "rain"] : /rain/.test(h) ? ["rain", "flood"]
+  const named = /\brivers?\b/.test(h) && !/atmospheric river/.test(h) ? [] : /wind|gust/.test(h) ? ["wind"] : /atmospheric river|flood/.test(h) ? ["flood", "rain"] : /rain/.test(h) ? ["rain", "flood"]
     : /snow/.test(h) ? ["snow"] : /freez|heat|cold|warm/.test(h) ? ["temp"] : []
   const order = [...named, ...summarize(data).filter((s) => s.tone !== "quiet").sort((a, b) => RANK[b.tone] - RANK[a.tone]).flatMap((s) => fam[s.tab] ?? [])]
-  for (const k of order) {
+  // the headline's near term: through three days after the issue date (Pacific)
+  const day0 = new Date(data.meta.issued)
+  const near = new Date(day0.getTime() + 3 * 86400e3).toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" })
+  const soon = (e: ImpactEvent) => (e.start <= near ? 0 : 1)
+  // a family's event in the next few days before any later one, then likely first, then earliest
+  for (const nearOnly of [true, false]) for (const k of order) {
     const row = ROWS.find((r) => r.key === k)!
-    const es = data.events.filter((e) => row.match(e.hazard))
-      .sort((a, b) => (a.level === b.level ? 0 : a.level === "likely" ? -1 : 1) || a.start.localeCompare(b.start))
+    const es = data.events.filter((e) => row.match(e.hazard) && (!nearOnly || soon(e) === 0))
+      .sort((a, b) => soon(a) - soon(b) || (a.level === b.level ? 0 : a.level === "likely" ? -1 : 1) || a.start.localeCompare(b.start))
     if (es[0]) return es[0]
   }
   return null
