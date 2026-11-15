@@ -75,3 +75,32 @@ def test_place_names_are_capitalised():
     n = summary.place_names(cfg)
     t = "strong gusts along puget sound, the wa coast or southwest bc, rain in western washington"
     assert summary.fix_places(t, n) == "strong gusts along Puget Sound, the WA coast or Southwest BC, rain in Western Washington"
+
+
+def _brief(events=(), gauges=(), waves=(), ar=None):
+    return {"meta": {"issued": "2026-11-07T15:00:00+00:00"}, "events": list(events), "ar": ar or {},
+            "rivers": {"gauges": list(gauges)}, "coast": {"waves": list(waves)}}
+
+
+CFG = {"timezone": "America/Los_Angeles", "points": [{"name": "Seattle", "kind": "city", "zone": "Puget Sound", "region": "wa"}],
+       "regions": {"wa": {"name": "Western Washington"}}}
+
+
+def test_near_term_and_regional_impacts_lead():
+    gusts = {"hazard": "wind", "label": "Strong gusts", "level": "likely", "agreement": 0.8, "start": "2026-11-07", "end": "2026-11-08",
+             "unit": "mph", "points": [{"name": "Seattle", "peak": 50, "frac": 1}]}
+    one_river = {"name": "Skokomish River near Potlatch", "crest": {"level": 2, "time": "2026-11-07T18:00:00Z"}}
+    ar = {"models": [{"model": "gfs"}, {"model": "ecmwf"}],
+          "events": [{"model": m, "rank": 4, "point": "Seattle", "start": "2026-11-16T00:00:00Z", "end": "2026-11-18T00:00:00Z"} for m in ("gfs", "ecmwf")]}
+    surf = {"name": "Off La Push", "area": "Outer coast", "daily": [{"date": "2026-11-07", "max": 20.0}, {"date": "2026-11-08", "max": 18.0}]}
+    items = summary.facts(_brief([gusts], [one_river], [surf], ar), CFG)["items"]
+    kinds = [i["kind"] for i in items]
+    # a strong atmospheric river nine days out and one river in flood rank below today's wind and surf
+    assert kinds.index("high surf") < kinds.index("atmospheric river") and kinds.index("impact") < kinds.index("atmospheric river")
+    assert kinds.index("river flooding forecast") > kinds.index("impact")
+    assert "Skokomish" in summary._sentence(next(i for i in items if i["kind"] == "river flooding forecast"))
+
+
+def test_events_already_under_way_read_from_today():
+    assert summary.when("2026-11-06", "2026-11-07", TODAY)["when"] == "today"
+    assert summary.when("2026-11-07", "2026-11-10", TODAY)["when"] == "today through Tuesday"

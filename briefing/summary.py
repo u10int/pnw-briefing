@@ -63,6 +63,7 @@ def _part_of_week(d: date, today: date) -> tuple[str, str]:
 def when(start, end, today: date) -> dict:
     """{when, weekdays, startsInDays, days}: a relative phrase for a period of local dates."""
     s, e = _d(start), _d(end or start)
+    s = max(s, min(today, e))         # already under way: describe it from today
     n = (s - today).days
     span = (e - s).days + 1
     weeks = ((s - timedelta(days=s.weekday())) - (today - timedelta(days=today.weekday()))).days // 7
@@ -70,6 +71,8 @@ def when(start, end, today: date) -> dict:
         phrase = _day_word(s, today)
     elif span == 2 and n <= 1:
         phrase = f"{_day_word(s, today)} into {_day_word(e, today)}"
+    elif n <= 1 and (e - today).days <= 6:
+        phrase = f"{_day_word(s, today)} through {WEEKDAY_LONG[e.weekday()]}"
     elif s.weekday() == 5 and span == 2:
         phrase = "this weekend" if weeks == 0 else "next weekend" if weeks == 1 else f"in about {n} days"
     else:
@@ -211,6 +214,23 @@ def facts(data: dict, cfg: dict) -> dict:
         items.append({"kind": "wettest stretch", **when(data["wettest"]["start"], data["wettest"]["end"], today),
                       "importance": 0.8 - 0.5 * _later(data["wettest"]["start"], today)})
 
+    # high surf: the outer coast's forecast waves over the next few days, from the coast section
+    big = {}
+    for w in (data.get("coast") or {}).get("waves") or []:
+        if w.get("area") not in ("Outer coast", "B.C. waters"):
+            continue
+        for dd in w.get("daily") or []:
+            n = (_d(dd["date"]) - today).days
+            if 0 <= n <= NEAR_DAYS and dd.get("max") is not None and dd["max"] >= 12:
+                big.setdefault(dd["date"], []).append((dd["max"], w["name"]))
+    if big:
+        days = sorted(big)
+        top = max(x[0] for v in big.values() for x in v)
+        spots = {x[1] for v in big.values() for x in v}
+        items.append({"kind": "high surf", "areas": ["the coast"], **when(days[0], days[-1], today),
+                      "highestWaves": f"{int(round(top))} ft", "forecastPointsAffected": len(spots),
+                      "importance": 2.2 + min(1.4, 0.15 * (top - 12))})
+
     gauges = (data.get("rivers") or {}).get("gauges") or []
     flooding = [g for g in gauges if ((g.get("crest") or {}).get("level") or 0) >= 2]
     if flooding:
@@ -220,7 +240,8 @@ def facts(data: dict, cfg: dict) -> dict:
         items.append({"kind": "river flooding forecast", "gauges": len(flooding), "worst": FLOOD[lvl],
                       **when(crest, crest, today),
                       "rivers": list(dict.fromkeys(g["name"].split(" at ")[0].split(" near ")[0] for g in flooding))[:4],
-                      "importance": 2.5 + 0.5 * lvl - _later(crest, today)})
+                      # one river is a local story: it takes several gauges to rank with regional impacts
+                      "importance": 1.5 + 0.5 * lvl * min(1.0, (len(flooding) + 1) / 4) - _later(crest, today)})
 
     changes = []
     ch = data.get("change") or {}
@@ -249,7 +270,7 @@ def facts(data: dict, cfg: dict) -> dict:
 
 SYSTEM = """You write the headline and lead for a weather briefing, updated four times a day, covering Western Washington, Northwest Oregon and southwest British Columbia.
 Use only the facts given. Do not add places, timings, numbers or hazards that are not in them, and do not speculate.
-- Headline: at most 10 words, sentence case (capitalise the first word and proper names only), no final period. Focus on the next three or four days (startsInDays 0 to 3): lead with the most important impact or event in that time (facts are listed most important first, already weighted toward the near term). Only headline something further out when nothing notable happens in the next few days; then the lead can say the next few days are quiet. When the headline names more than one event, give each its own area if they differ (e.g. "Windy for Puget Sound, heavy rain for Southwest BC"); never attach one area to events that happen in different places.
+- Headline: at most 10 words, sentence case (capitalise the first word and proper names only), no final period. Focus on the next three or four days (startsInDays 0 to 3): lead with the most important impact or event in that time (facts are listed most important first, already weighted toward the near term). Only headline something further out when nothing notable happens in the next few days; then the lead can say the next few days are quiet. Prefer impacts across a broad area (wind, rain, high surf on the coast) over something at a single river or location. When the headline names more than one event, give each its own area if they differ (e.g. "Windy for Puget Sound, heavy rain for Southwest BC"); never attach one area to events that happen in different places.
 - Lead: the same rule for places and timing applies; one or two short sentences, at most 40 words in all, giving a quick overview of the other key impacts and events, in order of importance, near-term first. A significant event a week or more out can get a brief mention at the end. Leave out anything minor.
 - Describe the weather and its impacts, never named NWS products: no "warning", "watch", "advisory" or "statement".
 - Keep it general: broad areas (e.g. "Puget Sound", "the coast", "the Cascade passes") rather than towns, with place names capitalised exactly as in the facts, and relative timing ("this weekend", "early next week") rather than dates. Never write calendar dates.
@@ -340,7 +361,11 @@ def _sentence(it) -> str:
         parts = [f"{n} about {v['total']}" + (f" ({v['percentOfNormal']} of normal)" if v.get("percentOfNormal") else "") for n, v in it["byRegion"].items()]
         return f"Over the {it['window']}, {' and '.join(parts)}"
     if k == "river flooding forecast":
-        return f"Rivers forecast to reach {it['worst']}" + (f" {it['when']}" if it.get("when") else "")
+        rivers = it.get("rivers") or []
+        who = f"the {rivers[0]}" if len(rivers) == 1 else "rivers"
+        return f"{_cap(it['worst'])} forecast on {who}" + (f" {it['when']}" if it.get("when") else "")
+    if k == "high surf":
+        return f"High surf on the coast {it['when']}, waves to {it['highestWaves']}"
     if k == "wettest stretch":
         return f"The wettest stretch comes {it['when']}"
     return ""
@@ -352,7 +377,19 @@ def by_rules(f: dict) -> dict:
         lede = ". ".join(s for s in (_sentence(i) for i in items[:2]) if s)
         return {"headline": "A quiet stretch with nothing standing out", "lede": (lede + ".") if lede else ""}
     head = _sentence(items[0])
-    rest = [s for s in (_sentence(i) for i in items[1:]) if s][:1]
+    rest_items = items[1:]
+    # two near-term regional impacts of similar weight share the headline
+    nxt = items[1] if len(items) > 1 else None
+    if (nxt and nxt["kind"] in ("impact", "high surf", "atmospheric river") and items[0].get("startsInDays", 9) <= NEAR_DAYS
+            and nxt.get("startsInDays", 9) <= NEAR_DAYS and items[0]["importance"] - nxt["importance"] <= 0.6):
+        bare = lambda it: re.sub(r",.*$", "", _sentence(it)).replace(" " + it["when"], "")
+        a, b = bare(items[0]), bare(nxt)
+        b = b[0].lower() + b[1:]
+        head = f"{a} and {b} {items[0]['when']}" if items[0]["when"] == nxt["when"] else f"{a} {items[0]['when']}, {b} {nxt['when']}"
+        rest_items = items[2:]
+    # the lead: near-term items first
+    rest_items = sorted(rest_items, key=lambda i: i.get("startsInDays", 0) > NEAR_DAYS)
+    rest = [s for s in (_sentence(i) for i in rest_items) if s][:1]
     precip = next((i for i in items if i["kind"] == "precipitation total" and i["window"].endswith("7 days")), None)
     if precip and _sentence(precip) not in rest:
         rest.append(_sentence(precip))
