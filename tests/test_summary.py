@@ -45,11 +45,24 @@ def test_overview_uses_model_text_only_when_it_checks_out(monkeypatch):
         {"hazard": "wind", "label": "Strong gusts", "unit": "mph", "start": "2026-11-07", "end": "2026-11-08",
          "points": [{"name": "Seattle", "frac": 1.0, "peak": 52.4}], "agreement": 1.0, "n_models": 10, "level": "likely"}]}
     monkeypatch.setenv("OPENAI_API_KEY", "test")
-    monkeypatch.setattr(summary, "ask_model", lambda f, m, k: {"headline": "Windy weekend for Puget Sound, gusts to 52 mph", "lede": "Strong winds are likely today into tomorrow."})
+    monkeypatch.setattr(summary, "ask_model", lambda f, m, k, retry=None: {"headline": "Windy weekend for Puget Sound, gusts to 52 mph", "lede": "Strong winds are likely today into tomorrow."})
     out = summary.overview(data, cfg)
     assert out["source"] == "openai" and out["headline"].endswith("52 mph")
-    monkeypatch.setattr(summary, "ask_model", lambda f, m, k: {"headline": "Gusts to 80 mph", "lede": "Very windy."})
+    monkeypatch.setattr(summary, "ask_model", lambda f, m, k, retry=None: {"headline": "Gusts to 80 mph", "lede": "Very windy."})
     assert summary.overview(data, cfg)["source"] == "rules"
+    # a lead that runs long is asked for again, told why
+    calls = []
+    def long_then_short(f, m, k, retry=None):
+        calls.append(retry)
+        lede = "Strong winds are likely today." if retry else "Windy. Very windy. Still windy."
+        return {"headline": "Windy for Puget Sound", "lede": lede}
+    monkeypatch.setattr(summary, "ask_model", long_then_short)
+    out = summary.overview(data, cfg)
+    assert out["source"] == "openai" and out["lede"] == "Strong winds are likely today." and calls[1][1] == "too long"
+    # and if it still runs long, its first two sentences are kept
+    monkeypatch.setattr(summary, "ask_model", lambda f, m, k, retry=None: {"headline": "Windy for Puget Sound", "lede": "Windy. Very windy. Still windy."})
+    out = summary.overview(data, cfg)
+    assert out["source"] == "openai" and out["lede"] == "Windy. Very windy."
 
 
 def test_check_rejects_named_products_and_long_leads():

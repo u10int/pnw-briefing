@@ -271,7 +271,7 @@ def facts(data: dict, cfg: dict) -> dict:
 SYSTEM = """You write the headline and lead for a weather briefing, updated four times a day, covering Western Washington, Northwest Oregon and southwest British Columbia.
 Use only the facts given. Do not add places, timings, numbers or hazards that are not in them, and do not speculate.
 - Headline: at most 10 words, sentence case (capitalise the first word and proper names only), no final period. Focus on the next three or four days (startsInDays 0 to 3): lead with the most important impact or event in that time (facts are listed most important first, already weighted toward the near term). Only headline something further out when nothing notable happens in the next few days; then the lead can say the next few days are quiet. Prefer impacts across a broad area (wind, rain, high surf on the coast) over something at a single river or location. When the headline names more than one event, give each its own area if they differ (e.g. "Windy for Puget Sound, heavy rain for Southwest BC"); never attach one area to events that happen in different places.
-- Lead: the same rule for places and timing applies; one or two short sentences, at most 40 words in all, giving a quick overview of the other key impacts and events, in order of importance, near-term first. A significant event a week or more out can get a brief mention at the end. Leave out anything minor.
+- Lead: the same rule for places and timing applies; one or two short sentences (never three or more), at most 40 words in all, giving a quick overview of the other key impacts and events, in order of importance, near-term first. A significant event a week or more out can get a brief mention at the end. Leave out anything minor.
 - Describe the weather and its impacts, never named NWS products: no "warning", "watch", "advisory" or "statement".
 - Keep it general: broad areas (e.g. "Puget Sound", "the coast", "the Cascade passes") rather than towns, with place names capitalised exactly as in the facts, and relative timing ("this weekend", "early next week") rather than dates. Never write calendar dates.
 - Use at most two numbers in total, copied exactly from the facts (e.g. "gusts to 55 mph", "about 3.6 in").
@@ -309,11 +309,31 @@ def shown(f: dict) -> dict:
     return {**f, "items": [{k: v for k, v in i.items() if k != "importance"} for i in f["items"]]}
 
 
-def ask_model(f: dict, model: str, key: str) -> dict:
+# what to tell the model when its answer fails a check
+FIX = {"too": "too long: the headline at most 10 words; the lead at most two sentences and 40 words, so pick only the next most important one or two things",
+       "number": "it uses a number that isn't in the facts; copy numbers exactly, at most two",
+       "names": "it names an NWS product; describe the weather instead",
+       "calendar": "it has a calendar date; use relative timing",
+       "empty": "the headline or lead is empty"}
+
+
+def _trim(text: dict) -> dict:
+    """The lead cut to its first two sentences (the usual way the model runs long)."""
+    parts = re.split(r"(?<=[.!?])\s+", (text.get("lede") or "").strip())
+    return {**text, "lede": " ".join(parts[:2])}
+
+
+def ask_model(f: dict, model: str, key: str, retry: tuple[dict, str] | None = None) -> dict:
+    """The model's headline and lead; with `retry` (its earlier answer and why it was rejected),
+    a second try that's told what to fix."""
     import requests
+    msgs = [{"role": "system", "content": SYSTEM},
+            {"role": "user", "content": "Facts for this briefing (JSON):\n" + json.dumps(shown(f), indent=1)}]
+    if retry:
+        msgs += [{"role": "assistant", "content": json.dumps(retry[0])},
+                 {"role": "user", "content": f"That can't be used ({FIX.get(retry[1].split(' ')[0], retry[1])}). Write it again, following every rule."}]
     body = {"model": model, "temperature": 0.3,
-            "messages": [{"role": "system", "content": SYSTEM},
-                         {"role": "user", "content": "Facts for this briefing (JSON):\n" + json.dumps(shown(f), indent=1)}],
+            "messages": msgs,
             "response_format": {"type": "json_schema", "json_schema": {"name": "overview", "strict": True, "schema": SCHEMA}}}
     last = None
     for _ in range(2):
@@ -436,6 +456,16 @@ def overview(data: dict, cfg: dict, demo: bool = False) -> dict:
         try:
             text = ask_model(f, model, key)
             why = check(text, f)
+            if why is not None:
+                log.info("overview from %s rejected (%s), asking again: %s", model, why, text)
+                first = text
+                text = ask_model(f, model, key, retry=(text, why))
+                why = check(text, f)
+                # still too long: keep its first two sentences when they pass on their own
+                for cand in ([_trim(text), _trim(first)] if why == "too long" else []):
+                    if check(cand, f) is None:
+                        text, why = cand, None
+                        break
             if why is None:
                 log.info("overview written by %s", model)
                 names = place_names(cfg)
