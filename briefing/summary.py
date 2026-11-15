@@ -102,6 +102,17 @@ def where(names, places) -> dict:
 
 # ---------------------------------------------------------------- facts
 
+NEAR_DAYS = 3   # the headline's focus: events starting within this many days of today
+
+
+def _later(start, today: date) -> float:
+    """How much to lower an item's importance for starting beyond the next few days: nothing
+    through NEAR_DAYS, then 0.3 a day, so a strong event a week or more out ranks below a
+    moderate one in the next few days."""
+    n = (_d(start) - today).days
+    return 0.0 if n <= NEAR_DAYS else 0.3 * (n - NEAR_DAYS)
+
+
 def _num(v, unit):
     return int(round(v)) if unit in ("mph", "°F", "ft", "%") else round(float(v), 1)
 
@@ -124,7 +135,7 @@ def facts(data: dict, cfg: dict) -> dict:
             "shareOfModels": f"{round(100 * e['agreement'])}%", **when(e["start"], e["end"], today),
             **where(main, places), "worst": None if peak is None else f"{_num(peak, unit)} {unit}",
             "importance": (3 if e["level"] == "likely" else 2) + {"wind": 0.4, "heavy_rain_72h": 0.5, "snow_24h": 0.3, "freezing_precip": 0.4}.get(e["hazard"], 0)
-                          - 0.08 * max(0, (_d(e["start"]) - today).days),
+                          - 0.08 * max(0, (_d(e["start"]) - today).days) - _later(e["start"], today),
         })
 
     # NWS alerts are left out on purpose: the overview speaks to impacts and events in general;
@@ -153,7 +164,7 @@ def facts(data: dict, cfg: dict) -> dict:
             t = max(datetime.fromisoformat(e["end"].replace("Z", "+00:00")) for e in evs).astimezone(tz).date()
             items.append({"kind": "atmospheric river", "strength": f"AR{rank} ({AR_WORD[rank]})", **when(s, t, today),
                           **where(list({e["point"] for e in evs}), places),
-                          "modelsAgreeing": f"{len(agree)} of {len(models)}", "importance": 1.0 + 0.7 * rank})
+                          "modelsAgreeing": f"{len(agree)} of {len(models)}", "importance": 1.0 + 0.7 * rank - _later(s, today)})
             break
 
     sl = data.get("snowLevel") or {}
@@ -172,7 +183,7 @@ def facts(data: dict, cfg: dict) -> dict:
     if low:
         first = min(x[1] for x in low)
         items.append({"kind": "snow level reaches the passes", "passes": [x[0] for x in low], **when(first, first, today),
-                      "lowestSnowLevel": f"{int(round(min(x[2] for x in low) / 500) * 500)} ft", "importance": 2.2})
+                      "lowestSnowLevel": f"{int(round(min(x[2] for x in low) / 500) * 500)} ft", "importance": 2.2 - _later(first, today)})
 
     td = data.get("tempDeparture") or {}
     tw = next((w for w in td.get("windows") or [] if w["days"] == 7), None)
@@ -197,15 +208,19 @@ def facts(data: dict, cfg: dict) -> dict:
         items.append({"kind": "precipitation total", "window": w["label"].lower(), "byRegion": rows,
                       "importance": 2.6 if top >= 200 else 1.8 if top >= 130 else 0.9 if w["days"] == 7 else 0.6})
     if data.get("wettest"):
-        items.append({"kind": "wettest stretch", **when(data["wettest"]["start"], data["wettest"]["end"], today), "importance": 0.8})
+        items.append({"kind": "wettest stretch", **when(data["wettest"]["start"], data["wettest"]["end"], today),
+                      "importance": 0.8 - 0.5 * _later(data["wettest"]["start"], today)})
 
     gauges = (data.get("rivers") or {}).get("gauges") or []
     flooding = [g for g in gauges if ((g.get("crest") or {}).get("level") or 0) >= 2]
     if flooding:
         lvl = max(g["crest"]["level"] for g in flooding)
+        crest = min((datetime.fromisoformat(g["crest"]["time"].replace("Z", "+00:00")).astimezone(tz).date()
+                     for g in flooding if g["crest"].get("time")), default=today)
         items.append({"kind": "river flooding forecast", "gauges": len(flooding), "worst": FLOOD[lvl],
+                      **when(crest, crest, today),
                       "rivers": list(dict.fromkeys(g["name"].split(" at ")[0].split(" near ")[0] for g in flooding))[:4],
-                      "importance": 2.5 + 0.5 * lvl})
+                      "importance": 2.5 + 0.5 * lvl - _later(crest, today)})
 
     changes = []
     ch = data.get("change") or {}
@@ -234,8 +249,8 @@ def facts(data: dict, cfg: dict) -> dict:
 
 SYSTEM = """You write the headline and lead for a weather briefing, updated four times a day, covering Western Washington, Northwest Oregon and southwest British Columbia.
 Use only the facts given. Do not add places, timings, numbers or hazards that are not in them, and do not speculate.
-- Headline: at most 10 words, sentence case (capitalise the first word and proper names only), no final period. Lead with the most important impact or event (facts are listed most important first). When the headline names more than one event, give each its own area if they differ (e.g. "Windy for Puget Sound, heavy rain for Southwest BC"); never attach one area to events that happen in different places.
-- Lead: the same rule for places and timing applies; one or two short sentences, at most 40 words in all, giving a quick overview of the other key impacts and events, in order of importance. Leave out anything minor.
+- Headline: at most 10 words, sentence case (capitalise the first word and proper names only), no final period. Focus on the next three or four days (startsInDays 0 to 3): lead with the most important impact or event in that time (facts are listed most important first, already weighted toward the near term). Only headline something further out when nothing notable happens in the next few days; then the lead can say the next few days are quiet. When the headline names more than one event, give each its own area if they differ (e.g. "Windy for Puget Sound, heavy rain for Southwest BC"); never attach one area to events that happen in different places.
+- Lead: the same rule for places and timing applies; one or two short sentences, at most 40 words in all, giving a quick overview of the other key impacts and events, in order of importance, near-term first. A significant event a week or more out can get a brief mention at the end. Leave out anything minor.
 - Describe the weather and its impacts, never named NWS products: no "warning", "watch", "advisory" or "statement".
 - Keep it general: broad areas (e.g. "Puget Sound", "the coast", "the Cascade passes") rather than towns, with place names capitalised exactly as in the facts, and relative timing ("this weekend", "early next week") rather than dates. Never write calendar dates.
 - Use at most two numbers in total, copied exactly from the facts (e.g. "gusts to 55 mph", "about 3.6 in").
@@ -325,7 +340,7 @@ def _sentence(it) -> str:
         parts = [f"{n} about {v['total']}" + (f" ({v['percentOfNormal']} of normal)" if v.get("percentOfNormal") else "") for n, v in it["byRegion"].items()]
         return f"Over the {it['window']}, {' and '.join(parts)}"
     if k == "river flooding forecast":
-        return f"Rivers forecast to reach {it['worst']}"
+        return f"Rivers forecast to reach {it['worst']}" + (f" {it['when']}" if it.get("when") else "")
     if k == "wettest stretch":
         return f"The wettest stretch comes {it['when']}"
     return ""
