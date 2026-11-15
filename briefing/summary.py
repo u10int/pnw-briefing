@@ -170,7 +170,12 @@ def facts(data: dict, cfg: dict) -> dict:
                           "modelsAgreeing": f"{len(agree)} of {len(models)}", "importance": 1.0 + 0.7 * rank - _later(s, today)})
             break
 
+    # snow level at the passes over the next few days, where at least two models agree (one
+    # model alone, often GFS a week out, isn't a forecast to headline). The lowest level is the
+    # lowest of those medians in that time; a freezing level within 1,000 ft of the ground is
+    # stored as 0 ("snow to sea level"), so very low values read as "near sea level".
     sl = data.get("snowLevel") or {}
+    horizon = datetime.combine(today + timedelta(days=NEAR_DAYS + 1), datetime.min.time(), tz)
     low = []
     for p in sl.get("passes") or []:
         by_t = {}
@@ -178,15 +183,19 @@ def facts(data: dict, cfg: dict) -> dict:
             for t, v in zip(s["times"], s["values"]):
                 if v is not None:
                     by_t.setdefault(t, []).append(v)
-        below = sorted(t for t, vs in by_t.items() if np.median(vs) < p["elev_ft"])
+        med = {t: float(np.median(vs)) for t, vs in by_t.items()
+               if len(vs) >= 2 and datetime.fromisoformat(t.replace("Z", "+00:00")) < horizon}
+        below = sorted(t for t, v in med.items() if v < p["elev_ft"])
         if below:
-            mins = min(float(np.median(v)) for v in by_t.values())
-            first = datetime.fromisoformat(below[0].replace("Z", "+00:00")).astimezone(tz).date()
-            low.append((p["name"], first, mins))
+            first = max(datetime.fromisoformat(below[0].replace("Z", "+00:00")).astimezone(tz).date(), today)
+            low.append((p["name"], first, min(med[t] for t in below)))
     if low:
         first = min(x[1] for x in low)
+        ft = lambda v: "near sea level" if v < 500 else f"{int(round(v / 500) * 500)} ft"
+        at = min(low, key=lambda x: x[2])
         items.append({"kind": "snow level reaches the passes", "passes": [x[0] for x in low], **when(first, first, today),
-                      "lowestSnowLevel": f"{int(round(min(x[2] for x in low) / 500) * 500)} ft", "importance": 2.2 - _later(first, today)})
+                      "lowestSnowLevel": ft(at[2]), "lowestAt": at[0],
+                      "importance": 2.2 - _later(first, today)})
 
     td = data.get("tempDeparture") or {}
     tw = next((w for w in td.get("windows") or [] if w["days"] == 7), None)

@@ -117,3 +117,14 @@ def test_near_term_and_regional_impacts_lead():
 def test_events_already_under_way_read_from_today():
     assert summary.when("2026-11-06", "2026-11-07", TODAY)["when"] == "today"
     assert summary.when("2026-11-07", "2026-11-10", TODAY)["when"] == "today through Tuesday"
+
+
+def test_snow_level_uses_the_near_term_where_models_agree():
+    def series(model, vals):   # 12-hourly from today 12Z
+        return {"model": model, "times": [f"2026-11-{7 + i // 2:02d}T{12 if i % 2 == 0 else 0:02d}:00:00Z" for i in range(len(vals))], "values": vals}
+    sl = {"passes": [{"name": "Stevens Pass", "elev_ft": 4061, "series": [
+        series("HRRR", [3500, 3200, 3000, 3100]),
+        series("GFS", [3600, 3300, 3100, 3000, 4000, 4000, 4000, 4000, 4000, 4000, 4000, 0])]}]}   # GFS alone a week out: 0
+    data = {**_brief(), "snowLevel": sl}
+    it = next(i for i in summary.facts(data, CFG)["items"] if i["kind"] == "snow level reaches the passes")
+    assert it["lowestSnowLevel"] == "3000 ft" and it["lowestAt"] == "Stevens Pass" and it["when"] == "today"
