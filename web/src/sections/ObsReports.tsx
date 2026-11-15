@@ -141,7 +141,7 @@ export function ObsReportsCard({ data, v }: { data: Briefing; v: V }) {
   )
 }
 
-/** Each location's observed high and low by day, two cells a day on the temperature scale, then any
+/** Each location's observed low and high by day (the low first, as it usually comes first), two cells a day on the temperature scale, then any
  *  NWS high and low temperature summaries. */
 function ObsTempCard({ data }: { data: Briefing }) {
   const o = data.obsReports!
@@ -185,7 +185,7 @@ function ObsTempCard({ data }: { data: Briefing }) {
                   ))}
                 </TableRow>
                 <TableRow className="hover:bg-transparent">
-                  {o.days.map((d) => (["High", "Low"] as const).map((k) => (
+                  {o.days.map((d) => (["Low", "High"] as const).map((k) => (
                     <TableHead key={d + k} className="h-auto w-[40px] px-1 pb-1.5 text-center text-[10.5px] font-normal text-muted-foreground sm:w-[44px]">{k}</TableHead>
                   )))}
                 </TableRow>
@@ -197,7 +197,7 @@ function ObsTempCard({ data }: { data: Briefing }) {
                       <button type="button" onClick={() => openLocation(name)} className="text-left hover:underline">{name}</button>
                       <span className="block truncate text-[11px] text-muted-foreground" title={rec!.stations.join("; ")}>{rec!.stations.join("; ")}</span>
                     </TableCell>
-                    {o.days.map((d, i) => (["tmax", "tmin"] as const).map((k) => {
+                    {o.days.map((d, i) => (["tmin", "tmax"] as const).map((k) => {
                       const x = rec![k]?.[i] ?? null
                       return (
                         <TableCell key={d + k} className="rounded-[3px] px-1 py-1 text-center tabular-nums" style={cell(x, "temp")}
@@ -211,7 +211,7 @@ function ObsTempCard({ data }: { data: Briefing }) {
               </TableBody>
             </Table>
             <p className="mt-2 text-xs text-muted-foreground">
-              °F. Days run midnight to midnight, so today's high and low are so far; a dash means the station didn't report.
+              °F. Days run midnight to midnight, so today's low and high are so far; a dash means the station didn't report.
               The passes use their SNOTEL's hourly air temperature.
             </p>
           </div>
