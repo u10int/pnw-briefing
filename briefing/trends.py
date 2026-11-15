@@ -22,21 +22,25 @@ SPECS = {
     "precip": {"key": "precipitation_sum", "agg": "sum", "kinds": ("lowland", "coast", "pass"), "combine": "mean"},
     "snow": {"key": "snowfall_sum", "agg": "sum", "kinds": ("pass",), "combine": "mean"},
     "gust": {"key": "wind_gusts_10m_max", "agg": "max", "kinds": ("lowland", "coast"), "combine": "max"},
-    "tmax": {"key": "temperature_2m_max", "agg": "mean", "kinds": ("lowland", "coast"), "combine": "mean"},
-    "tmin": {"key": "temperature_2m_min", "agg": "mean", "kinds": ("lowland", "coast"), "combine": "mean"},
+    "tmax": {"key": "temperature_2m_max", "agg": "mean", "kinds": ("lowland", "coast"), "combine": "mean", "whole": True},
+    "tmin": {"key": "temperature_2m_min", "agg": "mean", "kinds": ("lowland", "coast"), "combine": "mean", "whole": True},
 }
+# whole: an average over whole days only. An 18Z, 00Z or 06Z edition's first day is only its last
+# few hours, which have no daily high (so every model missed the window and highs vanished) and
+# a low that isn't the day's.
 _AGG = {"sum": np.sum, "max": np.max, "mean": np.mean}
 
 
-def _model_values(doc, cols, names):
+def _model_values(doc, cols, names, partial_first=False):
     """{var: {model: {point: value}}} for each model covering every date at that point."""
     out = {v: {} for v in SPECS}
     for m in doc.get("models", []):
         for var, spec in SPECS.items():
             vals = {}
+            use = [c for c in cols if c != 0] if spec.get("whole") and partial_first and len(cols) > 1 else cols
             for n in names:
                 s = m.get("data", {}).get(n, {}).get(spec["key"]) or []
-                v = [s[c] if c < len(s) else None for c in cols]
+                v = [s[c] if c < len(s) else None for c in use]
                 if v and all(x is not None for x in v):
                     vals[n] = float(_AGG[spec["agg"]](v))
             if vals:
@@ -48,9 +52,9 @@ def _stats(xs):
     return {"median": float(np.median(xs)), "lo": float(min(xs)), "hi": float(max(xs)), "n": len(xs)} if xs else None
 
 
-def _window(doc, cols, names):
+def _window(doc, cols, names, partial_first=False):
     """{"points": {name: {var: stats}}, "regions": {rid or "zone:<name>": {var: stats}}}."""
-    mv = _model_values(doc, cols, names)
+    mv = _model_values(doc, cols, names, partial_first)
     pts = {n: {} for n in names}
     regs = {}
     kind = {p["name"]: p for p in doc["points"]}
@@ -84,7 +88,8 @@ def summarize(doc, windows):
     out = []
     for w in windows:
         cols = list(range(min(w["days"], len(doc["dates"]))))
-        out.append({"days": w["days"], "label": w["label"], **_window(doc, cols, names)})
+        partial = (doc.get("meta") or {}).get("firstDayHours", 24) < 24
+        out.append({"days": w["days"], "label": w["label"], **_window(doc, cols, names, partial)})
     return {"windows": out}
 
 

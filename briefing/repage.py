@@ -35,6 +35,13 @@ def refresh(data: dict, cfg: dict) -> dict:
                   "codes": [c["a"].get("code"), c["b"].get("code")],
                   "locs": [[c["a"]["lon"], c["a"]["lat"]], [c["b"]["lon"], c["b"]["lat"]]],
                   "meaning": c["meaning"], "thresholds": c.get("thresholds", [])})
+    # the trends table's current values, worked out again from the published model data
+    if data.get("models") and data.get("dates") and data.get("trends"):
+        try:
+            from . import analysis, trends
+            data["trends"] = json.loads(json.dumps(trends.summarize(data, analysis.windows(cfg))))
+        except Exception as e:
+            print(f"trends not recomputed ({e})", file=sys.stderr)
     return data
 
 

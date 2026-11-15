@@ -57,3 +57,15 @@ def test_history_over_shared_dates():
     assert h["regions"]["wwa"]["snow"] == [2.0, 3.0, 0.5]       # today: median of A 1 and B 0
     h2 = trends.history(now, [older, newer], WINS, min_share=0.75)["windows"][0]
     assert len(h2["runs"]) == 2                                  # the older run shares too few dates
+
+
+def test_highs_skip_a_partial_first_day():
+    # an 06Z edition: the first day is its last few hours, with a low but no high
+    doc = {"meta": {"firstDayHours": 6}, "dates": ["2026-11-14", "2026-11-15", "2026-11-16"],
+           "regions": [], "points": [{"name": "A", "kind": "lowland"}],
+           "models": [{"label": "m", "data": {"A": {"temperature_2m_max": [None, 50, 54], "temperature_2m_min": [48, 40, 42],
+                                                  "precipitation_sum": [0.1, 0.2, 0.3]}}}]}
+    from briefing import trends
+    pt = trends.summarize(doc, [{"days": 3, "label": "x"}])["windows"][0]["points"]["A"]
+    assert pt["tmax"]["median"] == 52 and pt["tmin"]["median"] == 41
+    assert abs(pt["precip"]["median"] - 0.6) < 1e-9          # totals still count the partial day
