@@ -2,6 +2,8 @@ const { chromium } = require('playwright');
 (async () => {
   const b = await chromium.launch({ args: ['--use-gl=swiftshader', '--enable-webgl', '--ignore-gpu-blocklist'] })
   const shots = [
+    ['rdwps', 'http://localhost:8000/map.html?m=hourly&l=waves&hm=RDWPS&sm=1&c=-123.4,48.3,7.2,0,0'],
+    ['rdwps_ps', 'http://localhost:8000/map.html?m=hourly&l=waves&hm=RDWPS&sm=1&c=-122.6,47.6,8.6,0,0'],
     ['hourly', 'http://localhost:8000/map.html?m=hourly&l=waves&c=-125.5,46.5,5.6,0,0'],
     ['period', 'http://localhost:8000/map.html?m=hourly&l=wper&c=-125.5,46.5,5.6,0,0'],
     ['totals', 'http://localhost:8000/map.html?v=waves&c=-125.5,46.5,5.6,0,0'],
@@ -15,7 +17,7 @@ const { chromium } = require('playwright');
     await p.waitForTimeout(20000)
     if (name !== 'index') {
       const box = await p.locator('canvas').first().boundingBox()
-      if (box) { await p.mouse.move(box.x + box.width * 0.3, box.y + box.height * 0.5); await p.waitForTimeout(1500) }
+      if (box) { await p.mouse.move(box.x + box.width * 0.45, box.y + box.height * 0.45); await p.waitForTimeout(1500) }
     }
     console.log(name, 'url now', p.url())
     await p.screenshot({ path: `../probe-out/${name}.png` })
