@@ -41,7 +41,9 @@ function frame(m: maplibregl.Map, b: [[number, number], [number, number]], marks
   const u = m.getBounds()
   const span = (lo: number, hi: number, dlo: number, dhi: number) =>
     hi - lo >= dhi - dlo ? (dlo + dhi) / 2 - (lo + hi) / 2 : lo < dlo ? dlo - lo : hi > dhi ? dhi - hi : 0
-  const dx = span(u.getWest(), u.getEast(), box.west, box.east)
+  // wider than the grid: line its west edge up with the card's, so the spare room is land with
+  // the basemap's labels on the right rather than bare ocean on the left
+  const dx = u.getEast() - u.getWest() >= box.east - box.west ? box.west - u.getWest() : span(u.getWest(), u.getEast(), box.west, box.east)
   const dy = span(u.getSouth(), u.getNorth(), box.south, box.north)
   if (dx || dy) { const c = m.getCenter(); m.jumpTo({ center: [c.lng + dx, c.lat + dy] }) }
 }
