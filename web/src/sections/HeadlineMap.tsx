@@ -10,13 +10,12 @@ import { loadCog } from "@/lib/cog"
 import { GridLayer } from "@/lib/gl/grid-layer"
 import { headlineFocus } from "@/lib/headline-focus"
 import { openOnMap } from "@/lib/maplink"
-import { legendBins } from "@/lib/ramps"
 import { leadEvent } from "@/sections/OverviewStrip"
 import type { Briefing } from "@/types"
 
 const cogUrl = (path: string) => (path.startsWith("data:") ? path : `data/${path}`)
 // room for the Open map button above and the attribution below
-const PAD = { top: 56, bottom: 30, left: 24, right: 24 }
+const PAD = { top: 50, bottom: 40, left: 24, right: 24 }
 
 type Box = { west: number; south: number; east: number; north: number }
 
@@ -35,7 +34,7 @@ function frame(m: maplibregl.Map, b: [[number, number], [number, number]], marks
     const tight = marks.length
       ? m.cameraForBounds([[Math.min(...marks.map((x) => x[0])), Math.min(...marks.map((x) => x[1]))],
                            [Math.max(...marks.map((x) => x[0])), Math.max(...marks.map((x) => x[1]))]],
-                          { padding: { top: 48, bottom: 16, left: 40, right: 40 }, maxZoom: 9 })?.zoom ?? m.getZoom()
+                          { padding: { top: 46, bottom: 36, left: 40, right: 40 }, maxZoom: 9 })?.zoom ?? m.getZoom()
       : Infinity
     m.jumpTo({ zoom: Math.max(m.getZoom(), Math.min(m.getZoom() + short, tight)) })
   }
@@ -106,33 +105,17 @@ export function HeadlineMap({ data }: { data: Briefing }) {
 
   if (!focus) return null
   const open = () => openOnMap(focus.req)
-  const bins = focus.ramp ? legendBins(focus.ramp, undefined, 2) : []
   return (
-    <figure className="overflow-hidden rounded-xl border bg-card">
-      <div className="relative">
-        <div ref={el} role="img" aria-label={`Map: ${focus.title}`} onClick={open}
-             className="h-[300px] w-full cursor-pointer max-sm:h-[240px]" />
-        <Button variant="outline" size="sm" onClick={open} className="absolute top-3 right-3 bg-background/95 shadow-xs">
-          <MapIcon className="size-4" />Open map
-        </Button>
-      </div>
-      <figcaption className="space-y-2 border-t px-4 py-3">
-        <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-          <span className="text-sm font-medium">{focus.title}</span>
-          {focus.cog && <span className="text-xs text-muted-foreground">{focus.cog.model}{failed ? " (couldn't load)" : ""}</span>}
-        </div>
-        {focus.markNote && <p className="text-xs text-muted-foreground">{focus.markNote}</p>}
-        {bins.length > 0 && (
-          <div className="flex">
-            {bins.map((b, i) => (
-              <div key={i} className="min-w-0 flex-1">
-                <div className="h-2" style={{ background: b.color, borderRadius: i === 0 ? "3px 0 0 3px" : i === bins.length - 1 ? "0 3px 3px 0" : 0 }} />
-                <div className="pt-1 text-[10px] whitespace-nowrap tabular-nums text-muted-foreground">{b.label}</div>
-              </div>
-            ))}
-            <span className="pl-2 text-[10px] leading-none text-muted-foreground">{focus.ramp!.units}</span>
-          </div>
-        )}
+    <figure className="relative overflow-hidden rounded-xl border">
+      <div ref={el} role="img" aria-label={`Map: ${focus.title}${focus.markNote ? `. ${focus.markNote}` : ""}`} onClick={open}
+           className="h-[220px] w-full cursor-pointer max-sm:h-[200px]" />
+      <Button variant="outline" size="sm" onClick={open} className="absolute top-2.5 right-2.5 bg-background/95 shadow-xs">
+        <MapIcon className="size-4" />Open map
+      </Button>
+      <figcaption className="pointer-events-none absolute bottom-2.5 left-2.5 max-w-[calc(100%-60px)] rounded-md bg-background/90 px-2 py-1 text-xs shadow-xs">
+        <span className="font-medium">{focus.title}</span>
+        {focus.marks.length > 0 && focus.markLabel && <span className="text-muted-foreground"> · {focus.markLabel} labelled</span>}
+        {failed && <span className="text-muted-foreground"> (couldn't load)</span>}
       </figcaption>
     </figure>
   )
