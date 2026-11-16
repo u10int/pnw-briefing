@@ -1,0 +1,97 @@
+import * as React from "react"
+
+import * as maplibregl from "maplibre-gl"
+import { MapIcon } from "lucide-react"
+import "maplibre-gl/dist/maplibre-gl.css"
+
+import { Button } from "@/components/ui/button"
+import { FALLBACK, STYLE_URL, withKey } from "@/lib/basemap"
+import { loadCog } from "@/lib/cog"
+import { GridLayer } from "@/lib/gl/grid-layer"
+import { headlineFocus } from "@/lib/headline-focus"
+import { openOnMap } from "@/lib/maplink"
+import { legendBins } from "@/lib/ramps"
+import { leadEvent } from "@/sections/OverviewStrip"
+import type { Briefing } from "@/types"
+
+const cogUrl = (path: string) => (path.startsWith("data:") ? path : `data/${path}`)
+
+/**
+ * A small map under the headline: the grid behind its main hazard (strongest gust, rain total…),
+ * framed on the places it's about, with those places marked and labelled. It's a preview, so it
+ * doesn't pan or zoom; it and its button open the full map on the same layer.
+ */
+export function HeadlineMap({ data }: { data: Briefing }) {
+  const focus = React.useMemo(() => headlineFocus(data, leadEvent(data)?.hazard), [data])
+  const el = React.useRef<HTMLDivElement>(null)
+  const [failed, setFailed] = React.useState(false)
+
+  React.useEffect(() => {
+    if (!focus || !el.current) return
+    let gone = false
+    const m = new maplibregl.Map({
+      container: el.current, style: STYLE_URL, transformRequest: withKey, interactive: false,
+      attributionControl: { compact: true }, bounds: focus.bounds, fitBoundsOptions: { padding: 24 },
+    })
+    let loaded = false, fellBack = false
+    m.on("error", () => { if (!loaded && !fellBack && !m.isStyleLoaded()) { fellBack = true; m.setStyle(FALLBACK) } })
+    const grid = new GridLayer("hl-grid")
+    m.on("load", () => {
+      loaded = true
+      const labels = m.getStyle().layers.find((l) => l.type === "symbol")?.id
+      // the basemap's own label font (glyphs for any other font may not exist)
+      const font = (m.getStyle().layers.find((l) => l.type === "symbol" && (l.layout as Record<string, unknown> | undefined)?.["text-font"])
+        ?.layout as Record<string, unknown> | undefined)?.["text-font"] as string[] | undefined
+      m.addLayer(grid, labels)
+      if (focus.cog && focus.ramp) {
+        const ramp = focus.ramp
+        loadCog(cogUrl(focus.cog.path)).then((r) => { if (!gone) grid.setDraw({ grid: r, a: r.data, paint: { kind: "ramp", ramp } }) },
+          () => { if (!gone) setFailed(true) })
+      }
+      m.addSource("hl-marks", { type: "geojson", data: { type: "FeatureCollection", features: focus.marks.map((k) => ({
+        type: "Feature", properties: { label: k.label }, geometry: { type: "Point", coordinates: [k.lon, k.lat] } })) } })
+      m.addLayer({ id: "hl-marks", type: "circle", source: "hl-marks",
+                   paint: { "circle-radius": 4.5, "circle-color": "#fff", "circle-stroke-color": "#1b1f24", "circle-stroke-width": 2 } })
+      m.addLayer({ id: "hl-labels", type: "symbol", source: "hl-marks",
+                   layout: { "text-field": ["get", "label"], "text-size": 12, "text-offset": [0, -1.15], "text-anchor": "bottom",
+                             ...(font ? { "text-font": font } : {}), "text-padding": 2 },
+                   paint: { "text-color": "#1b1f24", "text-halo-color": "rgba(255,255,255,0.92)", "text-halo-width": 1.6 } })
+    })
+    // keep the framing when the card changes width
+    const ro = new ResizeObserver(() => { m.resize(); m.fitBounds(focus.bounds, { padding: 24, animate: false }) })
+    ro.observe(el.current)
+    return () => { gone = true; ro.disconnect(); m.remove() }
+  }, [focus])
+
+  if (!focus) return null
+  const open = () => openOnMap(focus.req)
+  const bins = focus.ramp ? legendBins(focus.ramp, undefined, 2) : []
+  return (
+    <figure className="overflow-hidden rounded-xl border bg-card">
+      <div className="relative">
+        <div ref={el} role="img" aria-label={`Map: ${focus.title}`} onClick={open}
+             className="h-[260px] w-full cursor-pointer max-sm:h-[220px]" />
+        <Button variant="outline" size="sm" onClick={open} className="absolute top-3 right-3 bg-background/95 shadow-xs">
+          <MapIcon className="size-4" />Open map
+        </Button>
+      </div>
+      <figcaption className="space-y-2 border-t px-4 py-3">
+        <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+          <span className="text-sm font-medium">{focus.title}</span>
+          {focus.cog && <span className="text-xs text-muted-foreground">{focus.cog.model}{failed ? " (couldn't load)" : ""}</span>}
+        </div>
+        {bins.length > 0 && (
+          <div className="flex">
+            {bins.map((b, i) => (
+              <div key={i} className="min-w-0 flex-1">
+                <div className="h-2" style={{ background: b.color, borderRadius: i === 0 ? "3px 0 0 3px" : i === bins.length - 1 ? "0 3px 3px 0" : 0 }} />
+                <div className="pt-1 text-[10px] whitespace-nowrap tabular-nums text-muted-foreground">{b.label}</div>
+              </div>
+            ))}
+            <span className="pl-2 text-[10px] leading-none text-muted-foreground">{focus.ramp!.units}</span>
+          </div>
+        )}
+      </figcaption>
+    </figure>
+  )
+}
