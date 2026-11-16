@@ -72,6 +72,8 @@ export function HeadlineMap({ data }: { data: Briefing }) {
     const grid = new GridLayer("hl-grid")
     m.on("load", () => {
       loaded = true
+      // the attribution starts folded to its (i) button, so it doesn't cover the marks
+      el.current?.querySelector(".maplibregl-ctrl-attrib")?.classList.remove("maplibregl-compact-show")
       const labels = m.getStyle().layers.find((l) => l.type === "symbol")?.id
       // the basemap's own label font (glyphs for any other font may not exist)
       const font = (m.getStyle().layers.find((l) => l.type === "symbol" && (l.layout as Record<string, unknown> | undefined)?.["text-font"])
