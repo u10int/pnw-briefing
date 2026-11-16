@@ -6,10 +6,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - uses: mamba-org/setup-micromamba@v2
-        with: {environment-file: environment.yml, cache-environment: true}
-      - shell: micromamba-shell {0}
-        run: mkdir -p probe-out && PYTHONPATH=. python probe/waves.py
+      - run: pip install -q requests && mkdir -p probe-out && python probe/rdwps.py
       - run: |
           git config user.name probe; git config user.email probe@users.noreply.github.com
           git add probe-out && git commit -qm "probe output" && git push
