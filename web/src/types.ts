@@ -218,7 +218,7 @@ export type ExtremeVar = "tmax" | "tmin" | "wind" | "gust"
 
 export interface Cog {
   path: string; model: string; tier: string
-  var: "precip" | "snow" | "mean" | "spread" | "pct" | ExtremeVar | "p24" | "p72" | "obs" | "obspct" | "tmaxdep" | "tmindep" | "ar" | "rivers" | "storms"
+  var: "precip" | "snow" | "mean" | "spread" | "pct" | ExtremeVar | "p24" | "p72" | "obs" | "obspct" | "tmaxdep" | "tmindep" | "ar" | "rivers" | "storms" | "waves"
   days: number; units: string; run?: string | null; members?: string[]; threshold?: number
 }
 
@@ -309,6 +309,7 @@ export interface Briefing {
   // the headline and lead, written at build time from the briefing's facts; absent before it was added
   summary?: { headline: string; lede: string; source: "openai" | "rules"; model?: string } | null
   coast?: Coast | null                                 // buoys, wave forecast, tides and marine warnings
+  waveGrids?: { model: string; run: string; first: string; last: string; source: string }[]   // the wave models' grids on the map
   obsReports?: ObsReports | null                       // station observations and NWS storm reports
   fronts?: Fronts | null                               // WPC surface fronts for the map; absent before it was added
   timing?: PeakTiming | null                           // when gusts and heavy precipitation peak, by location; absent before it was added
@@ -409,6 +410,7 @@ export interface Outlooks {
 
 /** data/fields.json: time-stepped grids for the interactive map (latest briefing only). */
 export type FieldVar = "t2m" | "gust" | "u10" | "v10" | "mslp" | "frz" | "refc" | "ptype" | "ivtu" | "ivtv" | "apcp" | "asnow" | "rh" | "smoke" | "prate"
+  | "wave" | "wper" | "wu" | "wv"           // GFS-Wave: wave height (ft), peak period (s), travel (mph)
 export interface FieldEntry {
   path: string; model: string; tier: string; var: FieldVar; units: string
   scale: number; nodata: number; times: string[]; run: string; init: string

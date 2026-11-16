@@ -4,7 +4,8 @@ import { CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts"
 
 import { Badge } from "@/components/ui/badge"
 import { dayOf, Takeaway } from "@/components/Takeaway"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { MapButton } from "@/components/MapButton"
 import { type ChartConfig, ChartContainer, ChartLegend, ChartLegendContent, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -178,6 +179,7 @@ export function WaveForecastCard({ data }: { data: Briefing }) {
     <Card>
       <CardHeader>
         <CardTitle>Wave forecast</CardTitle>
+        {(data.waveGrids?.length ?? 0) > 0 && <CardAction><MapButton req={{ mode: "hourly", layer: "waves" }} label="Waves on the map" /></CardAction>}
         {(() => { const x = ws.flatMap((w) => w.daily.map((d) => ({ w, d }))).sort((a, b) => b.d.max - a.d.max)[0]
           return x && <Takeaway>Highest seas: {Math.round(x.d.max)} ft at {x.w.name} {dayOf(x.d.date)}{x.d.period ? `, at ${Math.round(x.d.period)} s` : ""}.</Takeaway> })()}
         <CardDescription info="The highest significant wave height each day, in feet, with its period and direction underneath; the chart shows it through the week.">
