@@ -109,9 +109,9 @@ export function HeadlineMap({ data }: { data: Briefing }) {
   if (!focus) return null
   const open = () => openOnMap(focus.req)
   return (
-    <figure className="relative max-w-[640px] overflow-hidden rounded-xl border">
+    <figure className="relative max-w-[560px] overflow-hidden rounded-xl border">
       <div ref={el} role="img" aria-label={`Map: ${focus.title}${focus.markNote ? `. ${focus.markNote}` : ""}`} onClick={open}
-           className="h-[260px] w-full cursor-pointer max-sm:h-[220px]" />
+           className="h-[300px] w-full cursor-pointer max-sm:h-[220px]" />
       <Button variant="outline" size="sm" onClick={open} className="absolute top-2.5 right-2.5 bg-background/95 shadow-xs">
         <MapIcon className="size-4" />Open map
       </Button>
