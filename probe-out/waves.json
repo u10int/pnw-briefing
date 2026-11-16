@@ -1,0 +1,171 @@
+{
+ "run": "2026-11-16T12:00:00+00:00",
+ "wcoast.0p16": {
+  "url": "https://noaa-gfs-bdp-pds.s3.amazonaws.com/gfs.20261116/12/wave/gridded/gfswave.t12z.wcoast.0p16.f012.grib2",
+  "idx": [
+   "1:0:d=2026111612:WIND:surface:12 hour fcst:",
+   "2:15971:d=2026111612:WDIR:surface:12 hour fcst:",
+   "3:37208:d=2026111612:UGRD:surface:12 hour fcst:",
+   "4:53367:d=2026111612:VGRD:surface:12 hour fcst:",
+   "5:69527:d=2026111612:HTSGW:surface:12 hour fcst:",
+   "6:80135:d=2026111612:PERPW:surface:12 hour fcst:",
+   "7:90736:d=2026111612:DIRPW:surface:12 hour fcst:",
+   "8:106831:d=2026111612:WVHGT:surface:12 hour fcst:",
+   "9:112223:d=2026111612:SWELL:1 in sequence:12 hour fcst:",
+   "10:124479:d=2026111612:SWELL:2 in sequence:12 hour fcst:",
+   "11:135853:d=2026111612:SWELL:3 in sequence:12 hour fcst:",
+   "12:142323:d=2026111612:WVPER:surface:12 hour fcst:",
+   "13:147791:d=2026111612:SWPER:1 in sequence:12 hour fcst:",
+   "14:159579:d=2026111612:SWPER:2 in sequence:12 hour fcst:",
+   "15:171045:d=2026111612:SWPER:3 in sequence:12 hour fcst:",
+   "16:177960:d=2026111612:WVDIR:surface:12 hour fcst:",
+   "17:183668:d=2026111612:SWDIR:1 in sequence:12 hour fcst:",
+   "18:201564:d=2026111612:SWDIR:2 in sequence:12 hour fcst:",
+   "19:220612:d=2026111612:SWDIR:3 in sequence:12 hour fcst:"
+  ],
+  "grid": {
+   "var": "swh",
+   "lat": [
+    25.0,
+    50.0,
+    151
+   ],
+   "lon": [
+    210.0,
+    250.0,
+    241
+   ],
+   "max": 4.960000038146973
+  },
+  "hours": [
+   [
+    120,
+    200
+   ],
+   [
+    180,
+    200
+   ],
+   [
+    240,
+    200
+   ],
+   [
+    384,
+    200
+   ]
+  ]
+ },
+ "epacif.0p16": {
+  "url": "https://noaa-gfs-bdp-pds.s3.amazonaws.com/gfs.20261116/12/wave/gridded/gfswave.t12z.epacif.0p16.f012.grib2",
+  "idx": [
+   "1:0:d=2026111612:WIND:surface:12 hour fcst:",
+   "2:26953:d=2026111612:WDIR:surface:12 hour fcst:",
+   "3:56966:d=2026111612:UGRD:surface:12 hour fcst:",
+   "4:83907:d=2026111612:VGRD:surface:12 hour fcst:",
+   "5:110865:d=2026111612:HTSGW:surface:12 hour fcst:",
+   "6:135029:d=2026111612:PERPW:surface:12 hour fcst:",
+   "7:159972:d=2026111612:DIRPW:surface:12 hour fcst:",
+   "8:190365:d=2026111612:WVHGT:surface:12 hour fcst:",
+   "9:213811:d=2026111612:SWELL:1 in sequence:12 hour fcst:",
+   "10:238727:d=2026111612:SWELL:2 in sequence:12 hour fcst:",
+   "11:263571:d=2026111612:SWELL:3 in sequence:12 hour fcst:",
+   "12:287656:d=2026111612:WVPER:surface:12 hour fcst:",
+   "13:311512:d=2026111612:SWPER:1 in sequence:12 hour fcst:",
+   "14:337568:d=2026111612:SWPER:2 in sequence:12 hour fcst:",
+   "15:364619:d=2026111612:SWPER:3 in sequence:12 hour fcst:",
+   "16:391677:d=2026111612:WVDIR:surface:12 hour fcst:",
+   "17:418807:d=2026111612:SWDIR:1 in sequence:12 hour fcst:",
+   "18:450744:d=2026111612:SWDIR:2 in sequence:12 hour fcst:",
+   "19:483314:d=2026111612:SWDIR:3 in sequence:12 hour fcst:"
+  ],
+  "grid": {
+   "var": "swh",
+   "lat": [
+    -20.0,
+    30.0,
+    301
+   ],
+   "lon": [
+    130.0,
+    215.0,
+    511
+   ],
+   "max": 3.7100000381469727
+  },
+  "hours": [
+   [
+    120,
+    200
+   ],
+   [
+    180,
+    200
+   ],
+   [
+    240,
+    200
+   ],
+   [
+    384,
+    200
+   ]
+  ]
+ },
+ "global.0p16": {
+  "url": "https://noaa-gfs-bdp-pds.s3.amazonaws.com/gfs.20261116/12/wave/gridded/gfswave.t12z.global.0p16.f012.grib2",
+  "idx": [
+   "1:0:d=2026111612:WIND:surface:12 hour fcst:",
+   "2:646256:d=2026111612:WDIR:surface:12 hour fcst:",
+   "3:1576728:d=2026111612:UGRD:surface:12 hour fcst:",
+   "4:2234044:d=2026111612:VGRD:surface:12 hour fcst:",
+   "5:2879763:d=2026111612:HTSGW:surface:12 hour fcst:",
+   "6:3236142:d=2026111612:PERPW:surface:12 hour fcst:",
+   "7:3663583:d=2026111612:DIRPW:surface:12 hour fcst:",
+   "8:4459861:d=2026111612:WVHGT:surface:12 hour fcst:",
+   "9:4783132:d=2026111612:SWELL:1 in sequence:12 hour fcst:",
+   "10:5211000:d=2026111612:SWELL:2 in sequence:12 hour fcst:",
+   "11:5599669:d=2026111612:SWELL:3 in sequence:12 hour fcst:",
+   "12:5932942:d=2026111612:WVPER:surface:12 hour fcst:",
+   "13:6304273:d=2026111612:SWPER:1 in sequence:12 hour fcst:",
+   "14:6809266:d=2026111612:SWPER:2 in sequence:12 hour fcst:",
+   "15:7359154:d=2026111612:SWPER:3 in sequence:12 hour fcst:",
+   "16:7877787:d=2026111612:WVDIR:surface:12 hour fcst:",
+   "17:8461273:d=2026111612:SWDIR:1 in sequence:12 hour fcst:",
+   "18:9333476:d=2026111612:SWDIR:2 in sequence:12 hour fcst:",
+   "19:10204455:d=2026111612:SWDIR:3 in sequence:12 hour fcst:"
+  ],
+  "grid": {
+   "var": "swh",
+   "lat": [
+    -15.0,
+    52.5,
+    406
+   ],
+   "lon": [
+    0.0,
+    359.833376,
+    2160
+   ],
+   "max": 9.630000114440918
+  },
+  "hours": [
+   [
+    120,
+    200
+   ],
+   [
+    180,
+    200
+   ],
+   [
+    240,
+    200
+   ],
+   [
+    384,
+    200
+   ]
+  ]
+ }
+}
