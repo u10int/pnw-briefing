@@ -71,6 +71,7 @@ export function HeadlineMap({ data }: { data: Briefing }) {
     let loaded = false, fellBack = false
     m.on("error", () => { if (!loaded && !fellBack && !m.isStyleLoaded()) { fellBack = true; m.setStyle(FALLBACK) } })
     const grid = new GridLayer("hl-grid")
+    grid.setSmooth(true)                                     // bicubic, as the full map's smoothing
     m.on("load", () => {
       loaded = true
       // the attribution starts folded to its (i) button, so it doesn't cover the marks
@@ -108,7 +109,7 @@ export function HeadlineMap({ data }: { data: Briefing }) {
   if (!focus) return null
   const open = () => openOnMap(focus.req)
   return (
-    <figure className="relative max-w-[560px] overflow-hidden rounded-xl border">
+    <figure className="relative overflow-hidden rounded-xl border">
       <div ref={el} role="img" aria-label={`Map: ${focus.title}${focus.markNote ? `. ${focus.markNote}` : ""}`} onClick={open}
            className="h-[300px] w-full cursor-pointer max-sm:h-[220px]" />
       <Button variant="outline" size="sm" onClick={open} className="absolute top-2.5 right-2.5 bg-background/95 shadow-xs">
