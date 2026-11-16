@@ -15,6 +15,20 @@ import { leadEvent } from "@/sections/OverviewStrip"
 import type { Briefing } from "@/types"
 
 const cogUrl = (path: string) => (path.startsWith("data:") ? path : `data/${path}`)
+// room for the Open map button above and the attribution below
+const PAD = { top: 56, bottom: 30, left: 24, right: 24 }
+
+/** Frames the bounds, then slides the view back inside the briefing's grid where the card is
+ *  wider (or taller) than the bounds, so no edge of it is blank beyond the data. */
+function frame(m: maplibregl.Map, b: [[number, number], [number, number]], dom: Briefing["domain"]) {
+  m.fitBounds(b, { padding: PAD, animate: false })
+  const v = m.getBounds()
+  const span = (lo: number, hi: number, dlo: number, dhi: number) =>
+    hi - lo >= dhi - dlo ? (dlo + dhi) / 2 - (lo + hi) / 2 : lo < dlo ? dlo - lo : hi > dhi ? dhi - hi : 0
+  const dx = span(v.getWest(), v.getEast(), dom.lon_min, dom.lon_max)
+  const dy = span(v.getSouth(), v.getNorth(), dom.lat_min, dom.lat_max)
+  if (dx || dy) { const c = m.getCenter(); m.jumpTo({ center: [c.lng + dx, c.lat + dy] }) }
+}
 
 /**
  * A small map under the headline: the grid behind its main hazard (strongest gust, rain total…),
@@ -31,8 +45,9 @@ export function HeadlineMap({ data }: { data: Briefing }) {
     let gone = false
     const m = new maplibregl.Map({
       container: el.current, style: STYLE_URL, transformRequest: withKey, interactive: false,
-      attributionControl: { compact: true }, bounds: focus.bounds, fitBoundsOptions: { padding: 24 },
+      attributionControl: { compact: true },
     })
+    frame(m, focus.bounds, data.domain)
     let loaded = false, fellBack = false
     m.on("error", () => { if (!loaded && !fellBack && !m.isStyleLoaded()) { fellBack = true; m.setStyle(FALLBACK) } })
     const grid = new GridLayer("hl-grid")
@@ -58,10 +73,10 @@ export function HeadlineMap({ data }: { data: Briefing }) {
                    paint: { "text-color": "#1b1f24", "text-halo-color": "rgba(255,255,255,0.92)", "text-halo-width": 1.6 } })
     })
     // keep the framing when the card changes width
-    const ro = new ResizeObserver(() => { m.resize(); m.fitBounds(focus.bounds, { padding: 24, animate: false }) })
+    const ro = new ResizeObserver(() => { m.resize(); frame(m, focus.bounds, data.domain) })
     ro.observe(el.current)
     return () => { gone = true; ro.disconnect(); m.remove() }
-  }, [focus])
+  }, [focus, data.domain])
 
   if (!focus) return null
   const open = () => openOnMap(focus.req)
@@ -80,6 +95,7 @@ export function HeadlineMap({ data }: { data: Briefing }) {
           <span className="text-sm font-medium">{focus.title}</span>
           {focus.cog && <span className="text-xs text-muted-foreground">{focus.cog.model}{failed ? " (couldn't load)" : ""}</span>}
         </div>
+        {focus.markNote && <p className="text-xs text-muted-foreground">{focus.markNote}</p>}
         {bins.length > 0 && (
           <div className="flex">
             {bins.map((b, i) => (
