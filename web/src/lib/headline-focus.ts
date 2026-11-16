@@ -12,8 +12,9 @@ export interface Focus {
   cog: Cog | null
   ramp: Ramp | null
   marks: Mark[]
-  /** what the labels on the marks are */
+  /** what the labels on the marks are: a sentence (for screen readers) and a few words (on the map) */
   markNote: string | null
+  markLabel: string | null
   /** the area to frame, [[west, south], [east, north]] */
   bounds: [[number, number], [number, number]]
   req: MapRequest
@@ -123,6 +124,8 @@ export function headlineFocus(data: Briefing, fallbackHazard?: string | null): F
     wind: "Labels: peak gust at each affected location", rain: "Labels: heaviest rain at each affected location",
     snow: "Labels: most snow at each affected location", heat: "Labels: highest temperature", cold: "Labels: lowest temperature",
   }
+  const SHORT: Partial<Record<Fam, string>> = { surf: "highest waves", river: "rivers in flood", wind: "peak gusts", rain: "heaviest rain", snow: "most snow" }
   const markNote = marks.length ? (fams.map((f) => NOTE[f]).find(Boolean) ?? null) : null
-  return { title, cog, ramp: g?.ramp ?? null, marks, markNote, bounds, req }
+  const markLabel = marks.length ? (fams.map((f) => SHORT[f]).find(Boolean) ?? null) : null
+  return { title, cog, ramp: g?.ramp ?? null, marks, markNote, markLabel, bounds, req }
 }
