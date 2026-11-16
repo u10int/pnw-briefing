@@ -9,7 +9,7 @@ import argparse
 import json
 import logging
 import math
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -17,7 +17,7 @@ import numpy as np
 import yaml
 
 from . import (alerts, analysis, avalanche, change, climo, coast, cogs, context, convective, eccc_alerts, extremes, fields, fronts, impacts, landslide,
-               maps, nbmprob, normals, observed, obsreports, odds, outlooks, report, rivers, snowpack, summary, tempdep, timing, trends, urma, verify, wildfire)
+               maps, nbmprob, normals, observed, obsreports, odds, outlooks, report, rivers, snowpack, summary, tempdep, timing, trends, urma, verify, waves, wildfire)
 from .grib import day0, day12, first_day_hours
 
 ROOT = Path(__file__).resolve().parent
@@ -148,6 +148,12 @@ def collect(cfg: dict, out: Path, demo: bool = False, products: bool = True) -> 
     }
     field_manifest = safe("hourly fields", lambda: fields.export(grib_models, cfg, out / "fields"), []) \
         if products and grib_models else []
+    # the wave forecast (GFS-Wave), on the GFS run the briefing used when it's there
+    gfs_run = next((m["run"] for m in grib_models if m.get("id") == "gfs" and m.get("run")), None)
+    wave = safe("wave forecast grids", lambda: waves.fetch(cfg, datetime.now(timezone.utc), gfs_run)) \
+        if products and not demo else None
+    if wave:
+        field_manifest += safe("wave fields", lambda: waves.export_fields(wave, out / "fields"), [])
     if products:
         (out / "fields.json").write_text(json.dumps(clean({"fields": field_manifest})), encoding="utf-8")
     cog_manifest = safe("GeoTIFF export", lambda: cogs.export(grib_models, cfg, out / "cogs", norm_grid), []) \
@@ -158,6 +164,8 @@ def collect(cfg: dict, out: Path, demo: bool = False, products: bool = True) -> 
             cog_manifest += safe("observed GeoTIFFs", lambda: observed.export(obs_grids, out / "cogs"), [])
         if tnorm_grid and grib_models:
             cog_manifest += safe("temperature departure maps", lambda: tempdep.grids(grib_models, cfg, tnorm_grid, out / "cogs"), [])
+        if wave:
+            cog_manifest += safe("wave maps", lambda: waves.export_cogs(wave, wins, start, out / "cogs"), [])
 
     # ---- per-window totals by model (regions and points)
     totals = []
@@ -253,6 +261,7 @@ def collect(cfg: dict, out: Path, demo: bool = False, products: bool = True) -> 
         "snowpack": safe("snowpack", lambda: snowpack.fetch(cfg, demo)) if products else None,
         # buoys, wave forecast, tides against flood levels and marine warnings
         "coast": safe("coast and marine", lambda: coast.fetch(cfg, demo)) if products else None,
+        "waveGrid": waves.summary(wave, wins, start) if wave else None,
         # what stations and NWS storm reports have measured at each location over the last few days
         "obsReports": safe("observed reports", lambda: obsreports.fetch(cfg, demo)) if products else None,
         "outlooks": safe("NWS discussions and outlooks", lambda: outlooks.fetch(cfg, demo)) if products else None,

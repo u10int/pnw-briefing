@@ -36,6 +36,12 @@ export const WAVE: Ramp = {
   levels: [1, 3, 5, 8, 10, 12, 15, 20, 25, 30],
   colors: ["#e3f1fb", "#c3e0f5", "#9ccbec", "#6fb0de", "#4a90cf", "#f3d36b", "#f2a541", "#e5683b", "#c9302c", "#8e1f63"],
 }
+/** Peak wave period: short wind chop in pale blues, long-period swell in deep purples. */
+export const WPER: Ramp = {
+  label: "Peak wave period", units: "s",
+  levels: [4, 6, 8, 10, 12, 14, 16, 18, 20],
+  colors: ["#e6f4f1", "#c2e6de", "#8fd0c4", "#5bb5ad", "#3a92a0", "#356f98", "#3b4f8c", "#3d2f78", "#2d1a52"],
+}
 /** Probability (% of ensemble members); below 5% is left clear. */
 export const PROB: Ramp = {
   label: "Chance", units: "%",

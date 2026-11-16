@@ -37,7 +37,7 @@ import { colorLut, frac, frzColor, heightLut, heightRgb, hexRgb, ISO_BY_HEIGHT, 
   isDerived, LEVEL_VIEWS, pressureAtKm, viewVar, VIEW_LABEL, VOL_ORDER, type VolumeEntry, type VolumeVar, type VolVar } from "@/lib/volume"
 import { levelOverlay, pointCloud, trajectories } from "@/lib/volume-overlays"
 import { type Grid, mercY, sameGrid } from "@/lib/gl/util"
-import { AR_COLORS, AR_LABELS, FLOOD_COLORS, FLOOD_LABELS, FRZ, GUST, IVT, legendBins, PCT, PGRAD, PRECIP, PROB, PTYPE_COLORS, PTYPE_NAMES, type Ramp, REFC, RH, SMOKE, SNOW, SPREAD, TDEP, TEMP, WIND } from "@/lib/ramps"
+import { AR_COLORS, AR_LABELS, FLOOD_COLORS, FLOOD_LABELS, FRZ, GUST, IVT, legendBins, PCT, PGRAD, PRECIP, PROB, PTYPE_COLORS, PTYPE_NAMES, type Ramp, REFC, RH, SMOKE, SNOW, SPREAD, TDEP, TEMP, WAVE, WIND, WPER } from "@/lib/ramps"
 import { contrastTextColor } from "@/lib/contrast"
 import type { ArCoast, Briefing, Cog, Convective, ExtremeVar, FrontFrame, Fronts, ObsReport, RiverGauge, Wildfire, Rivers, FieldEntry, FieldsManifest, FieldVar, Gradient } from "@/types"
 import { ptDayHour } from "@/lib/format"
@@ -1380,7 +1380,7 @@ const categoryAt = (g: Grid, a: Float32Array, b: Float32Array | null, t: number,
 
 // ------------------------------------------------------------------ totals mode
 
-type TotVar = "precip" | "snow" | "spread" | "pct" | ExtremeVar | "p24" | "p72" | "obs" | "obspct" | "tmaxdep" | "tmindep" | "ar" | "rivers" | "storms"
+type TotVar = "precip" | "snow" | "spread" | "pct" | ExtremeVar | "p24" | "p72" | "obs" | "obspct" | "tmaxdep" | "tmindep" | "ar" | "rivers" | "storms" | "waves"
 type TotGroup = "Totals" | "Extremes" | "Vs normal" | "Odds" | "Observed" | "Outlooks"
 const GROUP_LABEL: Record<TotGroup, string> = {
   Totals: "Totals", Extremes: "Extremes over the window", "Vs normal": "Temperature vs normal", Odds: "Ensemble odds", Observed: "Already fallen (MRMS)",
@@ -1396,6 +1396,7 @@ const TOT_VARS: { id: TotVar; label: string; group: TotGroup; ramp: Ramp; perMod
   { id: "tmin", label: "Lowest temperature", group: "Extremes", ramp: { ...TEMP, label: "Lowest temperature at 2 m" }, perModel: true, digits: 0 },
   { id: "wind", label: "Strongest wind", group: "Extremes", ramp: { ...WIND, label: "Strongest sustained wind at 10 m" }, perModel: true, digits: 0 },
   { id: "gust", label: "Strongest gust", group: "Extremes", ramp: { ...GUST, label: "Strongest gust" }, perModel: true, digits: 0 },
+  { id: "waves", label: "Highest waves", group: "Extremes", ramp: { ...WAVE, label: "Highest significant wave height (GFS-Wave)" }, perModel: true, digits: 0 },
   { id: "p24", label: "Chance of 1\" in a day", group: "Odds", ramp: { ...PROB, label: "Chance of 1\" or more in 24 hours, pooled ensembles" }, perModel: false, digits: 0, suffix: "% of members" },
   { id: "p72", label: "Chance of 3\" in 3 days", group: "Odds", ramp: { ...PROB, label: "Chance of 3\" or more in 72 hours, pooled ensembles" }, perModel: false, digits: 0, suffix: "% of members" },
   { id: "obs", label: "Observed precipitation", group: "Observed", ramp: { ...PRECIP, label: "Observed precipitation (MRMS)" }, perModel: false, digits: 2 },
@@ -1621,8 +1622,8 @@ function ArLegend() {
 
 // ------------------------------------------------------------------ hourly mode
 
-type HLayer = "radar" | "apcp" | "asnow" | "t2m" | "gust" | "wind" | "frz" | "ivt" | "pgrad" | "rh" | "smoke"
-type HGroup = "Precipitation" | "Temperature" | "Wind and pressure" | "Fire weather"
+type HLayer = "radar" | "apcp" | "asnow" | "t2m" | "gust" | "wind" | "frz" | "ivt" | "pgrad" | "rh" | "smoke" | "waves" | "wper"
+type HGroup = "Precipitation" | "Temperature" | "Wind and pressure" | "Marine" | "Fire weather"
 const HLAYERS: { id: HLayer; label: string; group: HGroup; primary: (e: Record<string, FieldEntry>) => FieldEntry | undefined }[] = [
   { id: "radar", label: "Radar and precip type", group: "Precipitation", primary: (e) => e.refc ?? e.ptype },
   { id: "apcp", label: "Accumulated precipitation", group: "Precipitation", primary: (e) => e.apcp },
@@ -1635,13 +1636,17 @@ const HLAYERS: { id: HLayer; label: string; group: HGroup; primary: (e: Record<s
   { id: "pgrad", label: "Pressure gradient", group: "Wind and pressure", primary: (e) => e.mslp },
   { id: "rh", label: "Relative humidity", group: "Fire weather", primary: (e) => e.rh },
   { id: "smoke", label: "Near-surface smoke", group: "Fire weather", primary: (e) => e.smoke },
+  { id: "waves", label: "Wave height", group: "Marine", primary: (e) => e.wave },
+  { id: "wper", label: "Wave period", group: "Marine", primary: (e) => e.wper },
 ]
-const H_GROUPS: HGroup[] = ["Precipitation", "Temperature", "Wind and pressure", "Fire weather"]
+const H_GROUPS: HGroup[] = ["Precipitation", "Temperature", "Wind and pressure", "Marine", "Fire weather"]
 const APCP: Ramp = { ...PRECIP, label: "Accumulated precipitation, liquid equivalent" }
 const ASNOW: Ramp = { ...SNOW, label: "Accumulated snowfall" }
-/** The vector pair a layer's particles follow: water vapor transport on the IVT layer, else the 10 m wind. */
+/** The vector pair a layer's particles follow: water vapor transport on the IVT layer, the waves'
+ *  travel on the wave layers (faster for longer periods), else the 10 m wind. */
 const flowOf = (layer: HLayer, e: Record<string, FieldEntry>) =>
   layer === "ivt" ? (e.ivtu && e.ivtv ? { u: e.ivtu, v: e.ivtv, scale: 1 / 25 } : null)
+    : layer === "waves" || layer === "wper" ? (e.wu && e.wv ? { u: e.wu, v: e.wv, scale: 1 } : null)
     : (e.u10 && e.v10 ? { u: e.u10, v: e.v10, scale: 1 } : null)
 // every 2 hPa: this view is only ~7° across, where 4 hPa leaves one or two lines outside a strong storm
 const ISOBARS = Array.from({ length: 62 }, (_, i) => 940 + 2 * i)
@@ -1732,7 +1737,7 @@ function hourlyView(model: string, entries: Record<string, FieldEntry>, layer: H
   // observed frames only stand for the time they were taken; model steps cover the hours around them
   const tol = prim.tier === "observed" ? 0.4 : 3.1
   const nearest = (time: number | null) => (time == null ? null : bracket(prim.times, time, false, tol))
-  const ramp = layer === "t2m" ? TEMP : layer === "gust" ? GUST : layer === "wind" ? WIND : layer === "ivt" ? IVT : layer === "pgrad" ? PGRAD
+  const ramp = layer === "waves" ? WAVE : layer === "wper" ? WPER : layer === "t2m" ? TEMP : layer === "gust" ? GUST : layer === "wind" ? WIND : layer === "ivt" ? IVT : layer === "pgrad" ? PGRAD
     : layer === "apcp" ? APCP : layer === "asnow" ? ASNOW : layer === "rh" ? RH : layer === "smoke" ? SMOKE : FRZ
 
   return {
@@ -1815,6 +1820,23 @@ function hourlyView(model: string, entries: Record<string, FieldEntry>, layer: H
             }
           } else {
             draw = { grid: f, a: A, b: B, paint: { kind: "ramp", ramp } }
+            // the wave layers read out height, period and the direction the waves come from together
+            let waveText = (_lon: number, _lat: number, _t: number, _smooth: boolean): string | null => null
+            if (layer === "waves" || layer === "wper") {
+              const [oa, ua, va] = await Promise.all([bandNear(layer === "waves" ? entries.wper : entries.wave, isoA),
+                                                      bandNear(entries.wu, isoA), bandNear(entries.wv, isoA)])
+              waveText = (lon, lat, t, smooth) => {
+                const v = blendAt(f, A, B, t, lon, lat, smooth)
+                if (!Number.isFinite(v)) return null
+                const o = oa ? valueAt(oa.f, oa.data, lon, lat, smooth) : NaN
+                const h = layer === "waves" ? v : o, T = layer === "wper" ? v : o
+                const u = ua ? valueAt(ua.f, ua.data, lon, lat, smooth) : NaN, w = va ? valueAt(va.f, va.data, lon, lat, smooth) : NaN
+                const parts = [Number.isFinite(h) ? `Waves ${h < 10 ? h.toFixed(1) : Math.round(h)} ft` : null,
+                               Number.isFinite(T) ? `${Math.round(T)} s` : null,
+                               Number.isFinite(u) && Number.isFinite(w) && Math.hypot(u, w) > 0 ? `from the ${windFrom(u, w)}` : null]
+                return parts.filter(Boolean).join(", ")
+              }
+            }
             describe = (lon, lat, t, smooth) => {
               const v = blendAt(f, A, B, t, lon, lat, smooth)
               if (!Number.isFinite(v)) return null
@@ -1824,6 +1846,7 @@ function hourlyView(model: string, entries: Record<string, FieldEntry>, layer: H
               if (layer === "asnow") return v < 0.05 ? "No snow yet" : `${v.toFixed(1)} in of snow so far`
               if (layer === "rh") return `Humidity ${Math.round(v)}%`
               if (layer === "smoke") return v < 1 ? "No smoke" : `Smoke ${Math.round(v)} µg/m³`
+              if (layer === "waves" || layer === "wper") return waveText(lon, lat, t, smooth)
               return `Freezing level ${(Math.round(v / 100) * 100).toLocaleString("en-US")} ft`
             }
           }
@@ -2528,7 +2551,7 @@ export function InteractiveMap({ data, request, active = true, standalone = fals
     opened.current = true
     if (request) return
     const top = summarize(data).filter((x) => x.tone !== "quiet").sort((a, b) => (b.tone === "alert" ? 1 : 0) - (a.tone === "alert" ? 1 : 0))[0]
-    const want: TotVar[] = !top ? [] : top.tab === "wind" || top.tab === "coast" ? ["gust"] : top.tab === "snow" ? ["snow"]
+    const want: TotVar[] = !top ? [] : top.tab === "coast" ? ["waves", "gust"] : top.tab === "wind" ? ["gust"] : top.tab === "snow" ? ["snow"]
       : top.tab === "temp" ? ["tmaxdep", "tmax"] : ["precip"]
     const v = want.find((x) => totAvail.some((t) => t.id === x))
     if (v) setVariable(v)
@@ -3033,7 +3056,7 @@ export function InteractiveMap({ data, request, active = true, standalone = fals
           ...(mode === "hourly" ? [
             entriesA.mslp && <OptionRow key="iso" id="isobars" label="Isobars" checked={isobars} onChange={setIsobars} />,
             pairList.length > 0 && <OptionRow key="pairs" id="pairs" label="Gradient pairs" checked={showPairs} onChange={setShowPairs} />,
-            hasWind && <OptionRow key="part" id="particles" label={layer === "ivt" ? "Moisture particles" : "Wind particles"} checked={particles} onChange={setParticles} />,
+            hasWind && <OptionRow key="part" id="particles" label={layer === "ivt" ? "Moisture particles" : layer === "waves" || layer === "wper" ? "Wave particles" : "Wind particles"} checked={particles} onChange={setParticles} />,
             satAll && (
               <div key="sat" className="flex items-center justify-between gap-4 py-1">
                 <Label className="font-normal">Satellite</Label>
@@ -3235,12 +3258,13 @@ export function InteractiveMap({ data, request, active = true, standalone = fals
           layer === "smoke" && { label: "Smoke", text: <>HRRR and RRFS near-surface smoke (8 m). 55 µg/m³ and up is unhealthy for everyone.</> },
           layer === "wind" && { label: "Wind", text: showParticles ? <>Particles trace the 10 m wind; faster particles mean stronger wind.</> : <>Arrows point the way the wind is blowing; longer arrows are stronger winds.</> },
           layer === "frz" && { label: "Freezing level", text: <>Snow usually reaches the ground about 1,000 ft below it.</> },
+          (layer === "waves" || layer === "wper") && { label: layer === "waves" ? "Wave height" : "Wave period", text: <>NOAA's GFS-Wave (WAVEWATCH III) model on its 0.16° grid: {layer === "waves" ? "significant wave height, the average of the highest third of waves (the biggest single waves can be nearly twice that)" : "the peak period, the time between the most energetic waves; long-period swell carries more energy and runs up farther on the beach"}.{showParticles ? " Particles move the way the waves are travelling, faster for longer periods." : ""} Land and sheltered inland waters the model doesn't resolve are blank.</> },
           layer === "pgrad" && { label: "Pressure gradient", text: <>How fast sea-level pressure changes with distance, from the smoothed field; gap flows (Gorge, Fraser, Strait) pack tighter. Mountain cells (mean height above 600 m, or peaks above 1,400 m) are blank: sea-level pressure there is an extrapolation, and its gradient would mostly trace the terrain.</> },
           layer === "ivt" && { label: "Water vapour transport", text: <>Vertically integrated (GFS and ECMWF AIFS), the measure behind the atmospheric-river scale{showParticles ? "; particles follow the moisture flow" : ""}.</> },
         ] },
         { title: "Overlays", items: [
           mode !== "totals" && showPairs && pairList.length > 0 && { label: "Station pairs", text: <>Lines join each gradient pair, labelled with this model's pressure difference (hPa, first station minus second). Arrowheads point from high to low pressure, the way the gap flow blows; amber and red mark the pair's first and second thresholds, as on the pressure gradient card.</> },
-          mode !== "totals" && showParticles && layer !== "wind" && layer !== "ivt" && { label: "Wind particles", text: <>They trace the 10 m wind.</> },
+          mode !== "totals" && showParticles && layer !== "wind" && layer !== "ivt" && layer !== "waves" && layer !== "wper" && { label: "Wind particles", text: <>They trace the 10 m wind.</> },
           mode !== "totals" && isobars && entriesA.mslp && { label: "Isobars", text: <>Sea-level pressure every 2 hPa; heavier, labelled lines every 4 hPa. H and L mark pressure centres.</> },
           frontsOn && { label: "Fronts", text: <>The Weather Prediction Center's surface analyses every 3 hours for the last day, then its forecast chart once a day for days 1 – 3, so they move in steps rather than with each model hour. Symbols point the way the front is moving.</> },
           reportsOn && { label: "Storm reports", text: <>NWS storm reports and report summaries from the last {data.obsReports?.reportHours ?? 48} hours; gusts in mph, amounts in inches.</> },

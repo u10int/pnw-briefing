@@ -2,7 +2,7 @@
  *  places to mark, and the area to frame. Worked out from the headline's wording (the same way the
  *  overview strip finds the headline's hazard), so the preview map always matches the text. */
 import type { MapRequest } from "@/lib/maplink"
-import { GUST, PRECIP, type Ramp, SNOW, TEMP } from "@/lib/ramps"
+import { GUST, PRECIP, type Ramp, SNOW, TEMP, WAVE } from "@/lib/ramps"
 import type { Briefing, Cog, ImpactEvent } from "@/types"
 
 export interface Mark { lon: number; lat: number; label: string }
@@ -23,6 +23,7 @@ export interface Focus {
 type Fam = "wind" | "surf" | "rain" | "snow" | "heat" | "cold" | "river"
 const GRID: Partial<Record<Fam, { v: Cog["var"]; ramp: Ramp; label: string }>> = {
   wind: { v: "gust", ramp: { ...GUST, label: "Strongest gust" }, label: "Strongest gust" },
+  surf: { v: "waves", ramp: { ...WAVE, label: "Highest waves" }, label: "Highest waves" },
   rain: { v: "precip", ramp: PRECIP, label: "Precipitation" },
   snow: { v: "snow", ramp: SNOW, label: "Snowfall" },
   heat: { v: "tmax", ramp: { ...TEMP, label: "Highest temperature" }, label: "Highest temperature" },
@@ -91,17 +92,22 @@ export function headlineFocus(data: Briefing, fallbackHazard?: string | null): F
     }
   }
 
-  // the grid: the first family with one, else wind for a surf headline (the wind drives the waves)
-  const gf = fams.find((f) => GRID[f]) ?? (fams.includes("surf") ? "wind" : null)
+  // the grid: the first family the headline names that has one (high surf: the wave forecast,
+  // else the wind behind it)
+  const cands = fams.flatMap((f) => (f === "surf" ? ["surf", "wind"] : [f])).filter((f) => GRID[f as Fam]) as Fam[]
   let cog: Cog | null = null
-  const g = gf ? GRID[gf]! : null
-  if (g) {
+  let g: (typeof GRID)[Fam] | null = null
+  for (const f of cands) {
+    const gg = GRID[f]!
     const need = Math.max(1, data.dates.indexOf(lastDay) + 1)
-    const of = (data.cogs ?? []).filter((c) => c.var === g.v)
+    const of = (data.cogs ?? []).filter((c) => c.var === gg.v)
+    if (!of.length) continue
     const days = [...new Set(of.map((c) => c.days))].sort((a, b) => a - b)
     const d = days.find((x) => x >= need) ?? days[days.length - 1]
     const at = of.filter((c) => c.days === d)
     cog = at.find((c) => c.model === "Model mean") ?? at.find((c) => c.tier === "regional") ?? at[0] ?? null
+    g = gg
+    if (cog) break
   }
   if (!cog && !marks.length) return null
 
@@ -117,7 +123,7 @@ export function headlineFocus(data: Briefing, fallbackHazard?: string | null): F
     bounds = [[w, s], [e, n]]
   }
   const win = cog ? data.windows.find((w) => w.days === cog!.days)?.label.toLowerCase() ?? `next ${cog.days} days` : null
-  const title = g && cog ? `${g.label}, ${win}` : fams.includes("river") ? "Rivers forecast to flood" : "High surf"
+  const title = g && cog ? `${g.label}, ${win}${cog.model === "GFS-Wave" ? " (GFS-Wave)" : ""}` : fams.includes("river") ? "Rivers forecast to flood" : "High surf"
   const req: MapRequest = cog ? { mode: "totals", variable: cog.var, days: cog.days, model: cog.model } : { mode: "totals", variable: "rivers" }
   const NOTE: Partial<Record<Fam, string>> = {
     surf: "Labels: highest waves at the offshore forecast points", river: "Marked: rivers forecast to flood",

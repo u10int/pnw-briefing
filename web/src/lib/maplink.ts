@@ -3,7 +3,7 @@
 export interface MapRequest {
   /** left out: keep whatever the map is showing (for a request that only turns overlays on) */
   mode?: "totals" | "hourly"
-  layer?: "radar" | "apcp" | "asnow" | "t2m" | "gust" | "wind" | "frz" | "ivt" | "pgrad" | "rh" | "smoke"
+  layer?: "radar" | "apcp" | "asnow" | "t2m" | "gust" | "wind" | "frz" | "ivt" | "pgrad" | "rh" | "smoke" | "waves" | "wper"
   variable?: string
   days?: number
   isobars?: boolean

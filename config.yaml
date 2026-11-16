@@ -391,6 +391,17 @@ coast:
     - {id: "9447130", name: Seattle,       near: Seattle, area: Strait and Puget Sound}
     - {id: "9446484", name: Tacoma,        near: Tacoma, area: Strait and Puget Sound}
 
+# Gridded wave forecast for the map (briefing/waves.py): NOAA GFS-Wave (WAVEWATCH III) on its global
+# 0.16° grid (the West Coast grid stops at 50°N). Hourly to `hourly_hours`, then every `step` hours
+# to `max_hours`; the map's hourly wave height and period layers and the summary map's highest
+# waves for each window it reaches.
+waves:
+  enabled: true
+  product: global.0p16
+  hourly_hours: 48
+  step: 3
+  max_hours: 240
+
 # Snowpack: SNOTEL stations within `radius_km` of each area's centre. Percent of median is shown
 # once the area's median SWE reaches `min_median_in` (early-season medians are near zero).
 snowpack:
