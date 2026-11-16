@@ -71,6 +71,7 @@ export function HeadlineMap({ data }: { data: Briefing }) {
     let loaded = false, fellBack = false
     m.on("error", () => { if (!loaded && !fellBack && !m.isStyleLoaded()) { fellBack = true; m.setStyle(FALLBACK) } })
     const grid = new GridLayer("hl-grid")
+    ;(window as unknown as { __hl: unknown }).__hl = m
     m.on("load", () => {
       loaded = true
       // the attribution starts folded to its (i) button, so it doesn't cover the marks
