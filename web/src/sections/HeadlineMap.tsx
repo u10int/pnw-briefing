@@ -106,15 +106,15 @@ export function HeadlineMap({ data }: { data: Briefing }) {
   if (!focus) return null
   const open = () => openOnMap(focus.req)
   return (
-    <figure className="relative overflow-hidden rounded-xl border">
+    <figure className="relative max-w-[640px] overflow-hidden rounded-xl border">
       <div ref={el} role="img" aria-label={`Map: ${focus.title}${focus.markNote ? `. ${focus.markNote}` : ""}`} onClick={open}
            className="h-[220px] w-full cursor-pointer max-sm:h-[200px]" />
       <Button variant="outline" size="sm" onClick={open} className="absolute top-2.5 right-2.5 bg-background/95 shadow-xs">
         <MapIcon className="size-4" />Open map
       </Button>
-      <figcaption className="pointer-events-none absolute bottom-2.5 left-2.5 max-w-[calc(100%-60px)] rounded-md bg-background/90 px-2 py-1 text-xs shadow-xs">
+      <figcaption className="pointer-events-none absolute bottom-2.5 left-2.5 max-w-[calc(100%-48px)] truncate rounded-md bg-background/90 px-2 py-1 text-xs shadow-xs">
         <span className="font-medium">{focus.title}</span>
-        {focus.marks.length > 0 && focus.markLabel && <span className="text-muted-foreground"> · {focus.markLabel} labelled</span>}
+        {focus.marks.length > 0 && focus.markLabel && <span className="text-muted-foreground max-sm:hidden"> · {focus.markLabel} labelled</span>}
         {failed && <span className="text-muted-foreground"> (couldn't load)</span>}
       </figcaption>
     </figure>
