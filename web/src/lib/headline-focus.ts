@@ -12,6 +12,8 @@ export interface Focus {
   cog: Cog | null
   ramp: Ramp | null
   marks: Mark[]
+  /** what the labels on the marks are */
+  markNote: string | null
   /** the area to frame, [[west, south], [east, north]] */
   bounds: [[number, number], [number, number]]
   req: MapRequest
@@ -116,5 +118,11 @@ export function headlineFocus(data: Briefing, fallbackHazard?: string | null): F
   const win = cog ? data.windows.find((w) => w.days === cog!.days)?.label.toLowerCase() ?? `next ${cog.days} days` : null
   const title = g && cog ? `${g.label}, ${win}` : fams.includes("river") ? "Rivers forecast to flood" : "High surf"
   const req: MapRequest = cog ? { mode: "totals", variable: cog.var, days: cog.days, model: cog.model } : { mode: "totals", variable: "rivers" }
-  return { title, cog, ramp: g?.ramp ?? null, marks, bounds, req }
+  const NOTE: Partial<Record<Fam, string>> = {
+    surf: "Labels: highest waves at the offshore forecast points", river: "Marked: rivers forecast to flood",
+    wind: "Labels: peak gust at each affected location", rain: "Labels: heaviest rain at each affected location",
+    snow: "Labels: most snow at each affected location", heat: "Labels: highest temperature", cold: "Labels: lowest temperature",
+  }
+  const markNote = marks.length ? (fams.map((f) => NOTE[f]).find(Boolean) ?? null) : null
+  return { title, cog, ramp: g?.ramp ?? null, marks, markNote, bounds, req }
 }

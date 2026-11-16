@@ -20,12 +20,12 @@ const lvl = (es: ImpactEvent[]) => (es.some((e) => e.level === "likely") ? "like
  *  else the summary cards' most severe that has one. One in the next few days (as the headline
  *  is) wins over a later one in any family; within a family, likely first, then the earliest.
  *  A river-flooding headline names no impact event (it's about gauges), so it falls through to
- *  the cards. */
+ *  the cards; a high-surf one takes the wind behind it. */
 export function leadEvent(data: Briefing): ImpactEvent | null {
   const RANK = { alert: 2, watch: 1, quiet: 0 } as const
   const fam: Record<string, string[]> = { wind: ["wind"], coast: ["wind"], precip: ["rain"], flood: ["flood", "rain"], snow: ["snow"], temp: ["temp"] }
   const h = (data.summary?.headline ?? "").toLowerCase()
-  const named = /\brivers?\b/.test(h) && !/atmospheric river/.test(h) ? [] : /wind|gust/.test(h) ? ["wind"] : /atmospheric river|flood/.test(h) ? ["flood", "rain"] : /rain/.test(h) ? ["rain", "flood"]
+  const named = /\brivers?\b/.test(h) && !/atmospheric river/.test(h) ? [] : /wind|gust|surf|waves?\b/.test(h) ? ["wind"] : /atmospheric river|flood/.test(h) ? ["flood", "rain"] : /rain/.test(h) ? ["rain", "flood"]
     : /snow/.test(h) ? ["snow"] : /freez|heat|cold|warm/.test(h) ? ["temp"] : []
   const order = [...named, ...summarize(data).filter((s) => s.tone !== "quiet").sort((a, b) => RANK[b.tone] - RANK[a.tone]).flatMap((s) => fam[s.tab] ?? [])]
   // the headline's near term: through three days after the issue date (Pacific)
