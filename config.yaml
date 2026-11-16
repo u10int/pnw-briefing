@@ -401,6 +401,9 @@ waves:
   hourly_hours: 48
   step: 3
   max_hours: 240
+  # Environment Canada's RDWPS on its national 2.5 km grid (MSC Datamart), hourly to 48 h: the
+  # inland waters GFS-Wave is too coarse for. Resampled to `res`° over the water west of `lon_max`.
+  rdwps: {enabled: true, hours: 48, res: 0.03, lon_max: -121.9}
 
 # Snowpack: SNOTEL stations within `radius_km` of each area's centre. Percent of median is shown
 # once the area's median SWE reaches `min_median_in` (early-season medians are near zero).

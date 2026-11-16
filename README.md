@@ -134,8 +134,11 @@ below are described in that order of content, not page order.
   freezing level, water vapor transport (IVT, GFS and ECMWF AIFS) on the atmospheric-river
   scale, and pressure-gradient strength (hPa per 100 km from the smoothed sea-level pressure, with
   mountain cells left blank because sea-level pressure there is extrapolated), and wave height and
-  peak period from NOAA's GFS-Wave (WAVEWATCH III, global 0.16° grid, hourly to 48 h then 3-hourly
-  to 10 days; `waves` in config.yaml), read out with the direction the waves come from. Overlays: isobars
+  peak period from two wave models (`waves` in config.yaml), read out with the direction the waves
+  come from: NOAA's GFS-Wave (WAVEWATCH III, global 0.16° grid, hourly to 48 h then 3-hourly to
+  10 days) and Environment Canada's RDWPS (WAVEWATCH III with the 2.5 km HRDPS winds, 2.5 km grid,
+  hourly to 48 h), the one that resolves the Strait of Juan de Fuca, the Strait of Georgia and the
+  main basin of Puget Sound. Overlays: isobars
   every 2 hPa (labelled every 4, with H and L at pressure centres); the gradient station pairs as
   lines coloured by each pair's thresholds, labelled with the model's difference and with
   arrowheads from high to low pressure; and animated particles that follow the wind, or the

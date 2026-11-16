@@ -33,8 +33,9 @@ export const SPREAD: Ramp = {
  *  25 ft+ of a big storm. */
 export const WAVE: Ramp = {
   label: "Significant wave height", units: "ft",
-  levels: [1, 3, 5, 8, 10, 12, 15, 20, 25, 30],
-  colors: ["#e3f1fb", "#c3e0f5", "#9ccbec", "#6fb0de", "#4a90cf", "#f3d36b", "#f2a541", "#e5683b", "#c9302c", "#8e1f63"],
+  // from half a foot, so calm inland water still shows as forecast water rather than blank
+  levels: [0.5, 1, 3, 5, 8, 10, 12, 15, 20, 25, 30],
+  colors: ["#f2f8fc", "#e3f1fb", "#c3e0f5", "#9ccbec", "#6fb0de", "#4a90cf", "#f3d36b", "#f2a541", "#e5683b", "#c9302c", "#8e1f63"],
 }
 /** Peak wave period: short wind chop in pale blues, long-period swell in deep purples. */
 export const WPER: Ramp = {
