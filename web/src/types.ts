@@ -309,7 +309,7 @@ export interface Briefing {
   // the headline and lead, written at build time from the briefing's facts; absent before it was added
   summary?: { headline: string; lede: string; source: "openai" | "rules"; model?: string } | null
   coast?: Coast | null                                 // buoys, wave forecast, tides and marine warnings
-  waveGrid?: { model: string; run: string; first: string; last: string; source: string } | null   // the GFS-Wave grids on the map
+  waveGrids?: { model: string; run: string; first: string; last: string; source: string }[]   // the wave models' grids on the map
   obsReports?: ObsReports | null                       // station observations and NWS storm reports
   fronts?: Fronts | null                               // WPC surface fronts for the map; absent before it was added
   timing?: PeakTiming | null                           // when gusts and heavy precipitation peak, by location; absent before it was added

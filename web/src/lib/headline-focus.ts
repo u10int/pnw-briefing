@@ -123,7 +123,7 @@ export function headlineFocus(data: Briefing, fallbackHazard?: string | null): F
     bounds = [[w, s], [e, n]]
   }
   const win = cog ? data.windows.find((w) => w.days === cog!.days)?.label.toLowerCase() ?? `next ${cog.days} days` : null
-  const title = g && cog ? `${g.label}, ${win}${cog.model === "GFS-Wave" ? " (GFS-Wave)" : ""}` : fams.includes("river") ? "Rivers forecast to flood" : "High surf"
+  const title = g && cog ? `${g.label}, ${win}${g.v === "waves" ? ` (${cog.model})` : ""}` : fams.includes("river") ? "Rivers forecast to flood" : "High surf"
   const req: MapRequest = cog ? { mode: "totals", variable: cog.var, days: cog.days, model: cog.model } : { mode: "totals", variable: "rivers" }
   const NOTE: Partial<Record<Fam, string>> = {
     surf: "Labels: highest waves at the offshore forecast points", river: "Marked: rivers forecast to flood",

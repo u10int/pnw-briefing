@@ -148,12 +148,14 @@ def collect(cfg: dict, out: Path, demo: bool = False, products: bool = True) -> 
     }
     field_manifest = safe("hourly fields", lambda: fields.export(grib_models, cfg, out / "fields"), []) \
         if products and grib_models else []
-    # the wave forecast (GFS-Wave), on the GFS run the briefing used when it's there
+    # the wave forecasts (GFS-Wave on the GFS run the briefing used when it's there; RDWPS, the latest)
     gfs_run = next((m["run"] for m in grib_models if m.get("id") == "gfs" and m.get("run")), None)
-    wave = safe("wave forecast grids", lambda: waves.fetch(cfg, datetime.now(timezone.utc), gfs_run)) \
-        if products and not demo else None
-    if wave:
-        field_manifest += safe("wave fields", lambda: waves.export_fields(wave, out / "fields"), [])
+    wave_models = [w for w in (
+        safe("wave forecast grids (GFS-Wave)", lambda: waves.fetch(cfg, datetime.now(timezone.utc), gfs_run)),
+        safe("wave forecast grids (RDWPS)", lambda: waves.fetch_rdwps(cfg, datetime.now(timezone.utc))),
+    ) if w] if products and not demo else []
+    for w in wave_models:
+        field_manifest += safe(f"{w['label']} wave fields", lambda w=w: waves.export_fields(w, out / "fields"), [])
     if products:
         (out / "fields.json").write_text(json.dumps(clean({"fields": field_manifest})), encoding="utf-8")
     cog_manifest = safe("GeoTIFF export", lambda: cogs.export(grib_models, cfg, out / "cogs", norm_grid), []) \
@@ -164,8 +166,8 @@ def collect(cfg: dict, out: Path, demo: bool = False, products: bool = True) -> 
             cog_manifest += safe("observed GeoTIFFs", lambda: observed.export(obs_grids, out / "cogs"), [])
         if tnorm_grid and grib_models:
             cog_manifest += safe("temperature departure maps", lambda: tempdep.grids(grib_models, cfg, tnorm_grid, out / "cogs"), [])
-        if wave:
-            cog_manifest += safe("wave maps", lambda: waves.export_cogs(wave, wins, start, out / "cogs"), [])
+        for w in wave_models:
+            cog_manifest += safe(f"{w['label']} wave maps", lambda w=w: waves.export_cogs(w, wins, start, out / "cogs"), [])
 
     # ---- per-window totals by model (regions and points)
     totals = []
@@ -261,7 +263,7 @@ def collect(cfg: dict, out: Path, demo: bool = False, products: bool = True) -> 
         "snowpack": safe("snowpack", lambda: snowpack.fetch(cfg, demo)) if products else None,
         # buoys, wave forecast, tides against flood levels and marine warnings
         "coast": safe("coast and marine", lambda: coast.fetch(cfg, demo)) if products else None,
-        "waveGrid": waves.summary(wave, wins, start) if wave else None,
+        "waveGrids": [waves.summary(w, wins, start) for w in wave_models],
         # what stations and NWS storm reports have measured at each location over the last few days
         "obsReports": safe("observed reports", lambda: obsreports.fetch(cfg, demo)) if products else None,
         "outlooks": safe("NWS discussions and outlooks", lambda: outlooks.fetch(cfg, demo)) if products else None,

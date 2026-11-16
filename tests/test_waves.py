@@ -12,7 +12,7 @@ def _w():
     wave = np.full((n, len(lat), len(lon)), 6.0, dtype="float32")
     wave[30] = 18.0                                    # hour 30: the biggest waves
     wave[:, 0, 0] = np.nan                             # land
-    return {"run": datetime(2026, 11, 16, 12), "hours": hs, "lat": lat, "lon": lon, "wave": wave,
+    return {"id": "gfswave", "label": "GFS-Wave", "tier": "global", "source": "test", "run": datetime(2026, 11, 16, 12), "hours": hs, "lat": lat, "lon": lon, "wave": wave,
             "wper": np.full_like(wave, 12.0), "wu": np.zeros_like(wave), "wv": np.zeros_like(wave)}
 
 
@@ -42,3 +42,11 @@ def test_group_speed_points_where_waves_head():
     to = np.deg2rad(270 + 180.0)
     cg = waves.G * 12 / (4 * np.pi) * waves.MS_TO_MPH
     assert abs(cg * np.sin(to) - cg) < 1e-6 and abs(cg * np.cos(to)) < 1e-6
+
+
+def test_rdwps_url_today_and_yesterday():
+    now = datetime(2026, 11, 16, 3)
+    u = waves._rdwps_url(datetime(2026, 11, 15, 18), "HTSGW", 7, now)
+    assert u == ("https://dd.weather.gc.ca/yesterday/model_rdwps/national/2.5km/18/"
+                 "20261115T18Z_MSC_RDWPS_HTSGW_Sfc_RLatLon0.0225_PT007H.grib2")
+    assert "/today/" in waves._rdwps_url(datetime(2026, 11, 16, 0), "HTSGW", 0, now)
