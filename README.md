@@ -127,16 +127,20 @@ below are described in that order of content, not page order.
     travel advice and when the summary ends.
 - **Interactive map.** MapLibre map with two modes. *Summary* shows every gridded model, the
   multi-model mean, spread and percent of normal for each window, plus highest and lowest
-  temperature, strongest wind and strongest gust over each window. *Hourly* steps through
+  temperature, strongest wind and strongest gust over each window, and the highest waves (GFS-Wave)
+  for the windows the wave forecast reaches. *Hourly* steps through
   the forecast with a time slider and play button: simulated radar coloured by precipitation type
   (rain, snow, mix, freezing rain, sleet), 2 m temperature with the 32°F line, gusts, wind, and
   freezing level, water vapor transport (IVT, GFS and ECMWF AIFS) on the atmospheric-river
   scale, and pressure-gradient strength (hPa per 100 km from the smoothed sea-level pressure, with
-  mountain cells left blank because sea-level pressure there is extrapolated). Overlays: isobars
+  mountain cells left blank because sea-level pressure there is extrapolated), and wave height and
+  peak period from NOAA's GFS-Wave (WAVEWATCH III, global 0.16° grid, hourly to 48 h then 3-hourly
+  to 10 days; `waves` in config.yaml), read out with the direction the waves come from. Overlays: isobars
   every 2 hPa (labelled every 4, with H and L at pressure centres); the gradient station pairs as
   lines coloured by each pair's thresholds, labelled with the model's difference and with
   arrowheads from high to low pressure; and animated particles that follow the wind, or the
-  moisture flow on the IVT layer. A *Terrain* switch shades the
+  moisture flow on the IVT layer, or the waves' travel on the wave layers (at the deep-water
+  group speed, so long-period swell moves faster). A *Terrain* switch shades the
   relief over the grids (AWS Terrain Tiles, with everything below sea level flattened so sea-floor
   relief doesn't show through the ocean grids). Both modes hover for values, compare two models
   side by side, and link each grid for download.
