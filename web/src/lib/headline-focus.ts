@@ -105,13 +105,13 @@ export function headlineFocus(data: Briefing, fallbackHazard?: string | null): F
   }
   if (!cog && !marks.length) return null
 
-  // frame the marks, with room around them, never tighter than a couple of degrees
+  // frame the marks with a little room around them, never tighter than a degree or two
   const dom = data.domain
   let bounds: Focus["bounds"] = [[dom.lon_min, dom.lat_min], [dom.lon_max, dom.lat_max]]
   if (marks.length) {
     let w = Math.min(...marks.map((m) => m.lon)), e = Math.max(...marks.map((m) => m.lon))
     let s = Math.min(...marks.map((m) => m.lat)), n = Math.max(...marks.map((m) => m.lat))
-    const padX = Math.max(0.5, (2.6 - (e - w)) / 2), padY = Math.max(0.4, (1.8 - (n - s)) / 2)
+    const padX = Math.max(0.3, (2.0 - (e - w)) / 2), padY = Math.max(0.2, (1.2 - (n - s)) / 2)
     w = Math.max(dom.lon_min, w - padX); e = Math.min(dom.lon_max, e + padX)
     s = Math.max(dom.lat_min, s - padY); n = Math.min(dom.lat_max, n + padY)
     bounds = [[w, s], [e, n]]
