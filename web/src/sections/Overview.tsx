@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button"
 import { dateRange } from "@/lib/format"
 import { summarize } from "@/sections/Hazards"
 import { ChangedSince } from "@/sections/ChangedSince"
+import { HeadlineMap } from "@/sections/HeadlineMap"
 import { ObservedHighlights } from "@/sections/ObsReports"
 import { AgreementBar, OverviewStrip } from "@/sections/OverviewStrip"
 import type { Briefing } from "@/types"
@@ -29,6 +30,7 @@ function Overview({ data }: { data: Briefing }) {
     <Hero data={data}>
       <h1 className="max-w-[24ch] text-[2.75rem] leading-[1.08] font-semibold tracking-tight text-balance max-sm:text-3xl">{s.headline}</h1>
       {s.lede && <p className="max-w-[62ch] text-[17px] leading-relaxed text-pretty text-muted-foreground">{s.lede}</p>}
+      <HeadlineMap data={data} />
     </Hero>
   )
 }

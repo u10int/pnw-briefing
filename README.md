@@ -46,7 +46,9 @@ their commercial tier or swap in Xweather points in `briefing/points.py`.
 
 ## What's on the page
 
-The page opens with an **overview**: the headline and run status, a summary card per hazard tab
+The page opens with an **overview**: the headline and run status, a small preview map of the
+headline's hazard (the grid behind it, framed on and marking the places it's about, opening the
+full map on the same layer), a summary card per hazard tab
 (precip, flooding, wind, snow and mountains, temperature; each flags how notable the forecast is
 and opens its tab), NWS alerts, the impacts table and agreement grid, what changed since
 yesterday, and what NWS forecasters are saying. Below it, **tabs** group the
