@@ -14,8 +14,8 @@ import { leadEvent } from "@/sections/OverviewStrip"
 import type { Briefing } from "@/types"
 
 const cogUrl = (path: string) => (path.startsWith("data:") ? path : `data/${path}`)
-// room for the Open map button above and the attribution below
-const PAD = { top: 50, bottom: 40, left: 24, right: 24 }
+// a little room around the marks for their labels
+const PAD = { top: 28, bottom: 30, left: 24, right: 24 }
 
 type Box = { west: number; south: number; east: number; north: number }
 
@@ -34,7 +34,7 @@ function frame(m: maplibregl.Map, b: [[number, number], [number, number]], marks
     const tight = marks.length
       ? m.cameraForBounds([[Math.min(...marks.map((x) => x[0])), Math.min(...marks.map((x) => x[1]))],
                            [Math.max(...marks.map((x) => x[0])), Math.max(...marks.map((x) => x[1]))]],
-                          { padding: { top: 46, bottom: 36, left: 40, right: 40 }, maxZoom: 9 })?.zoom ?? m.getZoom()
+                          { padding: { top: 26, bottom: 28, left: 40, right: 40 }, maxZoom: 9 })?.zoom ?? m.getZoom()
       : Infinity
     m.jumpTo({ zoom: Math.max(m.getZoom(), Math.min(m.getZoom() + short, tight)) })
   }
@@ -111,7 +111,7 @@ export function HeadlineMap({ data }: { data: Briefing }) {
   return (
     <figure className="relative max-w-[640px] overflow-hidden rounded-xl border">
       <div ref={el} role="img" aria-label={`Map: ${focus.title}${focus.markNote ? `. ${focus.markNote}` : ""}`} onClick={open}
-           className="h-[220px] w-full cursor-pointer max-sm:h-[200px]" />
+           className="h-[260px] w-full cursor-pointer max-sm:h-[220px]" />
       <Button variant="outline" size="sm" onClick={open} className="absolute top-2.5 right-2.5 bg-background/95 shadow-xs">
         <MapIcon className="size-4" />Open map
       </Button>
