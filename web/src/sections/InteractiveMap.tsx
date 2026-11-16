@@ -2549,7 +2549,7 @@ export function InteractiveMap({ data, request, active = true, standalone = fals
   React.useEffect(() => {
     if (opened.current || !totAvail.length) return
     opened.current = true
-    if (request) return
+    if (request || q.has("v")) return                       // a link or the page's own address picked one
     const top = summarize(data).filter((x) => x.tone !== "quiet").sort((a, b) => (b.tone === "alert" ? 1 : 0) - (a.tone === "alert" ? 1 : 0))[0]
     const want: TotVar[] = !top ? [] : top.tab === "coast" ? ["waves", "gust"] : top.tab === "wind" ? ["gust"] : top.tab === "snow" ? ["snow"]
       : top.tab === "temp" ? ["tmaxdep", "tmax"] : ["precip"]
@@ -2976,6 +2976,8 @@ export function InteractiveMap({ data, request, active = true, standalone = fals
           {layer === "frz" && <RampLegend ramp={FRZ} every={2} />}
           {layer === "pgrad" && <RampLegend ramp={PGRAD} note="1 – 2 is typical; 3 and up is windstorm-class." />}
           {layer === "ivt" && <RampLegend ramp={IVT} note="250 and up is atmospheric-river strength." />}
+          {layer === "waves" && <RampLegend ramp={WAVE} note="Significant wave height: the biggest single waves can be nearly twice it." />}
+          {layer === "wper" && <RampLegend ramp={WPER} note="Long-period swell (14 s and up) carries more energy and runs farther up the beach." />}
         </div>
       )}
     </>
