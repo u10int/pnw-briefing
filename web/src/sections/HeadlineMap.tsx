@@ -18,15 +18,32 @@ const cogUrl = (path: string) => (path.startsWith("data:") ? path : `data/${path
 // room for the Open map button above and the attribution below
 const PAD = { top: 56, bottom: 30, left: 24, right: 24 }
 
-/** Frames the bounds, then slides the view back inside the briefing's grid where the card is
- *  wider (or taller) than the bounds, so no edge of it is blank beyond the data. */
-function frame(m: maplibregl.Map, b: [[number, number], [number, number]], dom: Briefing["domain"]) {
+type Box = { west: number; south: number; east: number; north: number }
+
+/**
+ * Frames the bounds, then zooms in as far as the marks allow while the card is wider (or taller)
+ * than the grid, and slides the view back inside the grid, so as little as possible of the card
+ * is basemap beyond the data.
+ */
+function frame(m: maplibregl.Map, b: [[number, number], [number, number]], marks: [number, number][], box: Box) {
   m.fitBounds(b, { padding: PAD, animate: false })
   const v = m.getBounds()
+  // how many zoom steps until the grid spans the card's width (the card is wider than it is tall)
+  const short = Math.log2((v.getEast() - v.getWest()) / (box.east - box.west))
+  if (short > 0) {
+    // as far as the marks still fit (with a little room), up to filling the card's width
+    const tight = marks.length
+      ? m.cameraForBounds([[Math.min(...marks.map((x) => x[0])), Math.min(...marks.map((x) => x[1]))],
+                           [Math.max(...marks.map((x) => x[0])), Math.max(...marks.map((x) => x[1]))]],
+                          { padding: { top: 48, bottom: 16, left: 40, right: 40 }, maxZoom: 9 })?.zoom ?? m.getZoom()
+      : Infinity
+    m.jumpTo({ zoom: Math.max(m.getZoom(), Math.min(m.getZoom() + short, tight)) })
+  }
+  const u = m.getBounds()
   const span = (lo: number, hi: number, dlo: number, dhi: number) =>
     hi - lo >= dhi - dlo ? (dlo + dhi) / 2 - (lo + hi) / 2 : lo < dlo ? dlo - lo : hi > dhi ? dhi - hi : 0
-  const dx = span(v.getWest(), v.getEast(), dom.lon_min, dom.lon_max)
-  const dy = span(v.getSouth(), v.getNorth(), dom.lat_min, dom.lat_max)
+  const dx = span(u.getWest(), u.getEast(), box.west, box.east)
+  const dy = span(u.getSouth(), u.getNorth(), box.south, box.north)
   if (dx || dy) { const c = m.getCenter(); m.jumpTo({ center: [c.lng + dx, c.lat + dy] }) }
 }
 
@@ -47,7 +64,9 @@ export function HeadlineMap({ data }: { data: Briefing }) {
       container: el.current, style: STYLE_URL, transformRequest: withKey, interactive: false,
       attributionControl: { compact: true },
     })
-    frame(m, focus.bounds, data.domain)
+    const marks = focus.marks.map((k) => [k.lon, k.lat] as [number, number])
+    let box: Box = { west: data.domain.lon_min, south: data.domain.lat_min, east: data.domain.lon_max, north: data.domain.lat_max }
+    frame(m, focus.bounds, marks, box)
     let loaded = false, fellBack = false
     m.on("error", () => { if (!loaded && !fellBack && !m.isStyleLoaded()) { fellBack = true; m.setStyle(FALLBACK) } })
     const grid = new GridLayer("hl-grid")
@@ -60,7 +79,12 @@ export function HeadlineMap({ data }: { data: Briefing }) {
       m.addLayer(grid, labels)
       if (focus.cog && focus.ramp) {
         const ramp = focus.ramp
-        loadCog(cogUrl(focus.cog.path)).then((r) => { if (!gone) grid.setDraw({ grid: r, a: r.data, paint: { kind: "ramp", ramp } }) },
+        loadCog(cogUrl(focus.cog.path)).then((r) => {
+          if (gone) return
+          grid.setDraw({ grid: r, a: r.data, paint: { kind: "ramp", ramp } })
+          box = r                                            // frame within the grid itself
+          frame(m, focus.bounds, marks, box)
+        },
           () => { if (!gone) setFailed(true) })
       }
       m.addSource("hl-marks", { type: "geojson", data: { type: "FeatureCollection", features: focus.marks.map((k) => ({
@@ -73,7 +97,7 @@ export function HeadlineMap({ data }: { data: Briefing }) {
                    paint: { "text-color": "#1b1f24", "text-halo-color": "rgba(255,255,255,0.92)", "text-halo-width": 1.6 } })
     })
     // keep the framing when the card changes width
-    const ro = new ResizeObserver(() => { m.resize(); frame(m, focus.bounds, data.domain) })
+    const ro = new ResizeObserver(() => { m.resize(); frame(m, focus.bounds, marks, box) })
     ro.observe(el.current)
     return () => { gone = true; ro.disconnect(); m.remove() }
   }, [focus, data.domain])
@@ -85,7 +109,7 @@ export function HeadlineMap({ data }: { data: Briefing }) {
     <figure className="overflow-hidden rounded-xl border bg-card">
       <div className="relative">
         <div ref={el} role="img" aria-label={`Map: ${focus.title}`} onClick={open}
-             className="h-[260px] w-full cursor-pointer max-sm:h-[220px]" />
+             className="h-[300px] w-full cursor-pointer max-sm:h-[240px]" />
         <Button variant="outline" size="sm" onClick={open} className="absolute top-3 right-3 bg-background/95 shadow-xs">
           <MapIcon className="size-4" />Open map
         </Button>
