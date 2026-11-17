@@ -131,7 +131,12 @@ const MAX = 20000           // drops and flakes at most
 const PER_CELL = 3          // per cell, times the square root of its rate (mm/h, liquid equivalent): the original count
 const SNOW_REST = 1.6        // seconds a landed snowflake lies on the ground (± 30%) before it's gone
 const BOUNCE_G = 0.5         // gravity for bouncing pellets, box heights a second squared (a hop of ~0.35 s)
-const SNOW_SHARE = 0.75     // snow at three quarters of that
+// Snow: flakes are much bigger on screen than a rain streak, and snow's liquid-equivalent rates
+// are small and widespread, so the square root (which lifts light rates) filled whole regions.
+// Snow follows the rate more steeply (rate^0.75) and at 0.55 of it: light snow sparse, heavy
+// snow still well below the same rate of rain.
+const SNOW_SHARE = 0.55
+const SNOW_POW = 0.75
 const START_KM = 3.5        // where they appear (roughly cloud base and below)
 
 type Kind = "rain" | "snow" | "freezing rain" | "sleet" | "mix"
@@ -284,7 +289,7 @@ export class PrecipFx {
         const code = types ? Math.round(types[i]) : 1
         const name = (PTYPE_NAMES[code] ?? "rain") as string
         const kind = name === "none" ? 0 : Math.max(0, (["rain", "snow", "freezing rain", "sleet", "mix"] as string[]).indexOf(name))
-        xs.push((lon - box.lon[0]) / (box.lon[1] - box.lon[0])); ys.push(y); ws.push(Math.sqrt(w) * (kind === 1 ? SNOW_SHARE : 1)); ks.push(kind)
+        xs.push((lon - box.lon[0]) / (box.lon[1] - box.lon[0])); ys.push(y); ws.push(kind === 1 ? SNOW_SHARE * Math.pow(w, SNOW_POW) : Math.sqrt(w)); ks.push(kind)
       }
     }
     const cdf = new Float32Array(ws.length)
