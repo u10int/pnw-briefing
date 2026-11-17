@@ -133,10 +133,11 @@ const SNOW_REST = 1.6        // seconds a landed snowflake lies on the ground (Â
 const BOUNCE_G = 0.5         // gravity for bouncing pellets, box heights a second squared (a hop of ~0.35 s)
 // Snow: flakes are much bigger on screen than a rain streak, and snow's liquid-equivalent rates
 // are small and spread over wide areas (much of it too weak to show on the radar layer), so the
-// square root, which lifts light rates, filled whole regions. Snow follows the rate linearly
-// instead, at 0.4 a mm/h, and starts at 0.6 mm/h (about 0.025 in/h): light snow is a scattering,
-// moderate snow (1 â€“ 2 mm/h) about half the old count, heavy snow (2.5 mm/h and up) about as before.
-const SNOW_PER_MM = 0.4
+// square root, which lifts light rates, filled whole regions. Snow grows faster than the rate
+// instead (rate^1.75), for a clear step from light to heavy, starting at 0.6 mm/h (about
+// 0.025 in/h). Against linear: a third at 0.6 mm/h, half at 1 mm/h, the same at 2.5 mm/h, more above.
+const SNOW_POW = 1.75
+const SNOW_K = 1 / Math.pow(2.5, SNOW_POW)   // weight 1 at 2.5 mm/h
 const SNOW_MIN_MM = 0.6
 const START_KM = 3.5        // where they appear (roughly cloud base and below)
 
@@ -295,7 +296,7 @@ export class PrecipFx {
           if (!rates && d.paint.kind === "refc") w = Math.sqrt(Math.pow(10, v / 10) / 2000)
           if (w < SNOW_MIN_MM) continue
         }
-        xs.push((lon - box.lon[0]) / (box.lon[1] - box.lon[0])); ys.push(y); ws.push(kind === 1 ? SNOW_PER_MM * w : Math.sqrt(w)); ks.push(kind)
+        xs.push((lon - box.lon[0]) / (box.lon[1] - box.lon[0])); ys.push(y); ws.push(kind === 1 ? SNOW_K * Math.pow(w, SNOW_POW) : Math.sqrt(w)); ks.push(kind)
       }
     }
     const cdf = new Float32Array(ws.length)
