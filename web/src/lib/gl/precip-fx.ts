@@ -132,11 +132,12 @@ const PER_CELL = 3          // per cell, times the square root of its rate (mm/h
 const SNOW_REST = 1.6        // seconds a landed snowflake lies on the ground (± 30%) before it's gone
 const BOUNCE_G = 0.5         // gravity for bouncing pellets, box heights a second squared (a hop of ~0.35 s)
 // Snow: flakes are much bigger on screen than a rain streak, and snow's liquid-equivalent rates
-// are small and widespread, so the square root (which lifts light rates) filled whole regions.
-// Snow follows the rate more steeply (rate^0.75) and at 0.55 of it: light snow sparse, heavy
-// snow still well below the same rate of rain.
-const SNOW_SHARE = 0.55
-const SNOW_POW = 0.75
+// are small and spread over wide areas (much of it too weak to show on the radar layer), so the
+// square root, which lifts light rates, filled whole regions. Snow follows the rate linearly
+// instead, at 0.4 a mm/h, and starts at 0.6 mm/h (about 0.025 in/h): light snow is a scattering,
+// moderate snow (1 – 2 mm/h) about half the old count, heavy snow (2.5 mm/h and up) about as before.
+const SNOW_PER_MM = 0.4
+const SNOW_MIN_MM = 0.6
 const START_KM = 3.5        // where they appear (roughly cloud base and below)
 
 type Kind = "rain" | "snow" | "freezing rain" | "sleet" | "mix"
@@ -289,7 +290,12 @@ export class PrecipFx {
         const code = types ? Math.round(types[i]) : 1
         const name = (PTYPE_NAMES[code] ?? "rain") as string
         const kind = name === "none" ? 0 : Math.max(0, (["rain", "snow", "freezing rain", "sleet", "mix"] as string[]).indexOf(name))
-        xs.push((lon - box.lon[0]) / (box.lon[1] - box.lon[0])); ys.push(y); ws.push(kind === 1 ? SNOW_SHARE * Math.pow(w, SNOW_POW) : Math.sqrt(w)); ks.push(kind)
+        if (kind === 1) {
+          // snow from reflectivity alone: the snow Z – R relation (Z = 2000 R²), not rain's
+          if (!rates && d.paint.kind === "refc") w = Math.sqrt(Math.pow(10, v / 10) / 2000)
+          if (w < SNOW_MIN_MM) continue
+        }
+        xs.push((lon - box.lon[0]) / (box.lon[1] - box.lon[0])); ys.push(y); ws.push(kind === 1 ? SNOW_PER_MM * w : Math.sqrt(w)); ks.push(kind)
       }
     }
     const cdf = new Float32Array(ws.length)
