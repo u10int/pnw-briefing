@@ -45,6 +45,48 @@ export function leadEvent(data: Briefing): ImpactEvent | null {
   return null
 }
 
+// ------------------------------------------------------------------ model uncertainty
+
+/** How far apart the models are on a day: at each location, the spread of the middle half of the
+ *  models (interquartile range) in daily rain and in the high and low, each against a reference
+ *  (0.35″ of rain, 10°F: models typically differ by 3 – 4°F even tomorrow), the larger of the two; averaged over the locations. 0 is agreement, 1 and
+ *  up is a wide spread. Needs three models at a location. */
+const UNC_REF = { rain: 0.35, temp: 10 }
+const UNC_LEVELS: { at: number; label: string; color: string }[] = [
+  { at: 0, label: "Low", color: "#f3eee4" },
+  { at: 0.35, label: "Moderate", color: "#ecd3a3" },
+  { at: 0.6, label: "High", color: "#dd9c4c" },
+  { at: 0.9, label: "Very high", color: "#b5611c" },
+]
+const uncLevel = (v: number) => [...UNC_LEVELS].reverse().find((l) => v >= l.at)!
+function quartiles(xs: number[]) {
+  const a = [...xs].sort((x, y) => x - y), q = (p: number) => {
+    const i = (a.length - 1) * p, lo = Math.floor(i), hi = Math.ceil(i)
+    return a[lo] + (a[hi] - a[lo]) * (i - lo)
+  }
+  return [q(0.25), q(0.75)] as const
+}
+interface DayUnc { score: number; rain: number; temp: number; models: number }
+function uncertainty(data: Briefing): (DayUnc | null)[] {
+  return data.dates.map((_, k) => {
+    const per: { s: number; r: number; t: number; n: number }[] = []
+    for (const p of data.points) {
+      const vals = (key: "precipitation_sum" | "temperature_2m_max" | "temperature_2m_min") =>
+        data.models.map((m) => m.data[p.name]?.[key]?.[k]).filter((x): x is number => typeof x === "number" && Number.isFinite(x))
+      const pr = vals("precipitation_sum")
+      if (pr.length < 3) continue
+      const [p25, p75] = quartiles(pr)
+      const iqr = (xs: number[]) => (xs.length >= 3 ? (([a, b]) => b - a)(quartiles(xs)) : 0)
+      const t = Math.max(iqr(vals("temperature_2m_max")), iqr(vals("temperature_2m_min")))
+      const r = p75 - p25
+      per.push({ s: Math.max(r / UNC_REF.rain, t / UNC_REF.temp), r, t, n: pr.length })
+    }
+    if (!per.length) return null
+    const avg = (f: (x: (typeof per)[number]) => number) => per.reduce((a, x) => a + f(x), 0) / per.length
+    return { score: avg((x) => x.s), rain: avg((x) => x.r), temp: avg((x) => x.t), models: Math.round(avg((x) => x.n)) }
+  })
+}
+
 /** The two weeks at a glance: each region's daily rain (model median, averaged over its
  *  locations) as paired bars, and above them a row per hazard with a mark on each day it's
  *  flagged (filled: likely, ring: possible). The headline's hazard days are shaded. */
@@ -59,6 +101,7 @@ export function OverviewStrip({ data }: { data: Briefing }) {
     })
   }, [data])
   const lead = React.useMemo(() => leadEvent(data), [data])
+  const unc = React.useMemo(() => uncertainty(data), [data])
   const dates = data.dates
   const rows = ROWS.map((r) => ({ ...r, es: data.events.filter((e) => r.match(e.hazard)) })).filter((r) => r.es.length)
   const top = Math.max(0.25, ...rain.map((x) => x ?? 0))
@@ -69,7 +112,7 @@ export function OverviewStrip({ data }: { data: Briefing }) {
   const SHADE = "bg-foreground/[0.06]"
 
   return (
-    <div className="space-y-1.5 pt-2" role="img" aria-label="The next two weeks: daily rain and the days each hazard is flagged">
+    <div className="space-y-1.5 pt-2" role="img" aria-label="The next two weeks: daily rain, the days each hazard is flagged, and how far apart the models are each day">
       <div className="grid items-center gap-x-[3px] [--lab:80px] sm:[--lab:100px]" style={{ gridTemplateColumns: cols }}>
         <div className="truncate pr-2 text-xs leading-9 text-muted-foreground">Rain</div>
         {dates.map((d, k) => (
@@ -99,6 +142,29 @@ export function OverviewStrip({ data }: { data: Briefing }) {
             })}
           </React.Fragment>
         ))}
+        {/* model uncertainty: a coloured cell a day, darker where the models are further apart */}
+        <div className="truncate pr-2 text-xs leading-8 text-muted-foreground">Uncertainty</div>
+        {dates.map((d, k) => {
+          const u = unc[k], l = u ? uncLevel(u.score) : null
+          return (
+            <Tooltip key={d}>
+              <TooltipTrigger asChild>
+                <div tabIndex={0} className={`flex h-8 items-center outline-none focus-visible:bg-muted ${isLead(d) ? SHADE : ""}`}>
+                  <span className="h-5 w-full rounded-[3px]" style={l ? { background: l.color } : { background: "repeating-linear-gradient(135deg, var(--border) 0 2px, transparent 2px 5px)" }} />
+                </div>
+              </TooltipTrigger>
+              <TooltipContent className="space-y-0.5">
+                <p className="font-semibold">{dayLabel(d)}</p>
+                {u && l ? <>
+                  <p>{l.label} uncertainty: the models are {l.at >= 0.6 ? "far apart" : l.at >= 0.35 ? "somewhat apart" : "close"}</p>
+                  <p>Rain: the middle half of the models span {u.rain.toFixed(2)}″ on average</p>
+                  {u.temp > 0 && <p>Temperature: the middle half span {Math.round(u.temp)}°F</p>}
+                  <p className="text-muted-foreground">About {u.models} models a location</p>
+                </> : <p>Too few models this far out to judge</p>}
+              </TooltipContent>
+            </Tooltip>
+          )
+        })}
         <div />
         {dates.map((d, k) => {
           const t = new Date(`${d}T20:00:00Z`)
@@ -115,6 +181,10 @@ export function OverviewStrip({ data }: { data: Briefing }) {
         <span className="mr-1 inline-block size-2 rounded-full bg-foreground align-middle" /> likely
         <span className="mr-1 ml-3 inline-block size-2 rounded-full border-[1.5px] border-foreground/70 align-middle" /> possible
         {lead && <><span className={`mr-1 ml-3 inline-block h-2.5 w-3 align-middle ${SHADE}`} /> the headline's days</>}
+        <span className="ml-3 inline-flex items-center gap-1 align-middle">
+          Uncertainty {UNC_LEVELS.map((l) => <span key={l.label} className="inline-block h-2.5 w-3 rounded-[2px]" style={{ background: l.color }} title={l.label} />)}
+          <span>low to very high</span>
+        </span>
         <span className="ml-3">Rain dots grow with the day's amount (the average of every location's model median; largest {top.toFixed(2)}″).</span>
       </p>
     </div>
