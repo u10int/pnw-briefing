@@ -46,6 +46,13 @@ their commercial tier or swap in Xweather points in `briefing/points.py`.
 
 ## What's on the page
 
+Each forecast location also has a **page of its own** at `location/<slug>/` (for example
+`location/snoqualmie-pass/`), written at build time and linked from the location panel: the
+two-week strip for that place, the next three days, the week at a glance, one daily matrix (rain,
+snow, high, low, peak gust, plus waves at the coast and the snow level at passes; the median or any
+model, each row opening to every model), nearby rivers, recent observations and the charts.
+`location/` lists them all.
+
 The page opens with an **overview**: the headline and run status, a small preview map of the
 headline's hazard (the grid behind it, framed on and marking the places it's about, opening the
 full map on the same layer), a summary card per hazard tab
