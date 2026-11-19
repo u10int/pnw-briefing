@@ -141,7 +141,7 @@ function LocationBody({ data, p, onLocation }: { data: Briefing; p: Point; onLoc
       </Card>
 
       <Extras data={data} p={p} />
-      <LocationObserved data={data} name={p.name} />
+      <Observed data={data} name={p.name} />
       <div className="grid gap-6 lg:grid-cols-2">
         <PrecipTotalCard data={data} point={p.name} />
         <DayByDay data={data} point={p.name} />
@@ -366,4 +366,11 @@ function Extras({ data, p }: { data: Briefing; p: Point }) {
       </CardContent>
     </Card>
   )
+}
+
+/** Recent observations at the location's station, in a card (nothing when there are none). */
+function Observed({ data, name }: { data: Briefing; name: string }) {
+  const body = <LocationObserved data={data} name={name} />
+  if (!data.obsReports?.points[name]) return null
+  return <Card><CardContent className="pt-6">{body}</CardContent></Card>
 }
