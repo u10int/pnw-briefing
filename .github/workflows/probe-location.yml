@@ -1,0 +1,23 @@
+name: probe-location
+on: {push: {branches: [probe-location]}}
+permissions: { contents: write }
+jobs:
+  p:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: |
+          git fetch -q --depth 1 origin gh-pages
+          mkdir -p /tmp/gp && git archive origin/gh-pages data | tar -x -C /tmp/gp
+          rm -rf web/public/data && cp -r /tmp/gp/data web/public/data
+          rm -rf web/public/data/fields web/public/data/volume
+      - run: cd web && npm ci >/dev/null 2>&1 && npm run build 2>&1 | tail -3 && cp -r dist /tmp/site
+      - run: mkdir -p /tmp/pw && cd /tmp/pw && npm init -y >/dev/null && npm i playwright@1.56.1 >/dev/null && npx playwright install --with-deps chromium >/dev/null 2>&1
+      - run: |
+          (cd /tmp/site && python3 -m http.server 8000 >/dev/null 2>&1 &) ; sleep 1
+          mkdir -p probe-out && sed "s#OUT/#$GITHUB_WORKSPACE/probe-out/#" probe/shot.cjs > /tmp/pw/shot.cjs && (cd /tmp/pw && node shot.cjs)
+      - run: |
+          git config user.name probe && git config user.email probe@users.noreply.github.com
+          git add probe-out && git commit -qm "probe output" && git push -q origin HEAD:probe-location
