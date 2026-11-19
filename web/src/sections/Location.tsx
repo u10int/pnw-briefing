@@ -1,6 +1,7 @@
 import * as React from "react"
 import { Area, Bar, CartesianGrid, ComposedChart, ErrorBar, Line, LineChart, XAxis, YAxis } from "recharts"
 
+import { Button } from "@/components/ui/button"
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
@@ -351,14 +352,20 @@ export function LocationPanel({ data, name, onChange, onClose }: { data: Briefin
         {p && (
           <>
             <div className="border-b px-6 pt-5 pb-4 pr-14">
-              <SheetTitle>{p.name}</SheetTitle>
-              <SheetDescription>{[p.area, region, kind].filter(Boolean).join(" · ")}</SheetDescription>
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <SheetTitle>{p.name}</SheetTitle>
+                  <SheetDescription>{[p.area, region, kind].filter(Boolean).join(" · ")}</SheetDescription>
+                </div>
+                <Button variant="outline" size="sm" asChild className="shrink-0">
+                  <a href={locationPath(p.name)}>Full page<ArrowRight aria-hidden /></a>
+                </Button>
+              </div>
               <div className="mt-3"><LocationPicker data={data} value={p.name} onChange={onChange} /></div>
             </div>
             <div className="flex-1 space-y-4 overflow-y-auto px-6 py-5">
               <LocationGlance data={data} name={p.name} />
               <DayByDay data={data} point={p.name} />
-              <a href={locationPath(p.name)} className="inline-flex items-center gap-1 text-sm font-medium hover:underline">Full page for {p.name}: the next three days, every model's numbers, rivers and observations <ArrowRight className="size-3.5 shrink-0" aria-hidden /></a>
             </div>
           </>
         )}
