@@ -55,7 +55,7 @@ export default function LocationPage() {
   return (
     <TooltipProvider delayDuration={100}>
       <header className="border-b bg-card">
-        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-x-4 gap-y-2 px-6 py-3 max-sm:px-4">
+        <div className="mx-auto flex max-w-[1320px] 2xl:max-w-[1560px] min-[1920px]:max-w-[1760px] flex-wrap items-center justify-between gap-x-4 gap-y-2 px-6 py-3 max-sm:px-4">
           <a href="./" className="inline-flex items-center gap-1.5 text-sm font-medium hover:underline"><ArrowLeft className="size-4" aria-hidden />{data.meta.title}</a>
           <div className="flex items-center gap-2">
             <span className="text-[13px] text-muted-foreground max-sm:hidden">Issued {issuedLabel(data.meta.issued)}</span>
@@ -63,7 +63,7 @@ export default function LocationPage() {
           </div>
         </div>
       </header>
-      <main className="mx-auto max-w-6xl space-y-6 px-6 py-6 max-sm:px-4">
+      <main className="mx-auto max-w-[1320px] 2xl:max-w-[1560px] min-[1920px]:max-w-[1760px] space-y-6 px-6 py-6 max-sm:px-4">
         {p ? <LocationBody data={data} p={p} onLocation={go} /> : <LocationIndex data={data} onLocation={go} />}
       </main>
     </TooltipProvider>

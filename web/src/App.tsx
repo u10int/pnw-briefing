@@ -198,7 +198,7 @@ export default function App() {
   return (
     <TooltipProvider delayDuration={100}>
       <header className="border-b bg-card">
-        <div className="mx-auto max-w-[1320px] px-8 max-sm:px-4">
+        <div className="mx-auto max-w-[1320px] px-8 2xl:max-w-[1560px] min-[1920px]:max-w-[1760px] max-sm:px-4">
           <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 pt-3.5 pb-2.5">
             <div className="font-semibold">
               {meta.title}<span className="ml-2.5 font-normal text-muted-foreground max-2xl:hidden">Western Washington and Northwest Oregon</span>
@@ -230,7 +230,7 @@ export default function App() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-[1320px] px-8 pb-16 max-sm:px-4">
+      <main className="mx-auto max-w-[1320px] px-8 2xl:max-w-[1560px] min-[1920px]:max-w-[1760px] pb-16 max-sm:px-4">
         <div className="pt-10 pb-8"><Headline data={data} /></div>
 
         <div className="space-y-4">
