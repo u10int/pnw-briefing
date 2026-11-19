@@ -10,8 +10,10 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrig
 import { dayShort, maxOf, median, minOf } from "@/lib/format"
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet"
 import type { Briefing, N, TrendVar } from "@/types"
-import { PeakTimingLines } from "@/sections/Timing"
-import { LocationObserved } from "@/sections/ObsReports"
+import { GUST, PRECIP, type Ramp, SNOW, TEMP } from "@/lib/ramps"
+import { rampCell } from "@/sections/DayMatrix"
+import { ArrowRight } from "lucide-react"
+import { locationPath } from "@/lib/locpage"
 
 const ENS_COLORS = ["var(--chart-1)", "var(--chart-2)", "var(--chart-3)"]
 
@@ -298,14 +300,49 @@ const GLANCE: { k: TrendVar; label: string }[] = [
 const glanceFmt = (k: TrendVar, v: number) =>
   k === "precip" || k === "snow" ? `${v >= 10 ? v.toFixed(0) : v.toFixed(k === "precip" && v < 1 ? 2 : 1)}″` : k === "gust" ? `${Math.round(v)} mph` : `${Math.round(v)}°`
 
-/** One location's detail in a panel that slides over the page: where it is, its next 7 days at a
- *  glance (with the change since yesterday), the running total, the ensemble spread and the
- *  day-by-day detail. Opened from location names anywhere on the page, and from the map. */
+/** The week's totals and extremes at a location (the model median), with the change since
+ *  yesterday's briefing where it moved. */
+export function LocationGlance({ data, name }: { data: Briefing; name: string }) {
+  const w = data.trends?.windows.find((x) => x.days === 7) ?? data.trends?.windows[0]
+  const c = data.change?.trends?.windows.find((x) => x.days === w?.days)
+  const pt = w?.points[name]
+  if (!w || !pt) return null
+  const RAMP: Record<string, Ramp> = { precip: PRECIP, snow: SNOW, gust: GUST, tmax: TEMP, tmin: TEMP }
+  return (
+    <div>
+      <p className="mb-2 text-sm font-medium">{w.label}</p>
+      {/* a card per variable, with a swatch of the map's colour for its value */}
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+        {GLANCE.map(({ k, label }) => {
+          const s = pt[k]
+          const d = c?.points[name]?.[k]
+          if (!s) return null
+          const bg = rampCell(s.median, RAMP[k], k === "precip" || k === "snow").background as string | undefined
+          const moved = d && Math.abs(d.delta) >= (k === "precip" ? 0.05 : k === "snow" ? 0.2 : k === "gust" ? 1 : 0.5)
+          return (
+            <div key={k} className="rounded-lg border bg-card px-3 py-2.5">
+              <p className="text-xs text-muted-foreground">{label}</p>
+              <p className="flex items-center gap-1.5 text-xl font-semibold tabular-nums">
+                <span className={`size-3 shrink-0 rounded-[3px] ${bg ? "" : "border"}`} style={bg ? { background: bg } : undefined} aria-hidden />
+                {glanceFmt(k, s.median)}
+              </p>
+              <p className="text-[11px] text-muted-foreground tabular-nums">
+                {moved ? <>{d!.delta > 0 ? "▲" : "▼"} {glanceFmt(k, Math.abs(d!.delta))} since yesterday</> : <>Models {glanceFmt(k, s.lo)} – {glanceFmt(k, s.hi)}</>}
+              </p>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+/** One location in a panel that slides over the page: its next 7 days at a glance and the
+ *  day-by-day charts, with a link to its full page. Opened from location names anywhere on the
+ *  page, and from the map. */
 export function LocationPanel({ data, name, onChange, onClose }: { data: Briefing; name: string | null; onChange: (n: string) => void; onClose: () => void }) {
   const p = data.points.find((x) => x.name === name)
   const region = p?.region ? data.regions.find((r) => r.id === p.region)?.name : p?.zone
-  const w = data.trends?.windows.find((x) => x.days === 7) ?? data.trends?.windows[0]
-  const c = data.change?.trends?.windows.find((x) => x.days === w?.days)
   const kind = p ? { lowland: "Lowland", coast: "Coast", pass: "Pass" }[p.kind] : ""
   return (
     <Sheet open={!!p} onOpenChange={(o) => { if (!o) onClose() }}>
@@ -319,31 +356,9 @@ export function LocationPanel({ data, name, onChange, onClose }: { data: Briefin
               <div className="mt-3"><LocationPicker data={data} value={p.name} onChange={onChange} /></div>
             </div>
             <div className="flex-1 space-y-4 overflow-y-auto px-6 py-5">
-              {w?.points[p.name] && (
-                <div>
-                  <p className="mb-2 text-sm font-medium">{w.label}</p>
-                  <div className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-5">
-                    {GLANCE.map(({ k, label }) => {
-                      const s = w.points[p.name][k]
-                      const d = c?.points[p.name]?.[k]
-                      if (!s) return null
-                      return (
-                        <div key={k}>
-                          <p className="text-xs text-muted-foreground">{label}</p>
-                          <p className="text-lg font-semibold tabular-nums">{glanceFmt(k, s.median)}</p>
-                          {d && Math.abs(d.delta) >= (k === "precip" ? 0.05 : k === "snow" ? 0.2 : k === "gust" ? 1 : 0.5) && (
-                            <p className="text-xs text-muted-foreground tabular-nums">{d.delta > 0 ? "+" : "−"}{glanceFmt(k, Math.abs(d.delta))} since yesterday</p>
-                          )}
-                        </div>
-                      )
-                    })}
-                  </div>
-                </div>
-              )}
-              <PeakTimingLines data={data} name={p.name} />
-              <LocationObserved data={data} name={p.name} />
-              <PrecipTotalCard data={data} point={p.name} />
+              <LocationGlance data={data} name={p.name} />
               <DayByDay data={data} point={p.name} />
+              <a href={locationPath(p.name)} className="inline-flex items-center gap-1 text-sm font-medium hover:underline">Full page for {p.name}: the next three days, every model's numbers, rivers and observations <ArrowRight className="size-3.5 shrink-0" aria-hidden /></a>
             </div>
           </>
         )}
