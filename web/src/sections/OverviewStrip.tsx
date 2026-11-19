@@ -67,10 +67,11 @@ function quartiles(xs: number[]) {
   return [q(0.25), q(0.75)] as const
 }
 interface DayUnc { score: number; rain: number; temp: number; models: number }
-function uncertainty(data: Briefing): (DayUnc | null)[] {
+function uncertainty(data: Briefing, point?: string): (DayUnc | null)[] {
+  const pts = point ? data.points.filter((p) => p.name === point) : data.points
   return data.dates.map((_, k) => {
     const per: { s: number; r: number; t: number; n: number }[] = []
-    for (const p of data.points) {
+    for (const p of pts) {
       const vals = (key: "precipitation_sum" | "temperature_2m_max" | "temperature_2m_min") =>
         data.models.map((m) => m.data[p.name]?.[key]?.[k]).filter((x): x is number => typeof x === "number" && Number.isFinite(x))
       const pr = vals("precipitation_sum")
@@ -90,20 +91,23 @@ function uncertainty(data: Briefing): (DayUnc | null)[] {
 /** The two weeks at a glance: each region's daily rain (model median, averaged over its
  *  locations) as paired bars, and above them a row per hazard with a mark on each day it's
  *  flagged (filled: likely, ring: possible). The headline's hazard days are shaded. */
-export function OverviewStrip({ data }: { data: Briefing }) {
+export function OverviewStrip({ data, point }: { data: Briefing; point?: string }) {
+  const pts = React.useMemo(() => (point ? data.points.filter((p) => p.name === point) : data.points), [data, point])
   const rain = React.useMemo(() => {
     const st = dayStats(data, "precipitation_sum")
-    const byPoint = Object.fromEntries(data.points.map((p) => [p.name, st[p.name].map((s) => s.med)]))
-    // the whole area: the mean across every location of its daily model median
+    const byPoint = Object.fromEntries(pts.map((p) => [p.name, st[p.name].map((s) => s.med)]))
+    // the whole area (or the one location): the mean across its locations of the daily model median
     return data.dates.map((_, k) => {
-      const xs = data.points.map((p) => byPoint[p.name][k]).filter((x): x is number => x != null)
+      const xs = pts.map((p) => byPoint[p.name][k]).filter((x): x is number => x != null)
       return xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null
     })
   }, [data])
-  const lead = React.useMemo(() => leadEvent(data), [data])
-  const unc = React.useMemo(() => uncertainty(data), [data])
+  // one location: no headline shading, and only the events that reach it
+  const lead = React.useMemo(() => (point ? null : leadEvent(data)), [data, point])
+  const unc = React.useMemo(() => uncertainty(data, point), [data, point])
   const dates = data.dates
-  const rows = ROWS.map((r) => ({ ...r, es: data.events.filter((e) => r.match(e.hazard)) })).filter((r) => r.es.length)
+  const at = (e: ImpactEvent) => !point || e.points.some((x) => x.name === point && x.frac > 0)
+  const rows = ROWS.map((r) => ({ ...r, es: data.events.filter((e) => r.match(e.hazard) && at(e)) })).filter((r) => r.es.length)
   const top = Math.max(0.25, ...rain.map((x) => x ?? 0))
   // dot area grows with the amount, up to 18 px across for the wettest day
   const dot = (v: number | null) => (v == null || v < 0.01 ? 0 : 4 + 14 * Math.sqrt(v / top))
@@ -124,7 +128,7 @@ export function OverviewStrip({ data }: { data: Briefing }) {
             </TooltipTrigger>
             <TooltipContent className="space-y-0.5">
               <p className="font-semibold">{dayLabel(d)}</p>
-              <p>Rain: {(rain[k] ?? 0).toFixed(2)}″ on average across the locations</p>
+              <p>Rain: {(rain[k] ?? 0).toFixed(2)}″ {point ? "model median" : "on average across the locations"}</p>
               {rows.map((r) => { const l = lvl(r.es.filter((e) => inDay(e, d))); return l && <p key={r.key}>{r.label}: {l}</p> })}
             </TooltipContent>
           </Tooltip>
@@ -185,7 +189,7 @@ export function OverviewStrip({ data }: { data: Briefing }) {
           Uncertainty {UNC_LEVELS.map((l) => <span key={l.label} className="inline-block h-2.5 w-3 rounded-[2px]" style={{ background: l.color }} title={l.label} />)}
           <span>low to very high</span>
         </span>
-        <span className="ml-3">Rain dots grow with the day's amount (the average of every location's model median; largest {top.toFixed(2)}″).</span>
+        <span className="ml-3">Rain dots grow with the day's amount ({point ? "the model median" : "the average of every location's model median"}; largest {top.toFixed(2)}″).</span>
       </p>
     </div>
   )

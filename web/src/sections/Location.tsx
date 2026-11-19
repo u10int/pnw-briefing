@@ -12,6 +12,8 @@ import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/
 import type { Briefing, N, TrendVar } from "@/types"
 import { PeakTimingLines } from "@/sections/Timing"
 import { LocationObserved } from "@/sections/ObsReports"
+import { ArrowRight } from "lucide-react"
+import { locationPath } from "@/lib/locpage"
 
 const ENS_COLORS = ["var(--chart-1)", "var(--chart-2)", "var(--chart-3)"]
 
@@ -301,11 +303,42 @@ const glanceFmt = (k: TrendVar, v: number) =>
 /** One location's detail in a panel that slides over the page: where it is, its next 7 days at a
  *  glance (with the change since yesterday), the running total, the ensemble spread and the
  *  day-by-day detail. Opened from location names anywhere on the page, and from the map. */
+/** The week's totals and extremes at a location (the model median), with the change since
+ *  yesterday's briefing where it moved. */
+export function LocationGlance({ data, name }: { data: Briefing; name: string }) {
+  const w = data.trends?.windows.find((x) => x.days === 7) ?? data.trends?.windows[0]
+  const c = data.change?.trends?.windows.find((x) => x.days === w?.days)
+  const p = { name }
+  return (
+    <>
+      {w?.points[p.name] && (
+        <div>
+          <p className="mb-2 text-sm font-medium">{w.label}</p>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-5">
+            {GLANCE.map(({ k, label }) => {
+              const s = w.points[p.name][k]
+              const d = c?.points[p.name]?.[k]
+              if (!s) return null
+              return (
+                <div key={k}>
+                  <p className="text-xs text-muted-foreground">{label}</p>
+                  <p className="text-lg font-semibold tabular-nums">{glanceFmt(k, s.median)}</p>
+                  {d && Math.abs(d.delta) >= (k === "precip" ? 0.05 : k === "snow" ? 0.2 : k === "gust" ? 1 : 0.5) && (
+            <p className="text-xs text-muted-foreground tabular-nums">{d.delta > 0 ? "+" : "−"}{glanceFmt(k, Math.abs(d.delta))} since yesterday</p>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+    </>
+  )
+}
+
 export function LocationPanel({ data, name, onChange, onClose }: { data: Briefing; name: string | null; onChange: (n: string) => void; onClose: () => void }) {
   const p = data.points.find((x) => x.name === name)
   const region = p?.region ? data.regions.find((r) => r.id === p.region)?.name : p?.zone
-  const w = data.trends?.windows.find((x) => x.days === 7) ?? data.trends?.windows[0]
-  const c = data.change?.trends?.windows.find((x) => x.days === w?.days)
   const kind = p ? { lowland: "Lowland", coast: "Coast", pass: "Pass" }[p.kind] : ""
   return (
     <Sheet open={!!p} onOpenChange={(o) => { if (!o) onClose() }}>
@@ -319,27 +352,8 @@ export function LocationPanel({ data, name, onChange, onClose }: { data: Briefin
               <div className="mt-3"><LocationPicker data={data} value={p.name} onChange={onChange} /></div>
             </div>
             <div className="flex-1 space-y-4 overflow-y-auto px-6 py-5">
-              {w?.points[p.name] && (
-                <div>
-                  <p className="mb-2 text-sm font-medium">{w.label}</p>
-                  <div className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-5">
-                    {GLANCE.map(({ k, label }) => {
-                      const s = w.points[p.name][k]
-                      const d = c?.points[p.name]?.[k]
-                      if (!s) return null
-                      return (
-                        <div key={k}>
-                          <p className="text-xs text-muted-foreground">{label}</p>
-                          <p className="text-lg font-semibold tabular-nums">{glanceFmt(k, s.median)}</p>
-                          {d && Math.abs(d.delta) >= (k === "precip" ? 0.05 : k === "snow" ? 0.2 : k === "gust" ? 1 : 0.5) && (
-                            <p className="text-xs text-muted-foreground tabular-nums">{d.delta > 0 ? "+" : "−"}{glanceFmt(k, Math.abs(d.delta))} since yesterday</p>
-                          )}
-                        </div>
-                      )
-                    })}
-                  </div>
-                </div>
-              )}
+              <LocationGlance data={data} name={p.name} />
+              <a href={locationPath(p.name)} className="inline-flex items-center gap-1 text-sm font-medium hover:underline">Full page for {p.name} <ArrowRight className="size-3.5" aria-hidden /></a>
               <PeakTimingLines data={data} name={p.name} />
               <LocationObserved data={data} name={p.name} />
               <PrecipTotalCard data={data} point={p.name} />
