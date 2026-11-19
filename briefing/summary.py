@@ -172,8 +172,9 @@ def facts(data: dict, cfg: dict) -> dict:
 
     # snow level at the passes over the next few days, where at least two models agree (one
     # model alone, often GFS a week out, isn't a forecast to headline). The lowest level is the
-    # lowest of those medians in that time; a freezing level within 1,000 ft of the ground is
-    # stored as 0 ("snow to sea level"), so very low values read as "near sea level".
+    # lowest of those medians in that time. It's a pass's grid point, so it says how far below the
+    # pass snow can fall there, not that the lowlands get snow: a very low value (a freezing level
+    # near the ground is stored as 0) reads as "well below pass level", never "sea level".
     sl = data.get("snowLevel") or {}
     horizon = datetime.combine(today + timedelta(days=NEAR_DAYS + 1), datetime.min.time(), tz)
     low = []
@@ -191,10 +192,13 @@ def facts(data: dict, cfg: dict) -> dict:
             low.append((p["name"], first, min(med[t] for t in below)))
     if low:
         first = min(x[1] for x in low)
-        ft = lambda v: "near sea level" if v < 500 else f"{int(round(v / 500) * 500)} ft"
         at = min(low, key=lambda x: x[2])
+        elev = next(p["elev_ft"] for p in sl["passes"] if p["name"] == at[0])
+        rel = {"lowestRelativeToPass": "well below pass level" if at[2] < elev - 1000 else "near pass level", "lowestAt": at[0]}
+        if at[2] >= 1000:
+            rel["lowestSnowLevel"] = f"{int(round(at[2] / 500) * 500)} ft"
         items.append({"kind": "snow level reaches the passes", "passes": [x[0] for x in low], **when(first, first, today),
-                      "lowestSnowLevel": ft(at[2]), "lowestAt": at[0],
+                      **rel,
                       "importance": 2.2 - _later(first, today)})
 
     td = data.get("tempDeparture") or {}
@@ -279,6 +283,7 @@ def facts(data: dict, cfg: dict) -> dict:
 
 SYSTEM = """You write the headline and lead for a weather briefing, updated four times a day, covering Western Washington, Northwest Oregon and southwest British Columbia.
 Use only the facts given. Do not add places, timings, numbers or hazards that are not in them, and do not speculate.
+- Snow levels are forecast at the mountain passes only: say they reach or fall below pass level; never call them "sea level" or imply lowland snow from them.
 - Headline: at most 10 words, sentence case (capitalise the first word and proper names only), no final period. Focus on the next three or four days (startsInDays 0 to 3): lead with the most important impact or event in that time (facts are listed most important first, already weighted toward the near term). Only headline something further out when nothing notable happens in the next few days; then the lead can say the next few days are quiet. Prefer impacts across a broad area (wind, rain, high surf on the coast) over something at a single river or location. When the headline names more than one event, give each its own area if they differ (e.g. "Windy for Puget Sound, heavy rain for Southwest BC"); never attach one area to events that happen in different places.
 - Lead: the same rule for places and timing applies; one or two short sentences (never three or more), at most 40 words in all, giving a quick overview of the other key impacts and events, in order of importance, near-term first. A significant event a week or more out can get a brief mention at the end. Leave out anything minor.
 - Describe the weather and its impacts, never named NWS products: no "warning", "watch", "advisory" or "statement".

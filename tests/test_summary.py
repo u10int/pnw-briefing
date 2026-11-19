@@ -128,3 +128,8 @@ def test_snow_level_uses_the_near_term_where_models_agree():
     data = {**_brief(), "snowLevel": sl}
     it = next(i for i in summary.facts(data, CFG)["items"] if i["kind"] == "snow level reaches the passes")
     assert it["lowestSnowLevel"] == "3000 ft" and it["lowestAt"] == "Stevens Pass" and it["when"] == "today"
+    assert it["lowestRelativeToPass"] == "well below pass level"     # 3,000 ft at a 4,061 ft pass
+    # a level near the ground at a pass's grid point: "well below pass level", no number to read as sea level
+    sl["passes"][0]["series"] = [series("HRRR", [300, 200, 3000, 3100]), series("RRFS", [400, 100, 3100, 3000])]
+    it = next(i for i in summary.facts({**_brief(), "snowLevel": sl}, CFG)["items"] if i["kind"] == "snow level reaches the passes")
+    assert it["lowestRelativeToPass"] == "well below pass level" and "lowestSnowLevel" not in it
