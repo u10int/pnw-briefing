@@ -2,6 +2,7 @@ const { chromium } = require('playwright');
 (async () => {
   const b = await chromium.launch()
   const shots = [
+    ['panel', '/', { width: 1400, height: 1100 }, false],
     ['seattle', '/location/seattle/', { width: 1400, height: 2600 }, false],
     ['pass', '/location/snoqualmie-pass/', { width: 1400, height: 2600 }, false],
     ['coast', '/location/aberdeen/', { width: 1400, height: 1400 }, false],
@@ -14,12 +15,13 @@ const { chromium } = require('playwright');
     p.on('console', (m) => { if (m.type() === 'error') console.log(name, 'console', m.text().slice(0, 200)) })
     await p.goto('http://localhost:8000' + path)
     await p.waitForTimeout(6000)
+    if (name === 'panel') { await p.evaluate(() => window.dispatchEvent(new CustomEvent('briefing:open-location', { detail: 'Snoqualmie Pass' }))); await p.waitForTimeout(2500) }
     if (name === 'seattle') {
       const btn = p.locator('button[aria-expanded]').first()
       if (await btn.count()) { await btn.click(); await p.waitForTimeout(500) }
     }
     console.log(name, 'title', await p.title())
-    await p.screenshot({ path: `OUT/${name}.png`, fullPage: true })
+    await p.screenshot({ path: `OUT/${name}.png`, fullPage: name !== 'panel' })
     await p.close()
   }
   await b.close()
