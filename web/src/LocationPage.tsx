@@ -9,7 +9,7 @@ import { locationPath, slugFromAddress, slugify } from "@/lib/locpage"
 import { GUST, PRECIP, type Ramp, SNOW, TEMP, WAVE } from "@/lib/ramps"
 import { AlertBadge } from "@/sections/Alerts"
 import { DayHead } from "@/components/DayHead"
-import { dayLabel, dayStats, type DailyKey, modelDays, ModelPick, MEDIAN, modelsWith, rampCell } from "@/sections/DayMatrix"
+import { dayLabel, dayStats, type DailyKey, modelDays, ModelPick, MEDIAN, modelsWith, rampCell, SUMMARY_COL } from "@/sections/DayMatrix"
 import { DayByDay, LocationGlance, LocationPicker, PrecipTotalCard } from "@/sections/Location"
 import { LocationObserved } from "@/sections/ObsReports"
 import { OverviewStrip } from "@/sections/OverviewStrip"
@@ -142,10 +142,8 @@ function LocationBody({ data, p, onLocation }: { data: Briefing; p: Point; onLoc
 
       <Extras data={data} p={p} />
       <Observed data={data} name={p.name} />
-      <div className="grid gap-6 lg:grid-cols-2">
-        <PrecipTotalCard data={data} point={p.name} />
-        <DayByDay data={data} point={p.name} />
-      </div>
+      <PrecipTotalCard data={data} point={p.name} />
+      <DayByDay data={data} point={p.name} />
       <p className="text-xs text-muted-foreground">
         Nearby: {data.points.filter((q) => q.name !== p.name).sort((a, b) => km(p, a) - km(p, b)).slice(0, 5).map((q, i) => (
           <React.Fragment key={q.name}>{i > 0 && " · "}<a href={locationPath(q.name)} onClick={(e) => { e.preventDefault(); onLocation(q.name) }} className="hover:underline">{q.name}</a></React.Fragment>
@@ -283,7 +281,7 @@ function LocationMatrix({ data, p }: { data: Briefing; p: Point }) {
           <thead>
             <tr className="border-b">
               <th className="sticky left-0 z-10 bg-card px-2 py-1.5 text-left font-medium">Daily<span className="block font-normal text-muted-foreground">4 AM – 4 AM</span></th>
-              <th className="px-2 py-1.5 text-center font-medium whitespace-nowrap">7 days<span className="block font-normal text-muted-foreground">&nbsp;</span></th>
+              <th className={`px-2 py-1.5 text-center font-medium whitespace-nowrap ${SUMMARY_COL}`}>7 days<span className="block font-normal text-muted-foreground">&nbsp;</span></th>
               {data.dates.map((d) => <th key={d} className="min-w-10 px-1 py-1.5 text-center font-medium"><DayHead day={d} /></th>)}
             </tr>
           </thead>
@@ -304,7 +302,7 @@ function LocationMatrix({ data, p }: { data: Briefing; p: Point }) {
                         </button>
                       ) : <span className="pl-[18px]">{r.label} <span className="font-normal text-muted-foreground">{r.unit}</span></span>}
                     </td>
-                    <td className="border-r px-2 py-1 text-center font-medium" style={cell(r, lead)} title={r.lead.label}>{lead == null ? "–" : r.fmt(lead)}</td>
+                    <td className={`px-2 py-1 text-center font-medium ${SUMMARY_COL}`} style={cell(r, lead)} title={r.lead.label}>{lead == null ? "–" : r.fmt(lead)}</td>
                     {xs.map((v, k) => {
                       const td = <td key={k} className="px-1 py-1 text-center" style={cell(r, v)}>{v == null ? "–" : r.fmt(v)}</td>
                       const s = st?.[k]
@@ -323,7 +321,7 @@ function LocationMatrix({ data, p }: { data: Briefing; p: Point }) {
                     return (
                       <tr key={m.label} className="border-b bg-muted/30">
                         <td className="sticky left-0 z-10 bg-card py-0.5 pr-2 pl-6 whitespace-nowrap text-muted-foreground">{m.label}</td>
-                        <td className="border-r px-2 py-0.5 text-center" style={cell(r, l)}>{l == null ? "–" : r.fmt(l)}</td>
+                        <td className={`px-2 py-0.5 text-center ${SUMMARY_COL}`} style={cell(r, l)}>{l == null ? "–" : r.fmt(l)}</td>
                         {ys.map((v, k) => <td key={k} className="px-1 py-0.5 text-center" style={cell(r, v)}>{v == null ? "" : r.fmt(v)}</td>)}
                       </tr>
                     )
@@ -370,7 +368,14 @@ function Extras({ data, p }: { data: Briefing; p: Point }) {
 
 /** Recent observations at the location's station, in a card (nothing when there are none). */
 function Observed({ data, name }: { data: Briefing; name: string }) {
-  const body = <LocationObserved data={data} name={name} />
   if (!data.obsReports?.points[name]) return null
-  return <Card><CardContent className="pt-6">{body}</CardContent></Card>
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Observed</CardTitle>
+        <CardDescription>At the location's station: the last few days and today so far, coloured as the observed tables in the briefing.</CardDescription>
+      </CardHeader>
+      <CardContent><LocationObserved data={data} name={name} bare /></CardContent>
+    </Card>
+  )
 }

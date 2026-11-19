@@ -193,6 +193,9 @@ export function RampStrip({ ramp, range, unit = "", from, extra }: { ramp: Ramp;
   )
 }
 
+/** The divider after a multi-day summary column (the total, peak or average before the days). */
+export const SUMMARY_COL = "border-r-[3px] border-r-foreground/30"
+
 export interface MatrixRow { name: string; group?: boolean; point?: string; region?: string; days: N[]; lead: N }
 
 /** A light diagonal hatch over a cell where the models are far apart. */
@@ -250,7 +253,7 @@ export function DayMatrix({ dates, rows, leadHead, leadSub, style, fmt, tip, dim
             <th className="sticky left-0 z-10 bg-card px-2 py-1.5 text-left font-medium">
               Location<span className="block font-normal text-muted-foreground">days 4 AM – 4 AM</span>
             </th>
-            <th className="px-2 py-1.5 text-center font-medium whitespace-nowrap">{leadHead}<span className="block font-normal text-muted-foreground">{leadSub}</span></th>
+            <th className={`px-2 py-1.5 text-center font-medium whitespace-nowrap ${SUMMARY_COL}`}>{leadHead}<span className="block font-normal text-muted-foreground">{leadSub}</span></th>
             {dates.map((d, k) => (
               <th key={d} className={`min-w-10 px-1 py-1.5 text-center font-medium ${dimFrom != null && k >= dimFrom ? "text-muted-foreground" : ""}`}>
                 <DayHead day={d} />
@@ -269,7 +272,7 @@ export function DayMatrix({ dates, rows, leadHead, leadSub, style, fmt, tip, dim
                     </button>
                   ) : r.name}
               </td>
-              <td className="border-r px-2 py-1 text-center font-medium" style={style(r.lead)}>{fmt(r.lead)}</td>
+              <td className={`px-2 py-1 text-center font-medium ${SUMMARY_COL}`} style={style(r.lead)}>{fmt(r.lead)}</td>
               {dates.map((_, k) => {
                 const x = r.days[k] ?? null
                 const hatched = x != null && flag?.(r, k)

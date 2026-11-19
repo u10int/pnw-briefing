@@ -282,41 +282,53 @@ function ReportList({ reports }: { reports: ObsReport[] }) {
 
 /** One location's observations in its side panel: the station's last few days, then the NWS
  *  reports tied to it. */
-export function LocationObserved({ data, name }: { data: Briefing; name: string }) {
+export function LocationObserved({ data, name, bare = false }: { data: Briefing; name: string; bare?: boolean }) {
   const o = data.obsReports
   const rec = o?.points[name]
   const reports = React.useMemo(() => liveReports(o).filter((r) => r.near === name)
     .sort((a, b) => (b.mag ?? -1) - (a.mag ?? -1)), [o, name])
   if (!o || (!rec && !reports.length)) return null
   type R = "precip" | "gust" | "snow" | "tmax" | "tmin"
-  const rows = rec ? (["tmax", "tmin", "precip", "gust", "snow"] as R[]).filter((v) => rec[v]?.some((x) => x != null)) : []
-  const label = { precip: "Precip (in)", gust: "Peak gust (mph)", snow: "New snow (in)", tmax: "High (°F)", tmin: "Low (°F)" }
+  // the low first, as in the briefing's temperature table
+  const rows = rec ? (["tmin", "tmax", "precip", "snow", "gust"] as R[]).filter((v) => rec[v]?.some((x) => x != null)) : []
+  const label = { precip: ["Precip", "in"], gust: ["Peak gust", "mph"], snow: ["New snow", "in"], tmax: ["High", "°F"], tmin: ["Low", "°F"] }
+  const kind = (v: R): V => (v === "tmax" || v === "tmin" ? "temp" : v)
   return (
     <div>
-      <p className="mb-2 text-sm font-medium">Observed</p>
+      {!bare && <p className="mb-2 text-sm font-medium">Observed</p>}
       {rows.length > 0 && (
         <>
-          <table className="w-full max-w-md text-[13px] tabular-nums">
-            <thead>
-              <tr className="text-xs text-muted-foreground">
-                <th className="pb-1 text-left font-normal" />
-                {o.days.map((d) => (
-                  <th key={d} className="pb-1 text-right font-normal">{d === o.today ? "Today" : new Date(`${d}T12:00:00`).toLocaleDateString("en-US", { weekday: "short" })}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((v) => (
-                <tr key={v} className="border-t border-border/60">
-                  <td className="py-1 pr-2 text-xs text-muted-foreground">{label[v]}</td>
-                  {rec![v]!.map((x, i) => (
-                    <td key={i} className={`py-1 text-right ${x == null ? "text-muted-foreground" : ""}`}>{fmt(v === "tmax" || v === "tmin" ? "temp" : v, x)}</td>
+          <div className="overflow-x-auto">
+            <Table className="w-auto border-separate border-spacing-[2px] text-[12.5px]">
+              <TableHeader>
+                <TableRow className="hover:bg-transparent">
+                  <TableHead className="sticky left-0 z-10 bg-card" />
+                  {o.days.map((d) => (
+                    <TableHead key={d} className="h-auto w-[52px] px-1 pb-2 text-center align-bottom text-[11.5px] sm:w-[72px]">
+                      {d === o.today ? <>Today<span className="block font-normal text-muted-foreground">so far</span></> : <DayHead day={d} />}
+                    </TableHead>
                   ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <p className="mt-1 text-xs text-muted-foreground">{rec!.stations.join("; ")}. Today is so far.</p>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {rows.map((v) => (
+                  <TableRow key={v} className="border-0 hover:bg-transparent">
+                    <TableCell className="sticky left-0 z-10 bg-card py-1 pr-3 whitespace-nowrap">{label[v][0]} <span className="text-muted-foreground">{label[v][1]}</span></TableCell>
+                    {rec![v]!.map((x, i) => {
+                      const t = v === "gust" ? clock(rec!.gustTime?.[i]) : null
+                      return (
+                        <TableCell key={i} className="rounded-[3px] px-1 py-1 text-center tabular-nums" style={cell(x, kind(v))} title={t ? `at ${t}` : undefined}>
+                          {fmt(kind(v), x)}
+                          {t && <span className="block text-[10px] leading-tight opacity-75">{t}</span>}
+                        </TableCell>
+                      )
+                    })}
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+          <p className="mt-2 text-xs text-muted-foreground">{rec!.stations.join("; ")}. Days run midnight to midnight; a dash means the station didn't report.</p>
         </>
       )}
       {reports.length > 0 && (
