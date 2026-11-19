@@ -103,9 +103,14 @@ const TAG: Record<Status["tone"], string> = {
   new: "bg-foreground text-background", up: "border border-[var(--likely-bar)] text-[var(--likely)]",
   down: "border border-dashed border-muted-foreground/60 text-muted-foreground", moved: "border text-muted-foreground", same: "",
 }
-const Tag = ({ s }: { s: Status }) =>
-  s.tag ? <span className={`shrink-0 rounded px-1.5 py-px text-[10px] leading-4 font-semibold whitespace-nowrap ${TAG[s.tone]}`}>
-    {s.tone === "up" ? "↑ " : s.tone === "down" ? "↓ " : ""}{s.tag}</span> : null
+const Tag = ({ s }: { s: Status }) => (s.tag ? <ChangeTag tone={s.tone} tag={s.tag} /> : null)
+/** The change badges, as in Impacts to watch: New, ↑ Upgraded, ↓ Downgraded, Moved, and Dropped
+ *  (a dashed outline). Also used by the "Since the last update" card. */
+export function ChangeTag({ tone, tag }: { tone: Status["tone"] | "dropped"; tag: string }) {
+  const cls = tone === "dropped" ? "border border-dashed border-muted-foreground/60" : TAG[tone]
+  return <span className={`shrink-0 rounded px-1.5 py-px text-[10px] leading-4 font-semibold whitespace-nowrap ${cls}`}>
+    {tone === "up" ? "↑ " : tone === "down" ? "↓ " : ""}{tag}</span>
+}
 
 /** Area and zone for briefings built before points carried them (config.yaml has the same). */
 const AREA_FALLBACK: Record<string, [string, string]> = {
