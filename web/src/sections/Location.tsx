@@ -311,19 +311,22 @@ export function LocationGlance({ data, name }: { data: Briefing; name: string })
   return (
     <div>
       <p className="mb-2 text-sm font-medium">{w.label}</p>
-      {/* a tile per variable, filled with the map's colour for its value */}
+      {/* a card per variable, with a swatch of the map's colour for its value */}
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
         {GLANCE.map(({ k, label }) => {
           const s = pt[k]
           const d = c?.points[name]?.[k]
           if (!s) return null
-          const st = rampCell(s.median, RAMP[k], k === "precip" || k === "snow")
+          const bg = rampCell(s.median, RAMP[k], k === "precip" || k === "snow").background as string | undefined
           const moved = d && Math.abs(d.delta) >= (k === "precip" ? 0.05 : k === "snow" ? 0.2 : k === "gust" ? 1 : 0.5)
           return (
-            <div key={k} className={`rounded-lg px-3 py-2.5 ${st.background ? "" : "bg-muted"}`} style={st.background ? st : undefined}>
-              <p className="text-xs opacity-80">{label}</p>
-              <p className="text-xl font-semibold tabular-nums">{glanceFmt(k, s.median)}</p>
-              <p className="text-[11px] tabular-nums opacity-80">
+            <div key={k} className="rounded-lg border bg-card px-3 py-2.5">
+              <p className="text-xs text-muted-foreground">{label}</p>
+              <p className="flex items-center gap-1.5 text-xl font-semibold tabular-nums">
+                <span className={`size-3 shrink-0 rounded-[3px] ${bg ? "" : "border"}`} style={bg ? { background: bg } : undefined} aria-hidden />
+                {glanceFmt(k, s.median)}
+              </p>
+              <p className="text-[11px] text-muted-foreground tabular-nums">
                 {moved ? <>{d!.delta > 0 ? "▲" : "▼"} {glanceFmt(k, Math.abs(d!.delta))} since yesterday</> : <>Models {glanceFmt(k, s.lo)} – {glanceFmt(k, s.hi)}</>}
               </p>
             </div>
