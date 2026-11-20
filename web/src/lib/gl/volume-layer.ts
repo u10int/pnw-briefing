@@ -1232,8 +1232,24 @@ export class VolumeLayer implements CustomLayerInterface {
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, nx, ny, 0, gl.RED, gl.UNSIGNED_BYTE, cov)
       for (const [p, v] of [[gl.TEXTURE_MIN_FILTER, gl.LINEAR], [gl.TEXTURE_MAG_FILTER, gl.LINEAR], [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE]])
         gl.texParameteri(gl.TEXTURE_2D, p, v)
-      this.coverTextures.get(k) && gl.deleteTexture(this.coverTextures.get(k)!)
+      const prevCt = this.coverTextures.get(k)
+      if (prevCt) gl.deleteTexture(prevCt)
       this.coverTextures.set(k, ct)
+      // copy the edge's columns two cells out into the missing ones, so the texture's blending at
+      // the domain's edge doesn't run down to zero there (which made surfaces into walls)
+      let have = cov.slice()
+      for (let pass = 0; pass < 2; pass++) {
+        const next = have.slice()
+        for (let y = 0; y < ny; y++) for (let x = 0; x < nx; x++) {
+          const j = y * nx + x
+          if (have[j]) continue
+          const src = x > 0 && have[j - 1] ? j - 1 : x < nx - 1 && have[j + 1] ? j + 1 : y > 0 && have[j - nx] ? j - nx : y < ny - 1 && have[j + nx] ? j + nx : -1
+          if (src < 0) continue
+          for (let z = 0; z < nz; z++) slice[z * nxy + j] = slice[z * nxy + src]
+          next[j] = 255
+        }
+        have = next
+      }
     }
     for (let j = 0; j < slice.length; j++) if (slice[j] === 255) slice[j] = 0     // missing: clear
     tex = gl.createTexture()!
