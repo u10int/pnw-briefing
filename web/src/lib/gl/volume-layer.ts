@@ -169,6 +169,9 @@ uniform bool uLit;              // shade by what lies towards the light (clouds 
 uniform bool uHasGround;        // the terrain: rays stop where they reach it
 uniform sampler2D uGround;      // terrain height over the box (rows north to south), as a fraction of GROUND_KM
 uniform float uGroundScale;     // GROUND_KM / the box's top (km)
+// where the model has data: columns with any value (a regional model's domain). Outside it the
+// field is missing, which reads as nothing, not as its lowest value (a solid or a surface there)
+uniform sampler2D uCover;
 // surfaces where the field crosses set values (isotherms, isotachs, the freezing level), lit by
 // the field's gradient; coloured by height (uHeight) when uIsoByHeight
 uniform int uIsoN;
@@ -215,6 +218,8 @@ vec3 texPos(vec3 p) {
 }
 float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
 float val(vec3 q) { return mix(texture(uA, q).r, texture(uB, q).r, uT); }
+bool covered(vec3 q) { return texture(uCover, q.xy).r > 0.5; }
+bool coveredAt(vec3 p) { vec3 q = texPos(p); return q.y >= 0.0 && q.y <= 1.0 && p.x >= 0.0 && p.x <= 1.0 && covered(q); }
 float valAt(vec3 p) { vec3 q = texPos(p); return (q.y < 0.0 || q.y > 1.0 || p.x < 0.0 || p.x > 1.0) ? 0.0 : val(q); }
 // the field's gradient in the box's true proportions (texture rows run north, the box's y south)
 vec3 gradAt(vec3 p) {
@@ -227,7 +232,7 @@ vec3 gradAt(vec3 p) {
 vec3 normalAt(vec3 p) { vec3 g = gradAt(p); float l = length(g); return l > 0.0 ? g / l : vec3(0, 0, 1); }
 float extinction(vec3 p) {
   vec3 q = texPos(p);
-  if (q.y < 0.0 || q.y > 1.0 || p.x < 0.0 || p.x > 1.0 || p.z > 1.0) return 0.0;
+  if (q.y < 0.0 || q.y > 1.0 || p.x < 0.0 || p.x > 1.0 || p.z > 1.0 || !covered(q)) return 0.0;
   return texture(uLut, vec2((val(q) * 255.0 + 0.5) / 256.0, 0.5)).a;
 }
 // the light's direction in box units, scaled to climb one box height
@@ -255,7 +260,7 @@ float lightAt(vec3 p, float d0) {
     float dz = d0 * float(k * k);                              // taps further apart further out
     vec3 s = p + L * dz;
     if (s.z > uZr.y || s.z > 1.0) break;
-    if (uSolid) od += step(0.0, (valAt(s) - uSolidAt) * uSolidSign) * 2.5;
+    if (uSolid) od += coveredAt(s) ? step(0.0, (valAt(s) - uSolidAt) * uSolidSign) * 2.5 : 0.0;
     else od += extinction(s) * 4.0 * uDensity * length(L * d0 * float(2 * k - 1) * uScale) / uScale.x;
   }
   return exp(-od);
@@ -305,7 +310,7 @@ void main() {
         vec3 pp = ro + rd * tPlane;
         float vs = valAt(pp);
         tPlane = 1e9;
-        if (vs < 254.5 / 255.0 && !(uHasGround && pp.z < groundZ(pp.xy))) {
+        if (vs < 254.5 / 255.0 && coveredAt(pp) && !(uHasGround && pp.z < groundZ(pp.xy))) {
           vec4 pc = texture(uPLut, vec2((vs * 255.0 + 0.5) / 256.0, 0.5));
           vec3 col = uColorMode == 0 ? pc.rgb : colourAt(pp, vec3(0.5));
           float pa = 0.9 * pc.a;                                 // clear where the view has nothing (no echo)
@@ -317,6 +322,8 @@ void main() {
       // the rest of the volume dims while scanning
       float w = 1.0;
       if (uScan > 0) w = uRest;
+      // outside the model's domain: nothing, and no surface between there and here
+      if (q.y >= 0.0 && q.y <= 1.0 && !covered(q)) { prev = -1.0; prevP = p; t += dt; continue; }
       if (q.y >= 0.0 && q.y <= 1.0) {
         float v = val(q);
         // the most along the ray: just note it, and draw it at the end
@@ -588,6 +595,9 @@ export class VolumeLayer implements CustomLayerInterface {
   private draw: VolumeDraw | null = null
   private textures = new Map<number, WebGLTexture>()
   private colorTextures = new Map<number, WebGLTexture>()
+  /** Per step: which columns have any value (2D, x by y), made with the step's texture. */
+  private coverTextures = new Map<number, WebGLTexture>()
+  private probeCov?: { data: Uint8Array; at: number; cov: Uint8Array }
   private cLut?: WebGLTexture
   private cLutData: Uint8Array | null = null
   private pLut?: WebGLTexture
@@ -768,7 +778,11 @@ export class VolumeLayer implements CustomLayerInterface {
   }
 
   private clearTextures(which: "main" | "color" | "both" = "both") {
-    if (which !== "color") { for (const t of this.textures.values()) this.gl?.deleteTexture(t); this.textures.clear() }
+    if (which !== "color") {
+      for (const t of this.textures.values()) this.gl?.deleteTexture(t)
+      for (const t of this.coverTextures.values()) this.gl?.deleteTexture(t)
+      this.textures.clear(); this.coverTextures.clear()
+    }
     if (which !== "main") { for (const t of this.colorTextures.values()) this.gl?.deleteTexture(t); this.colorTextures.clear() }
   }
 
@@ -826,6 +840,18 @@ export class VolumeLayer implements CustomLayerInterface {
       }
       return v
     }
+    // the model's domain at this step (columns with any value), as the shader's uCover
+    if (this.probeCov?.data !== d.data || this.probeCov.at !== s0) {
+      const c = new Uint8Array(nxy)
+      for (let z = 0; z < g.nz; z++) for (let j = 0; j < nxy; j++) if (d.data[s0 + z * nxy + j] !== 255) c[j] = 1
+      this.probeCov = { data: d.data, at: s0, cov: c }
+    }
+    const cov = this.probeCov.cov
+    const coveredAt = (x: number, y: number) => {
+      const lat = (Math.atan(Math.sinh(Math.PI * (1 - 2 * (yN + y * (yS - yN))))) * 180) / Math.PI
+      const ix = Math.round(x * (g.nx - 1)), iy = Math.round(((lat - g.lat[0]) / (g.lat[1] - g.lat[0])) * (g.ny - 1))
+      return ix >= 0 && ix < g.nx && iy >= 0 && iy < g.ny && cov[iy * g.nx + ix] === 1
+    }
     const lut = d.pickLut ?? d.lut
     const dt = 1.7320508 / 400 / Math.hypot(...rd)
     // the step's true length in box widths, as the shader works it out
@@ -846,11 +872,12 @@ export class VolumeLayer implements CustomLayerInterface {
       if (t >= tPlane) {
         const p = [ro[0] + rd[0] * tPlane, ro[1] + rd[1] * tPlane, ro[2] + rd[2] * tPlane]
         const pv = at(p[0], p[1], p[2])
-        if (p[2] >= this.groundAt(p[0], p[1]) && d.scan!.lut[Math.round(pv) * 4 + 3] > 0) return { x: p[0], y: p[1], z: p[2], byte: pv, what: "scan" }
+        if (p[2] >= this.groundAt(p[0], p[1]) && coveredAt(p[0], p[1]) && d.scan!.lut[Math.round(pv) * 4 + 3] > 0) return { x: p[0], y: p[1], z: p[2], byte: pv, what: "scan" }
         tPlane = Infinity
       }
       const x = ro[0] + rd[0] * t, y = ro[1] + rd[1] * t, z = ro[2] + rd[2] * t
       if (this.ground && z < this.groundAt(x, y)) break
+      if (!coveredAt(x, y)) { prev = -1; continue }
       const v = at(x, y, z)
       if (d.mode === "max") {
         if (lut[Math.round(v) * 4 + 3] > 0 && v > best) { best = v; bestP = [x, y, z] }
@@ -1195,6 +1222,19 @@ export class VolumeLayer implements CustomLayerInterface {
     const { nx, ny, nz } = d.grid
     const n = nx * ny * nz
     const slice = (color ? d.colorBy!.data : d.data).slice(k * n, (k + 1) * n)
+    if (!color) {
+      // the columns with any value: the model's domain (a regional model's edge, MRMS's radars)
+      const cov = new Uint8Array(nx * ny), nxy = nx * ny
+      for (let j = 0; j < slice.length; j++) if (slice[j] !== 255) cov[j % nxy] = 255
+      const ct = gl.createTexture()!
+      gl.bindTexture(gl.TEXTURE_2D, ct)
+      resetUnpack(gl)
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, nx, ny, 0, gl.RED, gl.UNSIGNED_BYTE, cov)
+      for (const [p, v] of [[gl.TEXTURE_MIN_FILTER, gl.LINEAR], [gl.TEXTURE_MAG_FILTER, gl.LINEAR], [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE]])
+        gl.texParameteri(gl.TEXTURE_2D, p, v)
+      this.coverTextures.get(k) && gl.deleteTexture(this.coverTextures.get(k)!)
+      this.coverTextures.set(k, ct)
+    }
     for (let j = 0; j < slice.length; j++) if (slice[j] === 255) slice[j] = 0     // missing: clear
     tex = gl.createTexture()!
     gl.bindTexture(gl.TEXTURE_3D, tex)
@@ -1224,6 +1264,9 @@ export class VolumeLayer implements CustomLayerInterface {
       const tex = this.textures.get(k)
       if (tex) gl.deleteTexture(tex)
       this.textures.delete(k)
+      const cov = this.coverTextures.get(k)
+      if (cov) gl.deleteTexture(cov)
+      this.coverTextures.delete(k)
     }
     this.staleSteps.clear()
 
@@ -1324,6 +1367,10 @@ export class VolumeLayer implements CustomLayerInterface {
     gl.activeTexture(gl.TEXTURE1)
     gl.bindTexture(gl.TEXTURE_3D, this.stepTexture(gl, d, this.i1))
     gl.uniform1i(p.u("uB"), 1)
+    // the domain, from the earlier step (its own unit)
+    gl.activeTexture(gl.TEXTURE9)
+    gl.bindTexture(gl.TEXTURE_2D, this.coverTextures.get(Math.max(0, Math.min(d.steps - 1, this.i0)))!)
+    gl.uniform1i(p.u("uCover"), 9)
     gl.activeTexture(gl.TEXTURE2)
     gl.bindTexture(gl.TEXTURE_2D, this.lut!)
     gl.uniform1i(p.u("uLut"), 2)
