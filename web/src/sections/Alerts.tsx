@@ -132,6 +132,27 @@ function AlertTimeline({ items }: { items: Alert[] }) {
   const t1 = days[nd]
   const pct = (t: number) => (100 * (Math.min(Math.max(t, t0), t1) - t0)) / (t1 - t0)
   const nowAt = now >= t0 && now <= t1 ? pct(now) : null
+  // by alert type, most serious first (warnings, watches, advisories, statements); within a type,
+  // a row per area, holding each of its periods
+  const rank = (ev: string) => (/warning/i.test(ev) ? 0 : /watch/i.test(ev) ? 1 : /advisory/i.test(ev) ? 2 : /statement/i.test(ev) ? 3 : 4)
+  type Bar = (typeof span)[number] & { label: string }
+  const byType = new Map<string, { key: string; event: string; eccc: boolean; colour?: string | null; first: number; rows: Map<string, { key: string; points: string; first: number; bars: Bar[] }> }>()
+  for (const x of span) {
+    const { a, s, e } = x
+    const sameDay = e != null && midnight(s) === midnight(e)
+    const label = e == null ? `${full(s)} onward` : sameDay ? `${dayMD(midnight(s))} ${hour(s)} – ${hour(e)}` : `${full(s)} – ${full(e)}`
+    const gk = `${a.event}|${a.source ?? ""}|${a.colour ?? ""}`
+    let g = byType.get(gk)
+    if (!g) byType.set(gk, (g = { key: gk, event: a.event, eccc: a.source === "eccc", colour: a.colour, first: s, rows: new Map() }))
+    g.first = Math.min(g.first, s)
+    const pts = a.points.join(", ")
+    let r = g.rows.get(pts)
+    if (!r) g.rows.set(pts, (r = { key: pts, points: pts, first: s, bars: [] }))
+    r.first = Math.min(r.first, s)
+    r.bars.push({ ...x, label })
+  }
+  const groups = [...byType.values()].sort((p, q) => rank(p.event) - rank(q.event) || p.first - q.first)
+    .map((g) => ({ ...g, rows: [...g.rows.values()].sort((p, q) => p.first - q.first).map((r) => ({ ...r, bars: r.bars.sort((p, q) => p.s - q.s) })) }))
 
   const grid = (
     <div className="pointer-events-none absolute inset-0" aria-hidden>
@@ -153,53 +174,66 @@ function AlertTimeline({ items }: { items: Alert[] }) {
           {nowAt != null && <span className="absolute -top-0.5 -translate-x-1/2 rounded bg-foreground/80 px-1 text-[10px] font-medium text-background max-sm:hidden" style={{ left: `${nowAt}%`, top: "100%" }}>Now</span>}
         </div>
       </div>
-      {span.map(({ a, s, e }) => {
-        const c = colorOf(a)
-        const l = pct(s), r = e != null ? pct(e) : 100, w = Math.max(r - l, 0.8)
-        const cut = e == null || e > t1
-        const sameDay = e != null && midnight(s) === midnight(e)
-        const label = e == null ? `${full(s)} onward` : sameDay ? `${dayMD(midnight(s))} ${hour(s)} – ${hour(e)}` : `${full(s)} – ${full(e)}`
-        const a0 = hour(s), a1 = e == null ? "no end" : hour(e)
-        const fits = (w / 100) * px >= (a0.length + a1.length) * 6.5 + 32     // both ends, else just the start
-        const fitsOne = (w / 100) * px >= a0.length * 6.5 + 18
+      {groups.map((g) => {
+        const c = colorOf(g.rows[0].bars[0].a)
+        const many = g.rows.length > 1
         return (
-          <div key={a.id} className="grid grid-cols-1 items-center gap-x-4 gap-y-1 border-t py-2 sm:grid-cols-[minmax(0,15rem)_1fr]">
-            <div className="min-w-0">
-              <div className="flex items-center gap-2">
+          <div key={g.key} className="border-t py-1.5">
+            {/* the alert type once, then a row per area; an area's separate periods share its row */}
+            {many && (
+              <div className="flex items-center gap-2 pt-0.5 pb-1">
                 <span className="size-2.5 shrink-0 rounded-full ring-1 ring-black/15" style={{ background: c.bg }} aria-hidden />
-                <span className="text-sm leading-tight font-medium">{a.event}</span>
-                {a.url && (
-                  <a href={a.url} target="_blank" rel="noopener" className="text-muted-foreground hover:text-foreground" aria-label={`Open ${a.event} on ${a.source === "eccc" ? "weather.gc.ca" : "weather.gov"}`}>
-                    <ExternalLink className="size-3.5" />
-                  </a>
-                )}
+                <span className="text-sm leading-tight font-medium">{g.event}</span>
+                <span className="text-xs text-muted-foreground">{g.rows.length} areas{g.eccc ? ` · Environment Canada${g.colour ? `, ${g.colour}` : ""}` : ""}</span>
               </div>
-              <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
-                {a.points.join(", ")}{a.source === "eccc" && <> · Environment Canada{a.colour ? `, ${a.colour}` : ""}</>}
-              </p>
-              <p className="mt-0.5 text-xs font-medium tabular-nums sm:hidden">{label}</p>
-            </div>
-            <div className="relative h-8">
-              {grid}
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <div tabIndex={0} aria-label={`${a.event}: ${label}`}
-                    className={`absolute top-1/2 flex h-7 -translate-y-1/2 items-center justify-between gap-2 overflow-hidden px-1.5 text-xs font-medium whitespace-nowrap tabular-nums shadow-[inset_0_0_0_1px_rgb(0_0_0/0.08)] outline-offset-1 hover:brightness-105 focus-visible:outline-2 focus-visible:outline-ring ${cut ? "rounded-l-[4px]" : "rounded-[4px]"}`}
-                    style={{ left: `${l}%`, width: `${w}%`, background: c.bg, color: c.fg }}>
-                    {(fits || fitsOne) && <span>{a0}</span>}
-                    {fits && <span>{a1}</span>}
-                  </div>
-                </TooltipTrigger>
-                <TooltipContent className="max-w-xs space-y-1">
-                  <p className="font-semibold">{a.event}</p>
-                  <p>{e == null ? `From ${full(s)}, no end time given` : `${full(s)} to ${full(e)} Pacific`}</p>
-                  {a.source === "eccc" && a.colour && <p>{titleCase(a.colour)} {(a.type ?? "alert").toLowerCase()}: Environment Canada's {RISK_WORD[a.colour] ?? "risk level"}{a.severity ? `; impact ${a.severity.toLowerCase()}` : ""}{a.certainty ? `, confidence ${a.certainty.toLowerCase()}` : ""}</p>}
-                  {a.sender && <p>Issued by {a.sender}{a.source === "eccc" && a.areaDesc ? ` for ${a.areaDesc}` : ""}</p>}
-                  <p>Covers {a.points.join(", ")}</p>
-                  {a.headline && <p className="opacity-80">{a.headline}</p>}
-                </TooltipContent>
-              </Tooltip>
-            </div>
+            )}
+            {g.rows.map((r) => (
+              <div key={r.key} className="grid grid-cols-1 items-center gap-x-4 gap-y-1 py-0.5 sm:grid-cols-[minmax(0,15rem)_1fr]">
+                <div className={`min-w-0 ${many ? "pl-[18px]" : ""}`}>
+                  {!many && (
+                    <div className="flex items-center gap-2">
+                      <span className="size-2.5 shrink-0 rounded-full ring-1 ring-black/15" style={{ background: c.bg }} aria-hidden />
+                      <span className="text-sm leading-tight font-medium">{g.event}</span>
+                    </div>
+                  )}
+                  <p className={`line-clamp-2 text-xs ${many ? "text-foreground/80" : "mt-0.5 text-muted-foreground"}`}>
+                    {r.points}{!many && g.eccc && <> · Environment Canada{g.colour ? `, ${g.colour}` : ""}</>}
+                  </p>
+                  <p className="mt-0.5 text-xs font-medium tabular-nums sm:hidden">{r.bars.map((x) => x.label).join("; ")}</p>
+                </div>
+                <div className="relative h-8">
+                  {grid}
+                  {r.bars.map(({ a, s, e, label }) => {
+                    const l = pct(s), rr = e != null ? pct(e) : 100, w = Math.max(rr - l, 0.8)
+                    const cut = e == null || e > t1
+                    const a0 = hour(s), a1 = e == null ? "no end" : hour(e)
+                    const fits = (w / 100) * px >= (a0.length + a1.length) * 6.5 + 32     // both ends, else just the start
+                    const fitsOne = (w / 100) * px >= a0.length * 6.5 + 18
+                    const cls = `absolute top-1/2 flex h-7 -translate-y-1/2 items-center justify-between gap-2 overflow-hidden px-1.5 text-xs font-medium whitespace-nowrap tabular-nums shadow-[inset_0_0_0_1px_rgb(0_0_0/0.08)] outline-offset-1 hover:brightness-105 focus-visible:outline-2 focus-visible:outline-ring ${cut ? "rounded-l-[4px]" : "rounded-[4px]"}`
+                    const style = { left: `${l}%`, width: `${w}%`, background: c.bg, color: c.fg }
+                    const inner = <>{(fits || fitsOne) && <span>{a0}</span>}{fits && <span>{a1}</span>}</>
+                    return (
+                      <Tooltip key={a.id}>
+                        <TooltipTrigger asChild>
+                          {a.url
+                            ? <a href={a.url} target="_blank" rel="noopener" aria-label={`${a.event}, ${r.points}: ${label}. Opens ${a.source === "eccc" ? "weather.gc.ca" : "weather.gov"}`} className={cls} style={style}>{inner}</a>
+                            : <div tabIndex={0} aria-label={`${a.event}, ${r.points}: ${label}`} className={cls} style={style}>{inner}</div>}
+                        </TooltipTrigger>
+                        <TooltipContent className="max-w-xs space-y-1">
+                          <p className="font-semibold">{a.event}</p>
+                          <p>{e == null ? `From ${full(s)}, no end time given` : `${full(s)} to ${full(e)} Pacific`}</p>
+                          {a.source === "eccc" && a.colour && <p>{titleCase(a.colour)} {(a.type ?? "alert").toLowerCase()}: Environment Canada's {RISK_WORD[a.colour] ?? "risk level"}{a.severity ? `; impact ${a.severity.toLowerCase()}` : ""}{a.certainty ? `, confidence ${a.certainty.toLowerCase()}` : ""}</p>}
+                          {a.sender && <p>Issued by {a.sender}{a.source === "eccc" && a.areaDesc ? ` for ${a.areaDesc}` : ""}</p>}
+                          <p>Covers {a.points.join(", ")}</p>
+                          {a.headline && <p className="opacity-80">{a.headline}</p>}
+                          {a.url && <p className="opacity-70">Click the bar for the full alert.</p>}
+                        </TooltipContent>
+                      </Tooltip>
+                    )
+                  })}
+                </div>
+              </div>
+            ))}
           </div>
         )
       })}
