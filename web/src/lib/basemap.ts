@@ -77,3 +77,40 @@ export function forDark(v: unknown): unknown {
   if (Array.isArray(v)) return v.map(forDark)
   return v
 }
+
+/**
+ * The basemap's place and water names, made to read over the weather colours: Positron's are a
+ * pale blue-grey with a faint halo, which all but vanish on a filled field. Darker (lighter on the
+ * dark map) with a firm halo. Run after the basemap loads and after each light/dark switch.
+ */
+export function legibleLabels(m: maplibregl.Map, dark: boolean) {
+  for (const l of m.getStyle().layers) {
+    if (l.type !== "symbol" || !/^(place_|watername_)/.test(l.id)) continue
+    const water = l.id.startsWith("watername_")
+    setPaint(m, l.id, "text-color", dark ? (water ? "#9fb6cc" : "#e6e9ed") : (water ? "#2f5b85" : "#252a31"))
+    setPaint(m, l.id, "text-halo-color", dark ? "rgba(18,20,24,0.9)" : "rgba(255,255,255,0.92)")
+    setPaint(m, l.id, "text-halo-width", 1.5)
+  }
+}
+
+/**
+ * Coastlines and borders over the weather colours (the basemap's own sit under them): the outline
+ * of every water area (the Pacific coast, Puget Sound, the straits, lakes and big rivers) and the
+ * country and state lines. Added just under the labels; `before` is the first label layer.
+ */
+export function addOutlines(m: maplibregl.Map, before?: string) {
+  const layers = m.getStyle().layers as { id: string; source?: string; "source-layer"?: string }[]
+  const water = layers.find((l) => l.id === "water"), bounds = layers.find((l) => l["source-layer"] === "boundaries")
+  if (water?.source && water["source-layer"])
+    m.addLayer({ id: "outline-water", type: "line", source: water.source, "source-layer": water["source-layer"],
+                 filter: ["==", ["geometry-type"], "Polygon"],
+                 paint: { "line-color": "#1b1f24", "line-opacity": 0.55,
+                          "line-width": ["interpolate", ["linear"], ["zoom"], 4, 0.5, 7, 0.8, 10, 1.2, 13, 1.6] } }, before)
+  if (bounds?.source)
+    m.addLayer({ id: "outline-borders", type: "line", source: bounds.source, "source-layer": "boundaries",
+                 filter: ["all", ["in", ["get", "kind_detail"], ["literal", [2, 4]]], ["!=", ["get", "maritime"], 1], ["!=", ["get", "maritime"], true]],
+                 paint: { "line-color": "#1b1f24", "line-opacity": ["match", ["get", "kind_detail"], 2, 0.6, 0.45],
+                          "line-width": ["match", ["get", "kind_detail"], 2, 1.2, 0.9],
+                          "line-dasharray": ["match", ["get", "kind_detail"], 2, ["literal", [1, 0]], ["literal", [3, 2]]] } }, before)
+}
+export const OUTLINE_LAYERS = ["outline-water", "outline-borders"]

@@ -15,7 +15,7 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrig
 import { Slider } from "@/components/ui/slider"
 import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { FALLBACK, forDark, setBasemapDark, setPaint, STYLE_URL, withKey } from "@/lib/basemap"
+import { addOutlines, FALLBACK, forDark, legibleLabels, OUTLINE_LAYERS, setBasemapDark, setPaint, STYLE_URL, withKey } from "@/lib/basemap"
 import { loadCog } from "@/lib/cog"
 import { MRMS_MODEL } from "@/lib/mrms-name"
 import type { Md } from "@/lib/spcmd"
@@ -397,7 +397,7 @@ export interface PaneTerrain { exaggeration: number; snow: { entry: VolumeEntry;
 /** The cross-section on the map: its line (and the points picked so far while drawing one). */
 interface PaneSection { line: SectionLine | null; picked: LonLat[] | null; sink: React.MutableRefObject<{ set?: (img: HTMLCanvasElement) => void }> }
 
-function MapPane({ data, view, clock, opacity, smooth, particles, particleColor, sync, terrain, sat, fronts, reports, fires, vol = null, xsec = null, onPick = null, terrain3d = null, tall = false, insetTitle = false, dark = false }: {
+function MapPane({ data, view, clock, opacity, smooth, particles, particleColor, sync, terrain, sat, fronts, reports, fires, vol = null, xsec = null, onPick = null, terrain3d = null, tall = false, insetTitle = false, dark = false, outlines = true }: {
   data: Briefing; view: View | null; clock: Clock; opacity: number; smooth: boolean
   particles: boolean; particleColor: [number, number, number, number]; sync: ReturnType<typeof useCameraSync>
   terrain: boolean; sat: { kind: SatKind; times: SatTimes } | null; fronts: Fronts | null; reports: ObsReport[] | null
@@ -410,6 +410,8 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
   insetTitle?: boolean
   /** the dark basemap */
   dark?: boolean
+  /** coastline and border lines over the weather colours */
+  outlines?: boolean
 }) {
   const el = React.useRef<HTMLDivElement>(null)
   const axisEl = React.useRef<HTMLDivElement>(null)
@@ -428,6 +430,8 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
   viewRef.current = view
   const terrainRef = React.useRef(terrain)
   terrainRef.current = terrain
+  const outlinesRef = React.useRef(outlines)
+  outlinesRef.current = outlines
   const [hover, setHover] = React.useState<{ x: number; y: number; text: string | null; place: string | null; vol?: string | null } | null>(null)
   const volRef = React.useRef(vol)
   volRef.current = vol
@@ -477,6 +481,9 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
                    paint: { "hillshade-exaggeration": 0.45, "hillshade-shadow-color": "rgba(20, 24, 30, 0.55)",
                             "hillshade-highlight-color": "rgba(255, 255, 255, 0.18)", "hillshade-accent-color": "rgba(0, 0, 0, 0)",
                             "hillshade-illumination-direction": 315 } }, labels)
+      addOutlines(m, labels)
+      for (const id of OUTLINE_LAYERS) if (m.getLayer(id)) m.setLayoutProperty(id, "visibility", outlinesRef.current ? "visible" : "none")
+      legibleLabels(m, false)
       m.addSource("isobars", { type: "geojson", data: EMPTY })
       m.addLayer({ id: "isobars", type: "line", source: "isobars", paint: { "line-color": "#3a3f47", "line-width": ["case", ["==", ["%", ["get", "value"], 4], 0], 1.3, 0.6], "line-opacity": ["case", ["==", ["%", ["get", "value"], 4], 0], 0.8, 0.55] } }, labels)
       m.addSource("centers", { type: "geojson", data: EMPTY })
@@ -614,6 +621,7 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
       }
       if (!live) return
       await setBasemapDark(m, dark).catch(() => {})
+      legibleLabels(m, dark)
       for (const [id, paint] of lightPaint.current) {
         if (!m.getLayer(id)) continue
         for (const [k, v] of Object.entries(paint)) setPaint(m, id, k, dark ? forDark(v) : v)
@@ -759,6 +767,9 @@ function MapPane({ data, view, clock, opacity, smooth, particles, particleColor,
   React.useEffect(() => {
     ready.current?.then((m) => m.getLayer("hillshade") && m.setLayoutProperty("hillshade", "visibility", terrain ? "visible" : "none"))
   }, [terrain])
+  React.useEffect(() => {
+    ready.current?.then((m) => { for (const id of OUTLINE_LAYERS) if (m.getLayer(id)) m.setLayoutProperty(id, "visibility", outlines ? "visible" : "none") })
+  }, [outlines])
 
   // ---- 3D: the volume over the map, tilting the camera in and out
   const volOn = !!vol
@@ -2441,6 +2452,7 @@ export function InteractiveMap({ data, request, active = true, standalone = fals
   const [particles, setParticles] = useStoredFlag("pnw-briefing.map.particles", true, q.has("pa") ? qb("pa", true) : undefined)
   const [terrain, setTerrain] = useStoredFlag("pnw-briefing.map.terrain", true, q.has("tr") ? qb("tr", true) : undefined)
   const [darkMap, setDarkMap] = useStoredFlag("pnw-briefing.map.dark", false, q.has("dk") ? qb("dk", false) : undefined)
+  const [outlines, setOutlines] = useStoredFlag("pnw-briefing.map.outlines", true, q.has("ol") ? qb("ol", true) : undefined)
   const [satKind, setSatKind] = React.useState<SatKind | "off">(() => (q.get("sat") && q.get("sat")! in SAT_KINDS ? q.get("sat") as SatKind : "off"))
   const [showPairs, setShowPairs] = useStoredFlag("pnw-briefing.map.pairs", true, q.has("pr") ? qb("pr", true) : undefined)
   const [showFronts, setShowFronts] = useStoredFlag("pnw-briefing.map.fronts", false, q.has("fr") ? qb("fr", false) : undefined)
@@ -2859,7 +2871,7 @@ export function InteractiveMap({ data, request, active = true, standalone = fals
     if (compare) { p.set("cmp", "1"); if (mode === "totals") put("o", other); else put("ho", hOther) }
     put("op", Math.round(opacity * 100) / 100, 0.85)
     // switches that are remembered per browser go in either way, so the link opens as it looks here
-    put("sm", smooth); put("pa", particles); put("tr", terrain); put("dk", darkMap, false); put("pr", showPairs); put("fr", showFronts); put("rp", showReports); put("fi", showFires)
+    put("sm", smooth); put("pa", particles); put("tr", terrain); put("dk", darkMap, false); put("ol", outlines); put("pr", showPairs); put("fr", showFronts); put("rp", showReports); put("fi", showFires)
     if (mode === "hourly" && threeD) {
       p.set("3d", "1"); put("vf", volVar, "cloud"); put("vm", volModel); put("ex", exag, 25)
       if (zRange) p.set("zr", zRange.join(","))
@@ -3076,6 +3088,7 @@ export function InteractiveMap({ data, request, active = true, standalone = fals
           display={<>
             <OptionRow id="dark-map" label="Dark map" checked={darkMap} onChange={setDarkMap} />
             <OptionRow id="terrain" label="Terrain" checked={terrain} onChange={setTerrain} />
+            <OptionRow id="outlines" label="Coastlines & borders" checked={outlines} onChange={setOutlines} />
             <OptionRow id="smooth" label="Smooth" checked={smooth} onChange={setSmooth} />
             <div className="flex items-center justify-between gap-4 py-1.5">
               <Label className="font-normal">Opacity</Label>
@@ -3299,9 +3312,9 @@ export function InteractiveMap({ data, request, active = true, standalone = fals
   const mapArea = (
     <div className={full ? `fixed inset-0 z-50 m-0! grid bg-background ${showB ? "grid-rows-2 gap-px lg:grid-cols-2 lg:grid-rows-1" : ""}` : standalone ? `relative grid h-full ${showB ? "grid-rows-2 gap-px lg:grid-cols-2 lg:grid-rows-1" : ""}` : `relative grid gap-3 ${showB ? "lg:grid-cols-2" : ""}`}
       role={full ? "dialog" : undefined} aria-modal={full || undefined} aria-label={full ? "Map, full screen" : undefined}>
-      <MapPane data={data} view={viewA} clock={clock} opacity={opacity} smooth={smooth} particles={showParticles} particleColor={ink} sync={sync} terrain={terrain} sat={sat} fronts={frontsOn} reports={reportsOn} fires={firesOn} vol={paneVol} dark={darkMap}
+      <MapPane data={data} view={viewA} clock={clock} opacity={opacity} smooth={smooth} particles={showParticles} particleColor={ink} sync={sync} terrain={terrain} sat={sat} fronts={frontsOn} reports={reportsOn} fires={firesOn} vol={paneVol} dark={darkMap} outlines={outlines}
         xsec={volOn && xsecOn ? { line: xsecLine, picked: picking, sink: xsecSink } : null} onPick={volOn && xsecOn && picking ? onPick : volOn && profileOn ? pickProfile : null} terrain3d={paneTerrain} tall={full || standalone} insetTitle={standalone && !panelOpen && !full} />
-      {showB && <MapPane data={data} view={viewB} clock={clock} opacity={opacity} smooth={smooth} particles={showParticles} particleColor={ink} sync={sync} terrain={terrain} sat={sat} fronts={frontsOn} reports={reportsOn} fires={firesOn} tall={full || standalone} dark={darkMap} />}
+      {showB && <MapPane data={data} view={viewB} clock={clock} opacity={opacity} smooth={smooth} particles={showParticles} particleColor={ink} sync={sync} terrain={terrain} sat={sat} fronts={frontsOn} reports={reportsOn} fires={firesOn} tall={full || standalone} dark={darkMap} outlines={outlines} />}
       {/* left of the zoom buttons, so it doesn't cover them */}
       <Button variant="outline" size="icon" onClick={() => setFull((f) => !f)} aria-pressed={full}
         aria-label={full ? "Exit full screen" : "Full screen map"} title={full ? "Exit full screen (Esc)" : "Full screen"}
