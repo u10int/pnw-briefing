@@ -14,7 +14,7 @@ import argparse
 import json
 import logging
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -46,10 +46,11 @@ def refresh(data: dict, cfg: dict) -> dict:
 
 
 def briefing_date(data: dict, cfg: dict) -> str:
-    """The briefing's day: its first 12Z – 12Z day (an overnight 06Z edition still belongs to the
-    evening before), or the local date it was issued for older briefings."""
-    if data.get("dates") and (data.get("meta") or {}).get("cycle"):
-        return str(data["dates"][0])[:10]
+    """The briefing's day: its cycle's 12Z – 12Z day (an overnight 06Z edition still belongs to the
+    evening before, as the workflow files it), or the local date it was issued for older briefings."""
+    c = (data.get("meta") or {}).get("cycle")
+    if c:
+        return (datetime.strptime(c[:13], "%Y-%m-%dT%H") - timedelta(hours=12)).date().isoformat()
     issued = datetime.fromisoformat(data["meta"]["issued"])
     return issued.astimezone(ZoneInfo(cfg["timezone"])).date().isoformat()
 

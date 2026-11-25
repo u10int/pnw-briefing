@@ -272,6 +272,7 @@ export interface Briefing {
     title: string; issued: string; demo: boolean; days: number; minAgreement: number
     coreModels?: string[]                               // the models behind the "core median" choice
     cycle?: string; firstDayHours?: number          // the edition's model cycle; hours of the first 12Z day it covers
+    start?: string                                  // where its days begin: the cycle, or the next 12Z after a 06Z cycle
     hasSupplement: boolean; sources: { ncep: string[]; ecmwf: string[] }
   }
   regions: Region[]

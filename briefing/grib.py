@@ -54,9 +54,12 @@ def cycle_start(now: datetime | None = None) -> datetime:
 
 
 def day0(cfg) -> datetime:
-    """The briefing's start: its cycle. Days still run 12Z – 12Z, so after a 18Z, 00Z or 06Z cycle
-    the first day is the rest of the current one (see first_day_hours)."""
-    return cycle_start()
+    """The briefing's start: its cycle. Days still run 12Z – 12Z, so after a 18Z or 00Z cycle the
+    first day is the rest of the current one (see first_day_hours). A 06Z edition comes out before
+    dawn, when the 12Z – 12Z day its cycle falls in (yesterday, in Pacific time) is all but over:
+    it starts at the next 12Z instead, so its first day is today, whole."""
+    c = cycle_start()
+    return c + timedelta(hours=6) if c.hour == 6 else c
 
 
 def day12(start: datetime) -> datetime:
@@ -108,9 +111,10 @@ def _H(spec, run, fxx):
 def _latest_run(spec, start: datetime):
     """Latest cycle at or before `start` whose last needed step exists."""
     cycles = spec.get("cycles", [0, 12])
+    latest = min(start, cycle_start())      # a 06Z edition starts at 12Z but can't use a 12Z run
     for back in range(0, 48):
         run = start - timedelta(hours=back)
-        if run.hour not in cycles:
+        if run.hour not in cycles or run > latest:
             continue
         lead0 = int((start - run).total_seconds() // 3600)
         h1 = first_day_hours(start)

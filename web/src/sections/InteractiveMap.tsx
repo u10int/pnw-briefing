@@ -1947,7 +1947,7 @@ function hourlyView(model: string, entries: Record<string, FieldEntry>, layer: H
  *  every 5 minutes after that while the window reaches now. */
 function useMrms(data: Briefing, on: boolean): FieldEntry | null {
   const [entry, setEntry] = React.useState<FieldEntry | null>(null)
-  const start = Date.parse(data.meta.cycle ?? `${data.dates[0]}T12:00:00Z`)
+  const start = Date.parse(data.meta.start ?? data.meta.cycle ?? `${data.dates[0]}T12:00:00Z`)
   React.useEffect(() => {
     if (!on) return
     let stop = false
@@ -1968,7 +1968,7 @@ function useMrms(data: Briefing, on: boolean): FieldEntry | null {
  *  while the briefing's window reaches now; over the models' box (or the briefing's area). */
 function useRadar3d(data: Briefing, on: boolean, like: VolumeEntry | null): VolumeEntry | null {
   const [entry, setEntry] = React.useState<VolumeEntry | null>(null)
-  const start = Date.parse(data.meta.cycle ?? `${data.dates[0]}T12:00:00Z`)
+  const start = Date.parse(data.meta.start ?? data.meta.cycle ?? `${data.dates[0]}T12:00:00Z`)
   const d = data.domain
   const box = like
     ? { west: like.lon[0], east: like.lon[1], south: like.lat[0], north: like.lat[1] }
@@ -2592,7 +2592,7 @@ export function InteractiveMap({ data, request, active = true, standalone = fals
   const primA = hA ? HLAYERS.find((l) => l.id === layer)!.primary(byModel.get(hA)!.entries) : undefined
   const times = React.useMemo(() => primA?.times ?? [], [primA])
   // accumulated layers count from the briefing start: its model cycle (12Z on the first day for older briefings)
-  const accStart = timeLabel(data.meta.cycle ?? `${data.dates[0]}T12:00:00Z`)
+  const accStart = timeLabel(data.meta.start ?? data.meta.cycle ?? `${data.dates[0]}T12:00:00Z`)
 
   // Keep the clock on one of the main model's steps when the model or layer changes (or on the
   // step nearest a moment an "Open on map" link asked for). Switching to "Hourly" starts at

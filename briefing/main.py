@@ -18,7 +18,7 @@ import yaml
 
 from . import (alerts, analysis, avalanche, change, climo, coast, cogs, context, convective, eccc_alerts, extremes, fields, fronts, impacts, landslide,
                maps, nbmprob, normals, observed, obsreports, odds, outlooks, report, rivers, snowpack, summary, tempdep, timing, trends, urma, verify, waves, wildfire)
-from .grib import day0, day12, first_day_hours
+from .grib import cycle_start, day0, day12, first_day_hours
 
 ROOT = Path(__file__).resolve().parent
 log = logging.getLogger("briefing")
@@ -203,7 +203,7 @@ def collect(cfg: dict, out: Path, demo: bool = False, products: bool = True) -> 
     data = {
         "meta": {"title": cfg["title"], "issued": datetime.now(tz), "demo": demo, "days": cfg["days"],
                  # the edition's model cycle, and how much of the first 12Z – 12Z day it covers
-                 "cycle": start.strftime("%Y-%m-%dT%H:00Z"), "firstDayHours": h1,
+                 "cycle": cycle_start().strftime("%Y-%m-%dT%H:00Z"), "start": start.strftime("%Y-%m-%dT%H:00Z"), "firstDayHours": h1,
                  "minAgreement": cfg["impacts"]["min_agreement"],
                  # the few models behind the "core median" choice in the by-location tables
                  "coreModels": cfg.get("core_models") or [],
